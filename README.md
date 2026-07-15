@@ -2,7 +2,7 @@
 
 **AutoDS Agent: An Autonomous Multi-Agent Data Science Analyst** is a resume-quality AI side project designed to grow into a system that can ingest raw tabular datasets, profile them, clean them, run EDA, train baseline models, evaluate results, generate visualizations, and write final analysis reports.
 
-Week 1 focuses on the foundation only: clean project structure, CSV upload, run folder management, basic dataset metadata, a FastAPI backend, a Streamlit frontend, and tests. There are no LLM calls, paid API dependencies, MLflow tracking, or model training yet.
+Week 2 adds deterministic dataset profiling and conservative cleaning. The project still does not use LLM API calls, paid credits, MLflow, LangGraph, databases, EDA plots, or model training.
 
 ## Long-Term Vision
 
@@ -16,9 +16,11 @@ The eventual system will use a multi-agent architecture with specialist agents f
 - Evaluation
 - Report generation
 
-The Week 1 code intentionally keeps those pieces as placeholders so the foundation stays simple and easy to extend.
+The current implementation keeps those boundaries visible while using deterministic Python services.
 
-## Week 1 Features
+## Features
+
+### Week 1 Foundation
 
 - FastAPI backend with health, upload, and run metadata endpoints
 - Streamlit UI for CSV uploads and dataset preview
@@ -26,16 +28,32 @@ The Week 1 code intentionally keeps those pieces as placeholders so the foundati
 - Run folder structure under `runs/<run_id>/`
 - Raw CSV preservation at `runs/<run_id>/input/raw_data.csv`
 - Metadata JSON saved at `runs/<run_id>/intermediate/metadata.json`
-- Basic metadata:
-  - Row count
-  - Column count
-  - Column names
-  - Column data types
-  - Missing value counts
-  - Duplicate row count
-  - First five rows as preview
-- Placeholder agent and workflow modules for future weeks
 - Pytest coverage for run management and dataset metadata
+
+### Week 2 Profiling And Cleaning
+
+- Rich dataset profile saved at `runs/<run_id>/intermediate/profile.json`
+- Semantic schema inference for `numeric`, `categorical`, `boolean`, `datetime`, `text`, `id`, and `unknown`
+- Dataset-level metrics:
+  - Row and column counts
+  - Total missing values
+  - Duplicate row count
+  - Memory usage
+  - Column count by inferred type
+  - Empty, duplicate, and missing-value flags
+- Column-level metrics:
+  - Pandas dtype and inferred semantic type
+  - Missing and unique counts/percentages
+  - Sample values
+  - Constant, high-cardinality, ID-like, datetime-like, numeric, categorical, boolean, and text-like flags
+  - Numeric statistics and simple IQR outlier counts
+  - Top values and average string length for text-like columns
+- Data quality warnings saved inside `profile.json`
+- Conservative cleaning plan saved at `runs/<run_id>/intermediate/cleaning_plan.json`
+- Safe cleaned dataset saved at `runs/<run_id>/intermediate/cleaned_data.csv`
+- Cleaning summary saved at `runs/<run_id>/intermediate/cleaning_summary.json`
+- Streamlit buttons and views for profiling, cleaning planning, and safe cleaning
+- Tests for schema inference, profiling, and cleaning services
 
 ## Project Architecture
 
@@ -53,12 +71,18 @@ autods-agent/
       routes/
         upload.py
         runs.py
+        profile.py
+        cleaning.py
       services/
         run_manager.py
         dataset_service.py
+        profiling_service.py
+        cleaning_service.py
       schemas/
         run.py
         dataset.py
+        profile.py
+        cleaning.py
 
     frontend/
       streamlit_app.py
@@ -76,6 +100,8 @@ autods-agent/
     tools/
       data_loader.py
       schema_inference.py
+      data_quality.py
+      cleaning.py
       file_utils.py
 
     workflows/
@@ -91,6 +117,9 @@ autods-agent/
   tests/
     test_run_manager.py
     test_dataset_service.py
+    test_schema_inference.py
+    test_profiling_service.py
+    test_cleaning_service.py
 ```
 
 ## Installation
@@ -120,14 +149,14 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Optional: copy `.env.example` to `.env` if you want to customize local settings.
+Optional environment settings:
 
 ```bash
 AUTODS_BACKEND_URL=http://localhost:8000
 AUTODS_RUNS_DIR=runs
 ```
 
-## Run the Backend
+## Run The Backend
 
 From the project root:
 
@@ -141,16 +170,7 @@ Health check:
 http://localhost:8000/health
 ```
 
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "service": "autods-agent-backend"
-}
-```
-
-## Run the Frontend
+## Run The Frontend
 
 In a second terminal, from the project root:
 
@@ -158,23 +178,57 @@ In a second terminal, from the project root:
 streamlit run app/frontend/streamlit_app.py
 ```
 
-The frontend expects the backend at:
+The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKEND_URL` is set.
 
-```text
-http://localhost:8000
-```
-
-Set `AUTODS_BACKEND_URL` if your backend runs somewhere else.
-
-## Example Usage Flow
+## Example Workflow
 
 1. Start the FastAPI backend.
 2. Start the Streamlit frontend.
-3. Upload a CSV file in the Streamlit app.
-4. The backend creates a unique run folder under `runs/`.
-5. The raw dataset is saved as `runs/<run_id>/input/raw_data.csv`.
-6. Metadata is saved as `runs/<run_id>/intermediate/metadata.json`.
-7. The UI displays the run ID, dataset shape, data types, missing values, duplicate rows, and a preview.
+3. Upload a CSV file.
+4. The backend creates `runs/<run_id>/` and saves the raw file as `input/raw_data.csv`.
+5. The UI displays Week 1 metadata and a preview.
+6. Click `Generate Dataset Profile`.
+7. Review dataset metrics, column profiles, and data quality warnings.
+8. Click `Generate Cleaning Plan`.
+9. Review duplicate handling, missing-value strategies, recommended drops, type conversions, and warnings.
+10. Click `Apply Safe Cleaning`.
+11. Review the cleaning summary and saved artifacts.
+
+## Run Artifacts
+
+After a successful Week 2 flow, a run can contain:
+
+```text
+runs/<run_id>/
+  input/
+    raw_data.csv
+  intermediate/
+    metadata.json
+    profile.json
+    cleaning_plan.json
+    cleaned_data.csv
+    cleaning_summary.json
+  models/
+  plots/
+  reports/
+  logs/
+```
+
+The raw dataset is never overwritten.
+
+## Conservative Cleaning Rules
+
+Safe cleaning intentionally avoids aggressive decisions:
+
+- Removes exact duplicate rows.
+- Imputes low or moderate numeric missing values with the median.
+- Fills categorical and text missing values with `Unknown`.
+- Fills boolean missing values with the mode when available.
+- Parses datetime-like columns to ISO-style strings.
+- Keeps ID columns for traceability and marks them for future modeling exclusion.
+- Recommends dropping constant columns and drops them only within the configured automatic drop limit.
+- Recommends review for very high missingness instead of automatically dropping those columns.
+- Preserves all actions and warnings in JSON artifacts.
 
 ## API Endpoints
 
@@ -186,13 +240,37 @@ Returns a simple service health check.
 
 Accepts a CSV file upload, creates a run, saves the raw dataset, generates metadata, saves it, and returns the metadata.
 
-### `GET /runs/{run_id}`
-
-Returns saved metadata for one run.
-
 ### `GET /runs`
 
 Returns available run IDs with lightweight metadata when available.
+
+### `GET /runs/{run_id}`
+
+Returns saved Week 1 metadata for one run.
+
+### `POST /runs/{run_id}/profile`
+
+Loads `input/raw_data.csv`, generates `profile.json`, and returns the profile.
+
+### `GET /runs/{run_id}/profile`
+
+Returns an existing profile or `404` if it has not been generated.
+
+### `POST /runs/{run_id}/cleaning-plan`
+
+Ensures a profile exists, generates `cleaning_plan.json`, and returns the plan.
+
+### `GET /runs/{run_id}/cleaning-plan`
+
+Returns an existing cleaning plan or `404`.
+
+### `POST /runs/{run_id}/clean`
+
+Ensures a cleaning plan exists, applies safe cleaning, saves `cleaned_data.csv` and `cleaning_summary.json`, and returns the summary.
+
+### `GET /runs/{run_id}/cleaning-summary`
+
+Returns an existing cleaning summary or `404`.
 
 ## Run Tests
 
@@ -200,15 +278,12 @@ Returns available run IDs with lightweight metadata when available.
 pytest
 ```
 
-## Future Weeks
+## Week 3 Direction
 
-Recommended Week 2 work:
+Recommended Week 3 work:
 
-- Add richer dataset profiling
-- Add schema inference beyond basic pandas dtypes
-- Detect high-cardinality columns, constants, likely identifiers, and target candidates
-- Produce a cleaning plan without modifying the raw input
-- Add tests for malformed CSVs and upload endpoint behavior
-- Start defining a shared analysis state object for future agents
-
-Later weeks can add EDA plots, modeling, evaluation, MLflow, LangGraph or OpenAI Agents SDK orchestration, and report generation.
+- Add deterministic EDA summaries and visualizations.
+- Use `cleaned_data.csv` as the default input for EDA when available.
+- Save plots under `runs/<run_id>/plots/`.
+- Save EDA artifacts under `runs/<run_id>/intermediate/`.
+- Keep model training, MLflow, LangGraph, and LLM calls out until later weeks.
