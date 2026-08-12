@@ -94,6 +94,22 @@ The current implementation keeps those boundaries visible while using determinis
 - Tests for task inference, preprocessing, modeling service artifacts, metrics, plots, and failed-model handling
 - No LLM API calls, paid credits, MLflow, LangGraph, deep learning, or heavy tuning in Week 4
 
+### Week 5 Agent Orchestration Layer
+
+- Deterministic autonomous workflow that connects profiling, cleaning planning, safe cleaning, EDA, and optional modeling
+- Structured workflow state saved at `runs/<run_id>/logs/workflow_state.json`
+- Ordered agent trace log saved at `runs/<run_id>/logs/agent_trace.json`
+- Canonical step statuses: `pending`, `running`, `completed`, `failed`, `skipped`, and `waiting_for_approval`
+- Agent wrappers with a consistent `run(state)` boundary around deterministic services
+- Human approval gates before risky cleaning actions and before modeling when enabled
+- Approval actions for `approve` and `reject`, with rejection recorded in state and trace
+- Retry support for failed steps while attempts remain
+- FastAPI workflow endpoints for start, state, trace, approval, retry, and reset
+- Streamlit `Autonomous Workflow` section with target selection, task-type override, approval toggles, status table, approval prompts, retry controls, artifacts, and trace events
+- Advanced manual controls remain available for direct Week 1-4 service calls
+- Tests for workflow state, orchestration, approval gates, retries, trace logging, and workflow API routes
+- No LLM API calls, paid credits, MLflow, LangGraph dependency, or final full analyst report generation in Week 5
+
 ## Project Architecture
 
 ```text
@@ -114,6 +130,7 @@ autods-agent/
         cleaning.py
         eda.py
         modeling.py
+        workflow.py
       services/
         run_manager.py
         dataset_service.py
@@ -122,6 +139,7 @@ autods-agent/
         eda_service.py
         modeling_service.py
         evaluation_service.py
+        workflow_service.py
       schemas/
         run.py
         dataset.py
@@ -129,11 +147,13 @@ autods-agent/
         cleaning.py
         eda.py
         modeling.py
+        workflow.py
 
     frontend/
       streamlit_app.py
 
     agents/
+      base_agent.py
       orchestrator.py
       profiler_agent.py
       cleaning_agent.py
@@ -153,12 +173,16 @@ autods-agent/
       modeling.py
       evaluation.py
       model_persistence.py
+      approval.py
+      trace_logger.py
       file_utils.py
       statistics_utils.py
       visualization.py
 
     workflows/
       analysis_graph.py
+      workflow_state.py
+      workflow_steps.py
 
   runs/
     .gitkeep
@@ -180,6 +204,11 @@ autods-agent/
     test_modeling_tools.py
     test_modeling_service.py
     test_evaluation_service.py
+    test_workflow_state.py
+    test_workflow_service.py
+    test_orchestrator.py
+    test_approval_gates.py
+    test_retry_logic.py
 ```
 
 ## Installation
@@ -247,25 +276,21 @@ The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKE
 3. Upload a CSV file.
 4. The backend creates `runs/<run_id>/` and saves the raw file as `input/raw_data.csv`.
 5. The UI displays Week 1 metadata and a preview.
-6. Click `Generate Dataset Profile`.
-7. Review dataset metrics, column profiles, and data quality warnings.
-8. Click `Generate Cleaning Plan`.
-9. Review duplicate handling, missing-value strategies, recommended drops, type conversions, and warnings.
-10. Click `Apply Safe Cleaning`.
-11. Review the cleaning summary and saved artifacts.
-12. Open `Exploratory Data Analysis`.
-13. Optionally select a target column.
-14. Click `Generate EDA`.
-15. Review dataset choice, column type summaries, remaining data quality notes, findings, recommended next steps, and generated plots.
-16. Open `Modeling and Evaluation`.
-17. Select a target column.
-18. Keep task type on `Auto-detect` or choose `Regression` or `Classification`.
-19. Choose a test set size and click `Train and Evaluate Models`.
-20. Review the inferred task, train/test split, feature exclusions, model comparison table, baseline comparison, saved artifacts, and evaluation plots.
+6. In `Autonomous Workflow`, optionally select a target column.
+7. Keep task type on `Auto-detect` or choose `Regression` or `Classification`.
+8. Choose whether cleaning and modeling require approval.
+9. Click `Start Autonomous Workflow`.
+10. The workflow runs profiling and cleaning-plan generation automatically.
+11. If cleaning approval is required, review the reason and choose `Approve and Continue` or `Reject Step`.
+12. After cleaning is approved or skipped, the workflow generates EDA.
+13. If a target column is provided and modeling approval is required, review the modeling gate and approve or reject it.
+14. Review the final workflow status, step table, generated artifacts, retry controls, and agent trace.
+
+The original manual profiling, cleaning, EDA, and modeling controls remain available under `Advanced Manual Controls`.
 
 ## Run Artifacts
 
-After a successful Week 4 flow, a run can contain:
+After a successful Week 5 workflow, a run can contain:
 
 ```text
 runs/<run_id>/
@@ -303,10 +328,40 @@ runs/<run_id>/
   reports/
     eda_summary.md
   logs/
+    workflow_state.json
+    agent_trace.json
 ```
 
 The raw dataset is never overwritten.
 Some evaluation plots are task-specific, so a run will only contain the plots that apply.
+
+## Autonomous Workflow Orchestration
+
+Week 5 uses a local deterministic state machine in `app/workflows/analysis_graph.py`. It deliberately avoids paid LLM calls and keeps future extension points open for LangGraph, OpenAI Agents SDK, or tool-calling agents.
+
+Canonical workflow order:
+
+```text
+profile -> cleaning_plan -> cleaning -> eda -> modeling
+```
+
+The workflow saves state after each transition. Each step records attempts, timestamps, outputs, errors, and approval metadata. Required steps fail the workflow when they error; optional modeling is skipped clearly when no target column is provided.
+
+Approval gates:
+
+- Cleaning pauses when enabled and the plan recommends column drops, duplicate-row removal, review warnings, or multi-column imputation.
+- Modeling pauses when enabled and a target column is present.
+- Approval continues from the paused step.
+- Rejection skips the step, records a warning, and appends a trace event.
+
+Retry behavior:
+
+- Step attempts increment when the step starts.
+- Failed steps record their error in `workflow_state.json`.
+- `POST /runs/{run_id}/workflow/retry` retries a failed step while attempts remain.
+- Retry events are appended to `agent_trace.json`.
+
+Trace events include workflow start/completion, step start/completion/failure, approval required/granted/rejected, retries, and skipped steps.
 
 ## Conservative Cleaning Rules
 
@@ -488,6 +543,62 @@ Returns an existing evaluation summary or `404` if models have not been trained.
 
 Returns saved model artifacts and model result files for one run.
 
+### `POST /runs/{run_id}/workflow/start`
+
+Starts or restarts the autonomous deterministic workflow for an existing run.
+
+Example request body:
+
+```json
+{
+  "target_column": "SalePrice",
+  "task_type": null,
+  "require_cleaning_approval": true,
+  "require_modeling_approval": true
+}
+```
+
+The workflow runs until it completes, fails, or reaches a human approval gate. It returns `workflow_state.json` as structured JSON.
+
+### `GET /runs/{run_id}/workflow/state`
+
+Returns the current workflow state saved under `logs/workflow_state.json`.
+
+### `GET /runs/{run_id}/workflow/trace`
+
+Returns ordered agent trace events saved under `logs/agent_trace.json`.
+
+### `POST /runs/{run_id}/workflow/approve`
+
+Applies approval or rejection to a waiting step.
+
+Example request body:
+
+```json
+{
+  "step": "cleaning",
+  "action": "approve"
+}
+```
+
+Supported steps are `cleaning` and `modeling`. Supported actions are `approve` and `reject`.
+
+### `POST /runs/{run_id}/workflow/retry`
+
+Retries a failed step when attempts remain.
+
+Example request body:
+
+```json
+{
+  "step": "eda"
+}
+```
+
+### `POST /runs/{run_id}/workflow/reset`
+
+Resets workflow state and trace logs for a run without deleting raw data or generated analysis artifacts.
+
 ## Run Tests
 
 ```bash
@@ -496,17 +607,20 @@ pytest
 
 If the local default temp directory has permission issues on Windows, this equivalent command keeps Pytest scratch files inside the workspace:
 
-```bash
-pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_tmp_cache
+```powershell
+$env:TEMP=(Resolve-Path ".pytest_tmp").Path
+$env:TMP=$env:TEMP
+pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
 ```
 
-## Week 5 Direction
+## Week 6 Direction
 
-Recommended Week 5 work:
+Recommended Week 6 work:
 
-- Add deterministic or LLM-assisted hypothesis candidates from saved profile, cleaning, EDA, and modeling artifacts.
-- Introduce agent orchestration, retries, and human approval gates.
-- Prepare target-aware feature selection guidance before more advanced tuning.
+- Generate the first full analyst report from saved deterministic artifacts.
+- Add a report agent that reads workflow state, trace logs, EDA summaries, and modeling summaries.
+- Keep report generation auditable and tied to artifact paths.
+- Add optional LLM interfaces only as clean placeholders unless API usage is intentionally enabled.
 - Consider MLflow only when experiment tracking becomes a clear requirement.
 - Keep correlation findings framed as relationships, not causal claims.
-- Continue avoiding LLM API calls and paid credits until the project intentionally adds them.
+- Continue avoiding paid LLM calls until the project intentionally adds them.

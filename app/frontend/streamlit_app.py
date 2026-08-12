@@ -41,10 +41,13 @@ def main() -> None:
                 st.session_state.pop("cleaning_summary", None)
                 st.session_state.pop("eda_response", None)
                 st.session_state.pop("modeling_response", None)
+                st.session_state.pop("workflow_state", None)
 
     metadata = st.session_state.get("metadata")
     if metadata:
         render_metadata(metadata)
+        render_autonomous_workflow(metadata)
+        st.header("Advanced Manual Controls")
         render_week2_workflow(metadata)
     else:
         st.info("Create an analysis run to begin profiling and cleaning.")
@@ -198,6 +201,271 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             "Week 5 can connect these deterministic services through an agent workflow "
             "with retry behavior and user review steps. Week 4 does not use LLM calls."
         )
+
+
+def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
+    """Render Week 5 autonomous workflow controls and state."""
+
+    run_id = metadata["run_id"]
+    column_names = list(metadata.get("column_names", []))
+
+    st.divider()
+    st.header("Autonomous Workflow")
+    st.caption(
+        "Runs the deterministic Week 1-4 services through an auditable agent workflow. "
+        "No LLM API calls or paid credits are used."
+    )
+
+    target_options = ["No target column"] + column_names
+    selected_target = st.selectbox(
+        "Optional target column",
+        options=target_options,
+        index=0,
+        key="workflow_target_column",
+    )
+    target_column = None if selected_target == "No target column" else selected_target
+
+    control_cols = st.columns(3)
+    with control_cols[0]:
+        task_type_label = st.selectbox(
+            "Task type",
+            options=["Auto-detect", "Regression", "Classification"],
+            key="workflow_task_type",
+        )
+    with control_cols[1]:
+        require_cleaning_approval = st.checkbox(
+            "Require approval before cleaning",
+            value=True,
+            key="workflow_require_cleaning_approval",
+        )
+    with control_cols[2]:
+        require_modeling_approval = st.checkbox(
+            "Require approval before modeling",
+            value=True,
+            key="workflow_require_modeling_approval",
+        )
+
+    action_cols = st.columns([1, 1, 4])
+    with action_cols[0]:
+        if st.button("Start Autonomous Workflow", type="primary"):
+            payload = {
+                "target_column": target_column,
+                "task_type": None
+                if task_type_label == "Auto-detect"
+                else task_type_label.lower(),
+                "require_cleaning_approval": require_cleaning_approval,
+                "require_modeling_approval": require_modeling_approval,
+            }
+            state = post_json(
+                f"/runs/{run_id}/workflow/start",
+                "Running autonomous workflow...",
+                payload=payload,
+            )
+            if state:
+                st.session_state["workflow_state"] = state
+
+    with action_cols[1]:
+        if st.button("Refresh Workflow"):
+            state = get_json(f"/runs/{run_id}/workflow/state")
+            if state:
+                st.session_state["workflow_state"] = state
+
+    state = st.session_state.get("workflow_state")
+    if state:
+        render_workflow_state(run_id, state)
+    else:
+        st.info("Start the autonomous workflow to profile, clean, analyze, and optionally model this run.")
+
+
+def render_workflow_state(run_id: str, state: dict[str, Any]) -> None:
+    """Render workflow progress, approval gates, retry controls, artifacts, and trace."""
+
+    status_cols = st.columns(3)
+    status_cols[0].metric("Workflow status", state.get("status", "unknown"))
+    status_cols[1].metric("Current step", state.get("current_step") or "None")
+    status_cols[2].metric("Target", state.get("target_column") or "None")
+
+    st.subheader("Step Status")
+    st.dataframe(
+        pd.DataFrame(_workflow_step_rows(state)),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    render_workflow_approval_controls(run_id, state)
+    render_workflow_retry_controls(run_id, state)
+    render_workflow_artifacts(run_id, state)
+    render_workflow_trace(run_id)
+
+
+def render_workflow_approval_controls(run_id: str, state: dict[str, Any]) -> None:
+    """Render approval controls for a waiting workflow gate."""
+
+    waiting_steps = [
+        step
+        for step, step_state in state.get("steps", {}).items()
+        if step_state.get("status") == "waiting_for_approval"
+    ]
+    if not waiting_steps:
+        return
+
+    step = waiting_steps[0]
+    step_state = state["steps"][step]
+    st.subheader("Approval Needed")
+    st.warning(step_state.get("approval_reason") or f"{step} needs approval.")
+
+    reasons = step_state.get("approval_details", {}).get("reasons", [])
+    if reasons:
+        for reason in reasons:
+            st.write(f"- {reason}")
+
+    approval_cols = st.columns([1, 1, 4])
+    with approval_cols[0]:
+        if st.button("Approve and Continue", type="primary", key=f"approve_{step}"):
+            updated = post_json(
+                f"/runs/{run_id}/workflow/approve",
+                "Applying approval and continuing workflow...",
+                payload={"step": step, "action": "approve"},
+            )
+            if updated:
+                st.session_state["workflow_state"] = updated
+                st.rerun()
+    with approval_cols[1]:
+        if st.button("Reject Step", key=f"reject_{step}"):
+            updated = post_json(
+                f"/runs/{run_id}/workflow/approve",
+                "Recording rejection...",
+                payload={"step": step, "action": "reject"},
+            )
+            if updated:
+                st.session_state["workflow_state"] = updated
+                st.rerun()
+
+
+def render_workflow_retry_controls(run_id: str, state: dict[str, Any]) -> None:
+    """Render retry controls for failed steps."""
+
+    failed_steps = [
+        (step, step_state)
+        for step, step_state in state.get("steps", {}).items()
+        if step_state.get("status") == "failed"
+    ]
+    if not failed_steps:
+        return
+
+    st.subheader("Failed Step")
+    for step, step_state in failed_steps:
+        st.error(step_state.get("error") or f"{step} failed.")
+        attempts = int(step_state.get("attempts", 0))
+        max_attempts = int(step_state.get("max_attempts", 0))
+        if attempts < max_attempts:
+            if st.button(f"Retry {step}", key=f"retry_{step}"):
+                updated = post_json(
+                    f"/runs/{run_id}/workflow/retry",
+                    f"Retrying {step}...",
+                    payload={"step": step},
+                )
+                if updated:
+                    st.session_state["workflow_state"] = updated
+                    st.rerun()
+        else:
+            st.warning("No retry attempts remain for this step.")
+
+
+def render_workflow_artifacts(run_id: str, state: dict[str, Any]) -> None:
+    """Render generated artifact pointers and summaries as they appear."""
+
+    artifacts = state.get("artifacts", {})
+    st.subheader("Generated Artifacts")
+    rows = [
+        {"Artifact": key, "Path": value if value else "Not generated"}
+        for key, value in artifacts.items()
+        if key != "plots"
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    if artifacts.get("profile"):
+        with st.expander("Profile", expanded=False):
+            profile = get_json(f"/runs/{run_id}/profile", show_error=False)
+            if profile:
+                render_profile(profile)
+
+    if artifacts.get("cleaning_plan"):
+        with st.expander("Cleaning Plan", expanded=False):
+            plan = get_json(f"/runs/{run_id}/cleaning-plan", show_error=False)
+            if plan:
+                render_cleaning_plan(plan)
+
+    if artifacts.get("cleaning_summary"):
+        with st.expander("Cleaning Summary", expanded=False):
+            summary = get_json(f"/runs/{run_id}/cleaning-summary", show_error=False)
+            if summary:
+                render_cleaning_summary(summary)
+
+    if artifacts.get("eda_summary"):
+        with st.expander("EDA Summary", expanded=False):
+            eda_response = get_json(f"/runs/{run_id}/eda", show_error=False)
+            if eda_response:
+                render_eda_response(run_id, eda_response)
+
+    if artifacts.get("modeling_summary") or artifacts.get("evaluation_summary"):
+        with st.expander("Modeling and Evaluation Summary", expanded=False):
+            modeling_summary = get_json(
+                f"/runs/{run_id}/modeling-summary",
+                show_error=False,
+            )
+            evaluation_summary = get_json(
+                f"/runs/{run_id}/evaluation-summary",
+                show_error=False,
+            )
+            if modeling_summary:
+                metric_cols = st.columns(4)
+                metric_cols[0].metric("Target", modeling_summary["target_column"])
+                metric_cols[1].metric("Task", modeling_summary["task_type"])
+                metric_cols[2].metric("Best model", modeling_summary["best_model_name"])
+                metric_cols[3].metric(
+                    "Primary metric",
+                    modeling_summary["primary_metric"].upper(),
+                )
+            if evaluation_summary:
+                st.dataframe(
+                    _metrics_dataframe(evaluation_summary.get("best_model_metrics", {})),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+
+def render_workflow_trace(run_id: str) -> None:
+    """Render ordered agent trace events."""
+
+    with st.expander("Agent Trace", expanded=False):
+        trace = get_json(f"/runs/{run_id}/workflow/trace", show_error=False)
+        if not trace:
+            st.write("No trace events have been saved yet.")
+            return
+
+        st.dataframe(
+            pd.DataFrame(trace)[
+                ["timestamp", "agent", "step", "event_type", "message"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def _workflow_step_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for step, step_state in state.get("steps", {}).items():
+        rows.append(
+            {
+                "Step": step,
+                "Status": step_state.get("status"),
+                "Attempts": f"{step_state.get('attempts', 0)} / {step_state.get('max_attempts', 0)}",
+                "Approval": step_state.get("approval_status"),
+                "Error": step_state.get("error") or "",
+            }
+        )
+    return rows
 
 
 def render_profile(profile: dict[str, Any]) -> None:
@@ -736,6 +1004,32 @@ def post_json(
         return None
     except requests.exceptions.RequestException as exc:
         st.error(f"Backend request failed: {exc}")
+        return None
+
+    return response.json()
+
+
+def get_json(path: str, show_error: bool = True) -> dict[str, Any] | list[Any] | None:
+    """GET from the backend and return JSON."""
+
+    try:
+        response = requests.get(f"{BACKEND_URL}{path}", timeout=60)
+        response.raise_for_status()
+    except requests.exceptions.ConnectionError:
+        if show_error:
+            st.error(
+                "Could not connect to the backend. Start it with: "
+                "uvicorn app.backend.main:app --reload"
+            )
+        return None
+    except requests.exceptions.HTTPError:
+        if show_error:
+            detail = _extract_error_detail(response)
+            st.error(f"Backend request failed: {detail}")
+        return None
+    except requests.exceptions.RequestException as exc:
+        if show_error:
+            st.error(f"Backend request failed: {exc}")
         return None
 
     return response.json()
