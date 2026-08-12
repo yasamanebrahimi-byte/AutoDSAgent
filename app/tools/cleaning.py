@@ -201,12 +201,18 @@ def apply_safe_cleaning(
                     f"Column '{column}' could not be median-imputed because no median was available."
                 )
         elif strategy == "fill_unknown":
-            cleaned[column] = cleaned[column].fillna(selected_config.categorical_missing_value)
+            cleaned[column] = _fill_missing_preserving_future_behavior(
+                cleaned[column],
+                selected_config.categorical_missing_value,
+            )
             imputation_strategies_used[str(column)] = selected_config.categorical_missing_value
         elif strategy == "mode_imputation":
             modes = cleaned[column].mode(dropna=True)
             if not modes.empty:
-                cleaned[column] = cleaned[column].fillna(modes.iloc[0])
+                cleaned[column] = _fill_missing_preserving_future_behavior(
+                    cleaned[column],
+                    modes.iloc[0],
+                )
                 imputation_strategies_used[str(column)] = "mode"
             else:
                 warnings.append(
@@ -336,6 +342,12 @@ def _is_finite_number(value: Any) -> bool:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
         return False
+
+
+def _fill_missing_preserving_future_behavior(series: pd.Series, value: Any) -> pd.Series:
+    with pd.option_context("future.no_silent_downcasting", True):
+        filled = series.fillna(value)
+    return filled.infer_objects(copy=False)
 
 
 def _deduplicate(values: list[str]) -> list[str]:

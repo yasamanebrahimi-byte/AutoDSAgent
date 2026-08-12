@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -12,6 +13,42 @@ import streamlit as st
 
 
 BACKEND_URL = os.getenv("AUTODS_BACKEND_URL", "http://localhost:8000").rstrip("/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+SAMPLE_DATASETS = {
+    "Synthetic Customer Churn Classification": {
+        "filename": "classification_churn.csv",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "classification_churn.csv",
+        "target": "churn",
+        "task_type": "Classification",
+        "description": "Binary churn prediction with numeric, categorical, boolean, missing-value, duplicate-row, and ID-like columns.",
+    },
+    "Synthetic Housing Regression": {
+        "filename": "regression_housing.csv",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "regression_housing.csv",
+        "target": "sale_price",
+        "task_type": "Regression",
+        "description": "Home-price prediction with mixed feature types and conservative cleaning opportunities.",
+    },
+}
+
+RUN_STATE_KEYS = [
+    "profile",
+    "cleaning_plan",
+    "cleaning_summary",
+    "eda_response",
+    "modeling_response",
+    "workflow_state",
+    "reports_response",
+]
+
+TARGET_WIDGET_KEYS = [
+    "workflow_target_column",
+    "workflow_task_type",
+    "modeling_target_column",
+    "modeling_task_type",
+    "eda_target_column",
+]
 
 
 def main() -> None:
@@ -22,39 +59,121 @@ def main() -> None:
     )
 
     st.title("AutoDS Agent: Autonomous Data Science Analyst")
-    st.write(
-        "Upload a CSV, profile the dataset, generate a conservative cleaning plan, "
-        "apply safe cleaning, generate deterministic EDA, and train lightweight "
-        "baseline models while preserving the raw input. Then generate final "
-        "Markdown reports from the saved artifacts."
-    )
     st.caption(f"Backend: {BACKEND_URL}")
+    render_project_overview()
     render_runtime_status()
-
-    uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
-
-    if uploaded_file is not None:
-        if st.button("Create analysis run", type="primary"):
-            metadata = upload_csv(uploaded_file)
-            if metadata:
-                st.session_state["metadata"] = metadata
-                st.session_state.pop("profile", None)
-                st.session_state.pop("cleaning_plan", None)
-                st.session_state.pop("cleaning_summary", None)
-                st.session_state.pop("eda_response", None)
-                st.session_state.pop("modeling_response", None)
-                st.session_state.pop("workflow_state", None)
-                st.session_state.pop("reports_response", None)
+    render_start_run_controls()
 
     metadata = st.session_state.get("metadata")
     if metadata:
         render_metadata(metadata)
-        render_autonomous_workflow(metadata)
-        render_final_reports(metadata)
         with st.expander("Advanced Manual Controls", expanded=False):
             render_week2_workflow(metadata)
+        render_autonomous_workflow(metadata)
+        render_final_reports(metadata)
     else:
-        st.info("Create an analysis run to begin profiling and cleaning.")
+        st.info("Create an analysis run from an upload or sample dataset to begin.")
+
+
+def render_project_overview() -> None:
+    """Render the portfolio-friendly project overview."""
+
+    st.write(
+        "AutoDS Agent turns a raw tabular CSV into an inspectable analysis run: "
+        "metadata, profiling, conservative cleaning, EDA plots, baseline and "
+        "candidate models, evaluation outputs, workflow trace logs, and final "
+        "Markdown reports."
+    )
+    overview_cols = st.columns(4)
+    overview_cols[0].metric("Workflow", "Profile to Report")
+    overview_cols[1].metric("Raw data", "Preserved")
+    overview_cols[2].metric("LLM cost", "$0 required")
+    overview_cols[3].metric("Tracking", "Optional MLflow")
+
+
+def render_start_run_controls() -> None:
+    """Render upload and bundled sample dataset controls."""
+
+    st.header("Start An Analysis Run")
+    st.caption(
+        "Use your own CSV or load a bundled sample dataset. Either path creates "
+        "a normal run folder and keeps the uploaded raw file unchanged."
+    )
+
+    upload_tab, sample_tab = st.tabs(["Upload CSV", "Try A Sample Dataset"])
+
+    with upload_tab:
+        uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+        if uploaded_file is not None:
+            if st.button("Create Analysis Run", type="primary"):
+                metadata = upload_csv(uploaded_file)
+                if metadata:
+                    set_active_run(metadata)
+
+    with sample_tab:
+        selected_label = st.radio(
+            "Sample dataset",
+            options=list(SAMPLE_DATASETS),
+            horizontal=True,
+        )
+        selected_sample = SAMPLE_DATASETS[selected_label]
+        st.write(selected_sample["description"])
+        sample_cols = st.columns(3)
+        sample_cols[0].metric("Target", selected_sample["target"])
+        sample_cols[1].metric("Task", selected_sample["task_type"])
+        sample_cols[2].metric("File", selected_sample["filename"])
+        if st.button("Load Sample Dataset", type="primary"):
+            metadata = upload_sample_dataset(selected_label)
+            if metadata:
+                set_active_run(metadata, selected_sample)
+
+
+def set_active_run(
+    metadata: dict[str, Any],
+    sample_config: dict[str, Any] | None = None,
+) -> None:
+    """Store a new active run and clear stale derived artifacts."""
+
+    st.session_state["metadata"] = metadata
+    for key in RUN_STATE_KEYS:
+        st.session_state.pop(key, None)
+
+    for key in TARGET_WIDGET_KEYS:
+        st.session_state.pop(key, None)
+
+    if sample_config is None:
+        st.session_state.pop("recommended_target_column", None)
+        st.session_state.pop("recommended_task_type", None)
+        return
+
+    target = str(sample_config["target"])
+    task_type = str(sample_config["task_type"])
+    st.session_state["recommended_target_column"] = target
+    st.session_state["recommended_task_type"] = task_type
+    st.session_state["workflow_target_column"] = target
+    st.session_state["workflow_task_type"] = task_type
+    st.session_state["modeling_target_column"] = target
+    st.session_state["modeling_task_type"] = task_type
+    st.session_state["eda_target_column"] = target
+
+
+def upload_sample_dataset(sample_label: str) -> dict[str, Any] | None:
+    """Upload one bundled sample dataset through the regular backend endpoint."""
+
+    sample = SAMPLE_DATASETS[sample_label]
+    path = Path(sample["path"])
+    if not path.exists():
+        st.error(f"Sample dataset was not found: {path}")
+        return None
+    return upload_csv_bytes(path.name, path.read_bytes())
+
+
+def ensure_widget_value(key: str, options: list[Any], default_value: Any) -> None:
+    """Keep Streamlit selectboxes aligned with the current dataset columns."""
+
+    if st.session_state.get(key) in options:
+        return
+    st.session_state[key] = default_value if default_value in options else options[0]
 
 
 def render_runtime_status() -> None:
@@ -83,10 +202,16 @@ def render_runtime_status() -> None:
 def upload_csv(uploaded_file) -> dict | None:
     """Send the uploaded CSV to the FastAPI backend."""
 
+    return upload_csv_bytes(uploaded_file.name, uploaded_file.getvalue())
+
+
+def upload_csv_bytes(filename: str, content: bytes) -> dict[str, Any] | None:
+    """Send CSV bytes to the FastAPI backend."""
+
     files = {
         "file": (
-            uploaded_file.name,
-            uploaded_file.getvalue(),
+            filename,
+            content,
             "text/csv",
         )
     }
@@ -123,6 +248,13 @@ def render_metadata(metadata: dict) -> None:
     metric_cols[2].metric("Duplicate rows", metadata["duplicate_rows"])
 
     st.text_input("Run ID", value=metadata["run_id"], disabled=True)
+    recommended_target = st.session_state.get("recommended_target_column")
+    recommended_task = st.session_state.get("recommended_task_type")
+    if recommended_target in metadata.get("column_names", []):
+        st.info(
+            f"Sample defaults loaded: target `{recommended_target}`, "
+            f"task `{recommended_task}`."
+        )
 
     left, right = st.columns(2)
     with left:
@@ -172,6 +304,10 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
     )
 
     with profile_tab:
+        st.caption(
+            "Profiling reads the preserved raw CSV and saves schema, missingness, "
+            "duplicates, sample values, and quality warnings."
+        )
         if st.button("Generate Dataset Profile", key="generate_profile"):
             profile = post_json(
                 f"/runs/{run_id}/profile",
@@ -186,6 +322,10 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             render_profile(profile)
 
     with plan_tab:
+        st.caption(
+            "The cleaning plan is conservative: it recommends safe actions and "
+            "surfaces anything that deserves human review."
+        )
         if st.button("Generate Cleaning Plan", key="generate_cleaning_plan"):
             plan = post_json(
                 f"/runs/{run_id}/cleaning-plan",
@@ -200,7 +340,10 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             render_cleaning_plan(plan)
 
     with clean_tab:
-        st.caption("Safe cleaning is conservative. The raw CSV is preserved unchanged.")
+        st.caption(
+            "Safe cleaning writes a new cleaned CSV while leaving the raw upload "
+            "unchanged in the run input folder."
+        )
         if st.button("Apply Safe Cleaning", key="apply_safe_cleaning"):
             summary = post_json(
                 f"/runs/{run_id}/clean",
@@ -247,19 +390,30 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
     )
 
     target_options = ["No target column"] + column_names
+    default_target = st.session_state.get("recommended_target_column")
+    default_target_value = (
+        default_target if default_target in column_names else "No target column"
+    )
+    ensure_widget_value("workflow_target_column", target_options, default_target_value)
     selected_target = st.selectbox(
         "Optional target column",
         options=target_options,
-        index=0,
         key="workflow_target_column",
     )
     target_column = None if selected_target == "No target column" else selected_target
 
     control_cols = st.columns(3)
     with control_cols[0]:
+        task_options = ["Auto-detect", "Regression", "Classification"]
+        recommended_task = st.session_state.get("recommended_task_type", "Auto-detect")
+        ensure_widget_value(
+            "workflow_task_type",
+            task_options,
+            recommended_task if recommended_task in task_options else "Auto-detect",
+        )
         task_type_label = st.selectbox(
             "Task type",
-            options=["Auto-detect", "Regression", "Classification"],
+            options=task_options,
             key="workflow_task_type",
         )
     with control_cols[1]:
@@ -499,6 +653,10 @@ def render_workflow_state(run_id: str, state: dict[str, Any]) -> None:
     status_cols[0].metric("Workflow status", state.get("status", "unknown"))
     status_cols[1].metric("Current step", state.get("current_step") or "None")
     status_cols[2].metric("Target", state.get("target_column") or "None")
+    st.caption(
+        "Workflow state is saved after each transition, so the run remains "
+        "auditable even after the UI session ends."
+    )
 
     st.subheader("Step Status")
     st.dataframe(
@@ -663,6 +821,10 @@ def render_workflow_trace(run_id: str) -> None:
     """Render ordered agent trace events."""
 
     with st.expander("Agent Trace", expanded=False):
+        st.caption(
+            "Trace events show which agent boundary started, completed, paused, "
+            "retried, skipped, or failed each step."
+        )
         trace = get_json(f"/runs/{run_id}/workflow/trace", show_error=False)
         if not trace:
             st.write("No trace events have been saved yet.")
@@ -848,10 +1010,14 @@ def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
     )
 
     target_options = ["No target column"] + list(column_names)
+    default_target = st.session_state.get("recommended_target_column")
+    default_target_value = (
+        default_target if default_target in column_names else "No target column"
+    )
+    ensure_widget_value("eda_target_column", target_options, default_target_value)
     selected_target = st.selectbox(
         "Optional target column",
         options=target_options,
-        index=0,
         key="eda_target_column",
     )
     target_column = None if selected_target == "No target column" else selected_target
@@ -913,14 +1079,27 @@ def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
         st.info("Upload a dataset before selecting a modeling target.")
         return
 
+    default_target = st.session_state.get("recommended_target_column")
+    ensure_widget_value(
+        "modeling_target_column",
+        column_names,
+        default_target if default_target in column_names else column_names[0],
+    )
     target_column = st.selectbox(
         "Target column",
         options=column_names,
         key="modeling_target_column",
     )
+    task_options = ["Auto-detect", "Regression", "Classification"]
+    recommended_task = st.session_state.get("recommended_task_type", "Auto-detect")
+    ensure_widget_value(
+        "modeling_task_type",
+        task_options,
+        recommended_task if recommended_task in task_options else "Auto-detect",
+    )
     task_type_label = st.selectbox(
         "Task type",
-        options=["Auto-detect", "Regression", "Classification"],
+        options=task_options,
         key="modeling_task_type",
     )
     test_size = st.slider(
