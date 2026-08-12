@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.backend.routes import cleaning, eda, profile, runs, upload
+from app.backend.routes import cleaning, eda, modeling, profile, runs, upload
 
 
 app = FastAPI(
@@ -24,3 +24,4 @@ app.include_router(runs.router)
 app.include_router(profile.router)
 app.include_router(cleaning.router)
 app.include_router(eda.router)
+app.include_router(modeling.router)

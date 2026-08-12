@@ -69,7 +69,30 @@ The current implementation keeps those boundaries visible while using determinis
 - Streamlit EDA section for target selection, summaries, findings, next steps, and plots
 - EDA agent boundary that wraps deterministic service logic
 - Tests for EDA analysis helpers, visualization helpers, and EDA service artifacts
-- No LLM API calls, paid credits, MLflow, LangGraph, or model training in Week 3
+- No model training in Week 3; modeling begins in Week 4
+
+### Week 4 Modeling And Evaluation
+
+- Modeling service that requires `intermediate/cleaned_data.csv`
+- User-selected target column with validation for missing, constant, too-small, and ID-like targets
+- Task-type inference for regression versus classification, with an API/UI override
+- Reusable sklearn preprocessing for numeric, categorical, boolean, and simple datetime features
+- ID-like, unsupported, and free-text columns excluded from modeling by default
+- Baseline models trained before candidates:
+  - Regression: `DummyRegressor(strategy="median")`
+  - Classification: `DummyClassifier(strategy="most_frequent")`
+- Lightweight candidate models:
+  - Regression: linear regression, ridge, random forest, hist gradient boosting
+  - Classification: logistic regression, random forest, hist gradient boosting
+- Regression metrics: MAE, RMSE, and R2, with RMSE used for model selection
+- Classification metrics: accuracy, precision, recall, F1, and optional ROC-AUC, with F1 used for model selection
+- Best-model selection, baseline comparison, and structured summaries
+- Saved model artifacts under `runs/<run_id>/models/`
+- Evaluation plots under `runs/<run_id>/plots/evaluation/`
+- Streamlit modeling tab for target selection, task selection, metrics, failures, and plots
+- Modeling and evaluation agent boundaries that wrap deterministic services
+- Tests for task inference, preprocessing, modeling service artifacts, metrics, plots, and failed-model handling
+- No LLM API calls, paid credits, MLflow, LangGraph, deep learning, or heavy tuning in Week 4
 
 ## Project Architecture
 
@@ -90,18 +113,22 @@ autods-agent/
         profile.py
         cleaning.py
         eda.py
+        modeling.py
       services/
         run_manager.py
         dataset_service.py
         profiling_service.py
         cleaning_service.py
         eda_service.py
+        modeling_service.py
+        evaluation_service.py
       schemas/
         run.py
         dataset.py
         profile.py
         cleaning.py
         eda.py
+        modeling.py
 
     frontend/
       streamlit_app.py
@@ -122,6 +149,10 @@ autods-agent/
       data_quality.py
       cleaning.py
       eda_analysis.py
+      preprocessing.py
+      modeling.py
+      evaluation.py
+      model_persistence.py
       file_utils.py
       statistics_utils.py
       visualization.py
@@ -145,6 +176,10 @@ autods-agent/
     test_eda_analysis.py
     test_visualization.py
     test_eda_service.py
+    test_preprocessing.py
+    test_modeling_tools.py
+    test_modeling_service.py
+    test_evaluation_service.py
 ```
 
 ## Installation
@@ -222,10 +257,15 @@ The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKE
 13. Optionally select a target column.
 14. Click `Generate EDA`.
 15. Review dataset choice, column type summaries, remaining data quality notes, findings, recommended next steps, and generated plots.
+16. Open `Modeling and Evaluation`.
+17. Select a target column.
+18. Keep task type on `Auto-detect` or choose `Regression` or `Classification`.
+19. Choose a test set size and click `Train and Evaluate Models`.
+20. Review the inferred task, train/test split, feature exclusions, model comparison table, baseline comparison, saved artifacts, and evaluation plots.
 
 ## Run Artifacts
 
-After a successful Week 3 flow, a run can contain:
+After a successful Week 4 flow, a run can contain:
 
 ```text
 runs/<run_id>/
@@ -239,7 +279,12 @@ runs/<run_id>/
     cleaning_summary.json
     eda_summary.json
     eda_findings.json
+    modeling_summary.json
+    evaluation_summary.json
   models/
+    baseline_model.pkl
+    best_model.pkl
+    model_results.json
   plots/
     missing_values.png
     numeric_distributions/
@@ -249,12 +294,19 @@ runs/<run_id>/
     correlation_heatmap.png
     target_relationships/
       ...
+    evaluation/
+      model_comparison.png
+      confusion_matrix.png
+      predicted_vs_actual.png
+      residuals.png
+      feature_importance.png
   reports/
     eda_summary.md
   logs/
 ```
 
 The raw dataset is never overwritten.
+Some evaluation plots are task-specific, so a run will only contain the plots that apply.
 
 ## Conservative Cleaning Rules
 
@@ -292,6 +344,35 @@ Generated plot types:
 - `categorical_distributions/*.png`: top-category bar charts for categorical and boolean columns.
 - `correlation_heatmap.png`: numeric correlation heatmap when enough numeric columns exist.
 - `target_relationships/*.png`: target distribution and simple feature-target relationship plots when a target is provided.
+
+## Modeling And Evaluation Rules
+
+Modeling uses a production-minded artifact flow rather than notebook state:
+
+- Uses `runs/<run_id>/intermediate/cleaned_data.csv`.
+- Returns a clear error if cleaned data is missing. It does not silently train on `input/raw_data.csv`.
+- Requires a target column selected by the user.
+- Excludes the target column from features.
+- Excludes likely ID columns from features by default.
+- Excludes free-text and unsupported columns for Week 4 and records the reason.
+- Builds sklearn pipelines so imputers, scalers, and encoders are fit only on the training split.
+- Always uses a train/test split.
+- Always trains a baseline model before candidate models.
+- Records failed model attempts without crashing the whole modeling run.
+- Selects the best model by the primary metric: lower RMSE for regression, higher F1 for classification.
+- Saves the baseline model as `models/baseline_model.pkl`.
+- Saves the selected best model as `models/best_model.pkl`.
+- Saves model comparison details as `models/model_results.json`.
+
+Task inference follows simple, deterministic rules:
+
+- Numeric targets with many unique values are treated as regression.
+- Numeric targets with few unique values are treated as classification.
+- Boolean and low-cardinality categorical targets are treated as classification.
+- High-cardinality text targets are rejected for Week 4 because text modeling is future work.
+- The API and UI can override task type with `regression` or `classification`.
+
+Baseline models set a plain reference point. Candidate models must beat the baseline to show useful predictive lift, but the baseline can remain the best model if candidates do not improve the primary metric.
 
 ## API Endpoints
 
@@ -369,6 +450,44 @@ Returns generated plot files with relative paths, labels, and categories.
 
 Returns one generated PNG plot. This is used by the Streamlit UI to display backend-generated images.
 
+### `POST /runs/{run_id}/model`
+
+Requires `intermediate/cleaned_data.csv`, trains the baseline and candidate models, evaluates them, saves model artifacts, saves evaluation plots, and returns modeling and evaluation summaries.
+
+Example request body:
+
+```json
+{
+  "target_column": "SalePrice",
+  "task_type": null,
+  "test_size": 0.2,
+  "random_state": 42
+}
+```
+
+Use `null` for auto-detection, or set `task_type` to `regression` or `classification`.
+
+Saved artifacts:
+
+- `intermediate/modeling_summary.json`
+- `intermediate/evaluation_summary.json`
+- `models/baseline_model.pkl`
+- `models/best_model.pkl`
+- `models/model_results.json`
+- `plots/evaluation/*.png`
+
+### `GET /runs/{run_id}/modeling-summary`
+
+Returns an existing modeling summary or `404` if models have not been trained.
+
+### `GET /runs/{run_id}/evaluation-summary`
+
+Returns an existing evaluation summary or `404` if models have not been trained.
+
+### `GET /runs/{run_id}/models`
+
+Returns saved model artifacts and model result files for one run.
+
 ## Run Tests
 
 ```bash
@@ -381,12 +500,13 @@ If the local default temp directory has permission issues on Windows, this equiv
 pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_tmp_cache
 ```
 
-## Week 4 Direction
+## Week 5 Direction
 
-Recommended Week 4 work:
+Recommended Week 5 work:
 
-- Generate deterministic hypothesis candidates from `profile.json`, `cleaning_summary.json`, `eda_summary.json`, and `eda_findings.json`.
-- Prepare target-aware feature selection guidance.
-- Add baseline modeling only after the Week 3 EDA artifacts are stable.
+- Add deterministic or LLM-assisted hypothesis candidates from saved profile, cleaning, EDA, and modeling artifacts.
+- Introduce agent orchestration, retries, and human approval gates.
+- Prepare target-aware feature selection guidance before more advanced tuning.
+- Consider MLflow only when experiment tracking becomes a clear requirement.
 - Keep correlation findings framed as relationships, not causal claims.
 - Continue avoiding LLM API calls and paid credits until the project intentionally adds them.

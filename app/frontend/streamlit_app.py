@@ -24,7 +24,8 @@ def main() -> None:
     st.title("AutoDS Agent: Autonomous Data Science Analyst")
     st.write(
         "Upload a CSV, profile the dataset, generate a conservative cleaning plan, "
-        "apply safe cleaning, and generate deterministic EDA while preserving the raw input."
+        "apply safe cleaning, generate deterministic EDA, and train lightweight "
+        "baseline models while preserving the raw input."
     )
     st.caption(f"Backend: {BACKEND_URL}")
 
@@ -39,6 +40,7 @@ def main() -> None:
                 st.session_state.pop("cleaning_plan", None)
                 st.session_state.pop("cleaning_summary", None)
                 st.session_state.pop("eda_response", None)
+                st.session_state.pop("modeling_response", None)
 
     metadata = st.session_state.get("metadata")
     if metadata:
@@ -128,12 +130,13 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
     run_id = metadata["run_id"]
 
     st.divider()
-    profile_tab, plan_tab, clean_tab, eda_tab, next_tab = st.tabs(
+    profile_tab, plan_tab, clean_tab, eda_tab, modeling_tab, next_tab = st.tabs(
         [
             "Dataset Profile",
             "Cleaning Plan",
             "Safe Cleaning",
             "Exploratory Data Analysis",
+            "Modeling and Evaluation",
             "Next",
         ]
     )
@@ -174,6 +177,7 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             if summary:
                 st.session_state["cleaning_summary"] = summary
                 st.session_state.pop("eda_response", None)
+                st.session_state.pop("modeling_response", None)
 
         summary = st.session_state.get("cleaning_summary")
         if summary:
@@ -182,11 +186,17 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
     with eda_tab:
         render_eda_workflow(run_id=run_id, column_names=metadata.get("column_names", []))
 
+    with modeling_tab:
+        render_modeling_workflow(
+            run_id=run_id,
+            column_names=metadata.get("column_names", []),
+        )
+
     with next_tab:
-        st.subheader("Next: Hypothesis generation and modeling")
+        st.subheader("Next: Agent orchestration, retries, and human approval gates")
         st.write(
-            "Week 4 can build on the saved EDA artifacts to generate hypotheses "
-            "and prepare baseline modeling. Week 3 does not train models yet."
+            "Week 5 can connect these deterministic services through an agent workflow "
+            "with retry behavior and user review steps. Week 4 does not use LLM calls."
         )
 
 
@@ -397,6 +407,183 @@ def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
         render_eda_response(run_id, eda_response)
 
 
+def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
+    """Render Week 4 modeling controls and outputs."""
+
+    st.subheader("Modeling and Evaluation")
+    st.caption(
+        "Modeling requires `cleaned_data.csv`, trains deterministic sklearn models, "
+        "and does not use LLM API calls."
+    )
+
+    if not column_names:
+        st.info("Upload a dataset before selecting a modeling target.")
+        return
+
+    target_column = st.selectbox(
+        "Target column",
+        options=column_names,
+        key="modeling_target_column",
+    )
+    task_type_label = st.selectbox(
+        "Task type",
+        options=["Auto-detect", "Regression", "Classification"],
+        key="modeling_task_type",
+    )
+    test_size = st.slider(
+        "Test set size",
+        min_value=0.1,
+        max_value=0.5,
+        value=0.2,
+        step=0.05,
+        key="modeling_test_size",
+    )
+
+    if st.button("Train and Evaluate Models", type="primary", key="train_models"):
+        payload = {
+            "target_column": target_column,
+            "task_type": None
+            if task_type_label == "Auto-detect"
+            else task_type_label.lower(),
+            "test_size": float(test_size),
+            "random_state": 42,
+        }
+        response = post_json(
+            f"/runs/{run_id}/model",
+            "Training baseline and candidate models...",
+            payload=payload,
+        )
+        if response:
+            st.session_state["modeling_response"] = response
+
+    modeling_response = st.session_state.get("modeling_response")
+    if modeling_response:
+        render_modeling_response(run_id, modeling_response)
+
+
+def render_modeling_response(run_id: str, response: dict[str, Any]) -> None:
+    """Render modeling and evaluation summaries."""
+
+    modeling_summary = response["modeling_summary"]
+    evaluation_summary = response["evaluation_summary"]
+    model_results = response.get("model_results", {})
+
+    st.success("Modeling and evaluation artifacts were saved.")
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Target", modeling_summary["target_column"])
+    metric_cols[1].metric("Task", modeling_summary["task_type"])
+    metric_cols[2].metric("Best model", modeling_summary["best_model_name"])
+    metric_cols[3].metric("Primary metric", modeling_summary["primary_metric"].upper())
+
+    split_cols = st.columns(3)
+    split_cols[0].metric("Rows used", modeling_summary["rows_used"])
+    split_cols[1].metric("Train rows", modeling_summary["train_rows"])
+    split_cols[2].metric("Test rows", modeling_summary["test_rows"])
+
+    st.subheader("Model Metrics")
+    comparison_table = _model_comparison_dataframe(model_results, evaluation_summary)
+    if not comparison_table.empty:
+        st.dataframe(comparison_table, use_container_width=True, hide_index=True)
+    else:
+        st.write("No model metrics were returned.")
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Baseline Metrics")
+        st.dataframe(
+            _metrics_dataframe(evaluation_summary.get("baseline_metrics", {})),
+            use_container_width=True,
+            hide_index=True,
+        )
+    with right:
+        st.subheader("Best Model Metrics")
+        st.dataframe(
+            _metrics_dataframe(evaluation_summary.get("best_model_metrics", {})),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.subheader("Baseline Comparison")
+    st.write(evaluation_summary.get("baseline_comparison", {}).get("interpretation", ""))
+
+    warnings = evaluation_summary.get("warnings", [])
+    if warnings:
+        st.subheader("Evaluation Warnings")
+        for warning in warnings:
+            st.warning(warning)
+
+    feature_cols = st.columns(2)
+    with feature_cols[0]:
+        with st.expander("Features used", expanded=False):
+            features_used = modeling_summary.get("features_used", [])
+            st.write(", ".join(features_used) if features_used else "None")
+    with feature_cols[1]:
+        with st.expander("Features excluded", expanded=False):
+            excluded = modeling_summary.get("excluded_feature_reasons", {})
+            if excluded:
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {"Column": column, "Reason": reason}
+                            for column, reason in excluded.items()
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.write("None")
+
+    with st.expander("Models attempted", expanded=False):
+        st.write(", ".join(modeling_summary.get("models_attempted", [])))
+        succeeded = modeling_summary.get("models_succeeded", [])
+        failed = modeling_summary.get("models_failed", [])
+        st.write(f"Succeeded: {', '.join(succeeded) if succeeded else 'None'}")
+        st.write(f"Failed: {', '.join(failed) if failed else 'None'}")
+
+    failed_records = [
+        result
+        for result in model_results.get("results", [])
+        if result.get("status") == "failed"
+    ]
+    if failed_records:
+        with st.expander("Model failure details", expanded=False):
+            st.dataframe(
+                pd.DataFrame(failed_records)[["model_name", "role", "error"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.subheader("Evaluation Plots")
+    plots = evaluation_summary.get("generated_plots", [])
+    render_plot_section(
+        "Model comparison",
+        _plots_by_category(plots, "evaluation_model_comparison"),
+        run_id,
+    )
+    render_plot_section(
+        "Confusion matrix",
+        _plots_by_category(plots, "evaluation_confusion_matrix"),
+        run_id,
+    )
+    render_plot_section(
+        "Predicted vs actual",
+        _plots_by_category(plots, "evaluation_predicted_vs_actual"),
+        run_id,
+    )
+    render_plot_section(
+        "Residuals",
+        _plots_by_category(plots, "evaluation_residuals"),
+        run_id,
+    )
+    render_plot_section(
+        "Feature signal",
+        _plots_by_category(plots, "evaluation_feature_importance"),
+        run_id,
+    )
+
+
 def render_eda_response(run_id: str, eda_response: dict[str, Any]) -> None:
     """Render EDA summary, findings, next steps, and generated plots."""
 
@@ -552,6 +739,51 @@ def post_json(
         return None
 
     return response.json()
+
+
+def _model_comparison_dataframe(
+    model_results: dict[str, Any],
+    evaluation_summary: dict[str, Any],
+) -> pd.DataFrame:
+    records = model_results.get("results", [])
+    if records:
+        rows: list[dict[str, Any]] = []
+        for record in records:
+            row = {
+                "Model": record.get("model_name"),
+                "Role": record.get("role"),
+                "Status": record.get("status"),
+            }
+            row.update(record.get("metrics", {}))
+            if record.get("primary_metric_value") is not None:
+                row["Primary metric value"] = record.get("primary_metric_value")
+            if record.get("error"):
+                row["Error"] = record.get("error")
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    all_metrics = evaluation_summary.get("all_model_metrics", {})
+    if not all_metrics:
+        return pd.DataFrame()
+
+    rows = []
+    for model_name, metrics in all_metrics.items():
+        row = {"Model": model_name}
+        row.update(metrics)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _metrics_dataframe(metrics: dict[str, Any]) -> pd.DataFrame:
+    if not metrics:
+        return pd.DataFrame([{"Metric": "None", "Value": None}])
+
+    return pd.DataFrame(
+        [
+            {"Metric": metric.upper(), "Value": value}
+            for metric, value in metrics.items()
+        ]
+    )
 
 
 def _shape_text(shape: list[int]) -> str:
