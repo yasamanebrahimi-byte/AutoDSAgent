@@ -29,6 +29,7 @@ def main() -> None:
         "Markdown reports from the saved artifacts."
     )
     st.caption(f"Backend: {BACKEND_URL}")
+    render_runtime_status()
 
     uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
@@ -54,6 +55,29 @@ def main() -> None:
             render_week2_workflow(metadata)
     else:
         st.info("Create an analysis run to begin profiling and cleaning.")
+
+
+def render_runtime_status() -> None:
+    """Render non-secret runtime configuration and demo hints."""
+
+    config_status = get_json("/config/status", show_error=False)
+    with st.expander("Runtime and Demo Notes", expanded=False):
+        if isinstance(config_status, dict):
+            status_cols = st.columns(3)
+            status_cols[0].metric("Environment", config_status.get("environment", "unknown"))
+            status_cols[1].metric(
+                "MLflow",
+                "enabled" if config_status.get("mlflow_enabled") else "disabled",
+            )
+            status_cols[2].metric("Runs directory", config_status.get("runs_dir", "runs"))
+            if config_status.get("mlflow_enabled"):
+                st.write(f"MLflow tracking URI: `{config_status.get('mlflow_tracking_uri')}`")
+                st.write("Open the MLflow UI to inspect model parameters, metrics, and artifacts.")
+        else:
+            st.write("Runtime status is unavailable until the backend is reachable.")
+
+        st.write("Bundled demo datasets are available under `examples/sample_data/`.")
+        st.write("Use `classification_churn.csv` with target `churn` or `regression_housing.csv` with target `sale_price`.")
 
 
 def upload_csv(uploaded_file) -> dict | None:

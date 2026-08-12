@@ -2,7 +2,11 @@
 
 from fastapi import FastAPI
 
-from app.backend.routes import cleaning, eda, modeling, profile, reports, runs, upload, workflow
+from app.backend.routes import config, cleaning, eda, modeling, profile, reports, runs, upload, workflow
+from app.tools.app_logging import configure_logging
+
+
+configure_logging()
 
 
 app = FastAPI(
@@ -20,6 +24,7 @@ def health_check() -> dict[str, str]:
 
 
 app.include_router(upload.router)
+app.include_router(config.router)
 app.include_router(runs.router)
 app.include_router(profile.router)
 app.include_router(cleaning.router)

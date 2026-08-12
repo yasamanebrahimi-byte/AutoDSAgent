@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pandas as pd
 
 from app.backend.schemas.eda import EDAFindings, EDAPlotInfo, EDARequest, EDAResponse, EDASummary
 from app.backend.services.run_manager import RunManager
+from app.tools.app_logging import get_logger, log_event
 from app.tools.data_loader import load_csv
 from app.tools.eda_analysis import (
     analyze_target_distribution,
@@ -48,6 +50,7 @@ class EDAService:
 
     def __init__(self, run_manager: RunManager | None = None) -> None:
         self.run_manager = run_manager or RunManager()
+        self.logger = get_logger(__name__)
 
     def eda_summary_path(self, run_id: str) -> Path:
         """Return the EDA summary JSON artifact path."""
@@ -167,6 +170,15 @@ class EDAService:
             path=self.eda_report_path(run_id),
             summary=summary,
             findings=findings,
+        )
+        log_event(
+            self.logger,
+            logging.INFO,
+            "EDA generated.",
+            run_id=run_id,
+            dataset_used=summary.dataset_used,
+            plots=len(summary.generated_plots),
+            target_column=summary.target_column or "none",
         )
 
         return EDAResponse(summary=summary, findings=findings)

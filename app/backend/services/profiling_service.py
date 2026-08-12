@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.backend.schemas.profile import (
     ValueCount,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.app_logging import get_logger, log_event
 from app.tools.data_loader import load_csv
 from app.tools.data_quality import detect_data_quality_issues
 from app.tools.file_utils import json_safe, load_json, save_json
@@ -27,6 +29,7 @@ class ProfilingService:
 
     def __init__(self, run_manager: RunManager | None = None) -> None:
         self.run_manager = run_manager or RunManager()
+        self.logger = get_logger(__name__)
 
     def raw_data_path(self, run_id: str) -> Path:
         """Return the preserved raw dataset path for a run."""
@@ -48,6 +51,15 @@ class ProfilingService:
         dataframe = load_csv(raw_path)
         profile = self.profile_dataframe(dataframe, run_id=run_id)
         save_json(self.profile_path(run_id), profile.model_dump(mode="json"))
+        log_event(
+            self.logger,
+            logging.INFO,
+            "Dataset profile generated.",
+            run_id=run_id,
+            rows=profile.rows,
+            columns=profile.columns,
+            warnings=len(profile.data_quality_issues),
+        )
         return profile
 
     def load_profile(self, run_id: str) -> DatasetProfile:

@@ -2,6 +2,47 @@
 
 **AutoDS Agent: An Autonomous Multi-Agent Data Science Analyst** is designed to grow into a system that can ingest raw tabular datasets, profile them, clean them, run EDA, train baseline models, evaluate results, generate visualizations, and write final analysis reports.
 
+AutoDS Agent is built as a portfolio-ready engineering project: deterministic by default, artifact-driven, Docker-ready, and designed so every analysis run can be inspected after the fact. Through Week 7, it does not require paid LLM API credits.
+
+## What It Does
+
+- Upload a CSV and preserve the raw dataset.
+- Generate profile, cleaning, EDA, modeling, evaluation, and report artifacts.
+- Run the analysis manually through API/UI controls or through an autonomous workflow.
+- Track model experiments in MLflow when enabled.
+- Produce Markdown reports that clearly show available results, missing artifacts, limitations, and next steps.
+
+## Tech Stack
+
+- FastAPI backend
+- Streamlit frontend
+- pandas, scikit-learn, Matplotlib, joblib
+- Pydantic schemas
+- Optional MLflow experiment tracking
+- Docker and Docker Compose
+- Pytest
+
+## Demo Materials
+
+Example datasets live in `examples/sample_data/`.
+
+- Classification demo: `classification_churn.csv`, target `churn`
+- Regression demo: `regression_housing.csv`, target `sale_price`
+
+Suggested screenshot placeholders for a portfolio README:
+
+- Streamlit upload and workflow screen
+- Generated EDA plots
+- Final report preview
+- MLflow experiment comparison
+
+Detailed docs:
+
+- [Architecture](docs/architecture.md)
+- [Demo Walkthrough](docs/demo_walkthrough.md)
+- [API Reference](docs/api_reference.md)
+- [Portfolio Summary](docs/portfolio_summary.md)
+
 ## Long-Term Vision
 
 The eventual system will use a multi-agent architecture with specialist agents for:
@@ -127,6 +168,25 @@ The current implementation keeps those boundaries visible while using determinis
 - Tests for report builders, report service, report agent, API routes, and workflow integration
 - No LLM API calls, paid credits, MLflow, or cloud deployment in Week 6
 
+### Week 7 Portfolio Polish, MLflow, And Docker
+
+- Optional MLflow tracking for modeling runs
+- Parent AutoDS MLflow run plus nested model runs when tracking is enabled
+- MLflow tags for run ID, target column, task type, dataset path, project, and modeling stage
+- MLflow parameters for target, task type, split settings, feature counts, row counts, and selected models
+- MLflow metrics for regression and classification models
+- MLflow artifact logging for modeling/evaluation summaries, model results, evaluation plots, selected model artifact, and final report when present
+- Non-fatal MLflow behavior: if MLflow is disabled, unavailable, or fails, local modeling still completes
+- Expanded environment configuration in `app/backend/config.py`
+- Structured application logging in `app/tools/app_logging.py`
+- Non-secret config status endpoint at `GET /config/status`
+- Dockerfile and Docker Compose setup for backend, frontend, and MLflow
+- Small synthetic regression and classification example datasets
+- `scripts/create_demo_run.py` for generating complete demo runs from bundled datasets
+- `scripts/validate_project.py` for lightweight project validation
+- Architecture, demo walkthrough, API reference, and portfolio summary docs
+- Streamlit runtime notes showing MLflow status and demo dataset guidance
+
 ## Project Architecture
 
 ```text
@@ -135,12 +195,16 @@ autods-agent/
   pyproject.toml
   .env.example
   .gitignore
+  Dockerfile
+  docker-compose.yml
+  .dockerignore
 
   app/
     backend/
       main.py
       config.py
       routes/
+        config.py
         upload.py
         runs.py
         profile.py
@@ -195,6 +259,8 @@ autods-agent/
       report_sections.py
       report_builder.py
       report_export.py
+      app_logging.py
+      mlflow_logger.py
       model_persistence.py
       approval.py
       trace_logger.py
@@ -210,9 +276,24 @@ autods-agent/
   runs/
     .gitkeep
 
+  mlruns/
+    .gitkeep
+
   examples/
     sample_data/
-      .gitkeep
+      regression_housing.csv
+      classification_churn.csv
+      README.md
+
+  scripts/
+    create_demo_run.py
+    validate_project.py
+
+  docs/
+    architecture.md
+    demo_walkthrough.md
+    api_reference.md
+    portfolio_summary.md
 
   tests/
     test_run_manager.py
@@ -231,6 +312,9 @@ autods-agent/
     test_report_service.py
     test_report_agent.py
     test_report_workflow_integration.py
+    test_mlflow_logger.py
+    test_config.py
+    test_demo_scripts.py
     test_workflow_state.py
     test_workflow_service.py
     test_orchestrator.py
@@ -265,11 +349,22 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
+Install optional MLflow support when you want experiment tracking:
+
+```bash
+python -m pip install -e ".[dev,mlflow]"
+```
+
 Optional environment settings:
 
 ```bash
 AUTODS_BACKEND_URL=http://localhost:8000
 AUTODS_RUNS_DIR=runs
+AUTODS_ENV=local
+AUTODS_LOG_LEVEL=INFO
+AUTODS_ENABLE_MLFLOW=false
+AUTODS_MLFLOW_TRACKING_URI=http://localhost:5000
+AUTODS_MLFLOW_EXPERIMENT_NAME=AutoDS-Agent
 ```
 
 ## Run The Backend
@@ -296,6 +391,39 @@ streamlit run app/frontend/streamlit_app.py
 
 The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKEND_URL` is set.
 
+## Run With Docker Compose
+
+Docker Compose starts the backend, frontend, and MLflow UI together:
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+- Frontend: `http://localhost:8501`
+- Backend docs: `http://localhost:8000/docs`
+- MLflow UI: `http://localhost:5000`
+
+Compose mounts `runs/` and `mlruns/` so local artifacts and MLflow tracking data persist between container restarts.
+
+To disable MLflow tracking while still running the MLflow service:
+
+```bash
+AUTODS_ENABLE_MLFLOW=false docker compose up --build
+```
+
+## Run A Demo Analysis
+
+Use the built-in demo script to generate a full analysis run without clicking through the UI:
+
+```bash
+python scripts/create_demo_run.py --dataset classification --target churn
+python scripts/create_demo_run.py --dataset regression --target sale_price
+```
+
+The script creates a run, profiles data, plans and applies cleaning, runs EDA, trains models, generates reports, and prints key artifact paths.
+
 ## Example Workflow
 
 1. Start the FastAPI backend.
@@ -316,6 +444,54 @@ The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKE
 
 The original manual profiling, cleaning, EDA, and modeling controls remain available under `Advanced Manual Controls`.
 The `Final Reports` section can also generate reports manually for a partially completed run.
+
+## Example Datasets
+
+Bundled datasets are intentionally small and synthetic:
+
+- `examples/sample_data/classification_churn.csv`: binary classification demo with target `churn`
+- `examples/sample_data/regression_housing.csv`: regression demo with target `sale_price`
+
+Both include numeric, categorical, boolean, missing-value, duplicate-row, and ID-like-column examples.
+
+## View Generated Reports
+
+Final reports are saved under each run:
+
+```text
+runs/<run_id>/reports/final_report.md
+runs/<run_id>/reports/executive_summary.md
+runs/<run_id>/reports/technical_summary.md
+runs/<run_id>/reports/limitations.md
+```
+
+The Streamlit `Final Reports` section previews and downloads these Markdown files.
+
+## View MLflow Experiments
+
+MLflow is optional. When enabled, modeling runs log parameters, metrics, tags, and artifacts.
+
+For Docker Compose, open:
+
+```text
+http://localhost:5000
+```
+
+For local Python usage, install the optional extra and start MLflow:
+
+```bash
+python -m pip install -e ".[mlflow]"
+mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri mlruns --default-artifact-root mlruns
+```
+
+Then set:
+
+```bash
+AUTODS_ENABLE_MLFLOW=true
+AUTODS_MLFLOW_TRACKING_URI=http://localhost:5000
+```
+
+If MLflow is unavailable, AutoDS Agent logs a warning and keeps the modeling workflow running.
 
 ## Run Artifacts
 
@@ -373,7 +549,7 @@ Some evaluation plots are task-specific, so a run will only contain the plots th
 
 ## Autonomous Workflow Orchestration
 
-Week 6 uses a local deterministic state machine in `app/workflows/analysis_graph.py`. It deliberately avoids paid LLM calls and keeps future extension points open for LangGraph, OpenAI Agents SDK, or tool-calling agents.
+Week 7 uses a local deterministic state machine in `app/workflows/analysis_graph.py`. It deliberately avoids paid LLM calls and keeps future extension points open for LangGraph, OpenAI Agents SDK, or tool-calling agents.
 
 Canonical workflow order:
 
@@ -467,6 +643,8 @@ Task inference follows simple, deterministic rules:
 
 Baseline models set a plain reference point. Candidate models must beat the baseline to show useful predictive lift, but the baseline can remain the best model if candidates do not improve the primary metric.
 
+When MLflow is enabled, modeling logs run metadata, parameters, metrics, nested model runs, evaluation plots, and selected artifacts. MLflow logging is best-effort: failures are recorded as warnings and do not stop local artifact generation.
+
 ## Final Report Generation
 
 Week 6 adds a deterministic reporting layer in `app/backend/services/report_service.py`.
@@ -492,13 +670,17 @@ The report text follows deterministic interpretation rules:
 - Modeling metrics are included only when saved modeling and evaluation artifacts exist.
 - Failed models, skipped steps, missing artifacts, and warnings are surfaced.
 - Limitations are always included.
-- Week 6 does not use LLM API calls, paid credits, MLflow, or cloud deployment.
+- Report generation does not use LLM API calls, paid credits, or cloud deployment.
 
 ## API Endpoints
 
 ### `GET /health`
 
 Returns a simple service health check.
+
+### `GET /config/status`
+
+Returns non-secret runtime configuration status, including environment, runs directory, backend URL, default modeling settings, logging level, and MLflow status.
 
 ### `POST /upload`
 
@@ -662,7 +844,7 @@ Example request body:
 }
 ```
 
-The workflow runs until it completes, fails, or reaches a human approval gate. It returns `workflow_state.json` as structured JSON. In Week 6, successful workflows include a final report step.
+The workflow runs until it completes, fails, or reaches a human approval gate. It returns `workflow_state.json` as structured JSON. Successful workflows include a final report step.
 
 ### `GET /runs/{run_id}/workflow/state`
 
@@ -717,12 +899,28 @@ $env:TMP=$env:TEMP
 pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
 ```
 
-## Week 7 Direction
+## Current Limitations
 
-Recommended Week 7 work:
+- Analysis is deterministic and does not use LLM reasoning or paid API calls through Week 7.
+- Text, time-series, geospatial, and deep learning workflows are intentionally out of scope.
+- Leakage detection is conservative and should be reviewed before trusting model results.
+- Hyperparameter tuning is lightweight.
+- Reports summarize saved artifacts and do not invent unavailable findings.
+- Docker Compose is intended for local development and demos, not hardened production deployment.
 
-- Add MLflow or another lightweight experiment tracking layer when model runs need comparison history.
-- Polish local packaging, Docker setup, and portfolio-ready demo instructions.
-- Add richer report styling or optional LLM-assisted narrative only behind explicit user configuration.
-- Expand leakage checks, validation strategies, and target-specific modeling guardrails.
-- Keep raw data preservation, deterministic fallbacks, and missing-artifact transparency intact.
+## Future Work
+
+Recommended Week 8 work:
+
+- Add final demo screenshots and a portfolio walkthrough video.
+- Polish resume-ready packaging and release notes.
+- Add stronger leakage checks and richer validation strategies.
+- Add optional LLM-assisted narrative generation only behind explicit configuration.
+- Add model registry or richer MLflow experiment comparison workflows.
+
+## Resume Bullet Suggestions
+
+- Built an autonomous tabular data science analyst with FastAPI, Streamlit, sklearn, MLflow, Docker Compose, and Pytest.
+- Designed an artifact-first workflow for profiling, cleaning, EDA, modeling, evaluation, and deterministic report generation.
+- Implemented optional MLflow experiment tracking that logs model metrics, parameters, tags, and artifacts without breaking local runs when unavailable.
+- Added workflow state management, approval gates, retry logic, trace logs, and partial-report handling for reliable autonomous analysis.

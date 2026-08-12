@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -13,10 +14,12 @@ from app.backend.services.dataset_service import (
     validate_csv_filename,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.app_logging import get_logger, log_event
 
 
 router = APIRouter(tags=["upload"])
 run_manager = RunManager()
+logger = get_logger(__name__)
 
 
 @router.post("/upload", response_model=DatasetMetadata)
@@ -56,5 +59,14 @@ async def upload_dataset(file: UploadFile = File(...)) -> DatasetMetadata:
         run_id=run_id,
     )
     run_manager.save_metadata(run_id, metadata.model_dump(mode="json"))
+    log_event(
+        logger,
+        logging.INFO,
+        "Dataset uploaded.",
+        run_id=run_id,
+        filename=file.filename,
+        rows=metadata.rows,
+        columns=metadata.columns,
+    )
 
     return metadata
