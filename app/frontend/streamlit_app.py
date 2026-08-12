@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -23,7 +24,7 @@ def main() -> None:
     st.title("AutoDS Agent: Autonomous Data Science Analyst")
     st.write(
         "Upload a CSV, profile the dataset, generate a conservative cleaning plan, "
-        "and apply safe cleaning while preserving the raw input."
+        "apply safe cleaning, and generate deterministic EDA while preserving the raw input."
     )
     st.caption(f"Backend: {BACKEND_URL}")
 
@@ -37,11 +38,12 @@ def main() -> None:
                 st.session_state.pop("profile", None)
                 st.session_state.pop("cleaning_plan", None)
                 st.session_state.pop("cleaning_summary", None)
+                st.session_state.pop("eda_response", None)
 
     metadata = st.session_state.get("metadata")
     if metadata:
         render_metadata(metadata)
-        render_week2_workflow(metadata["run_id"])
+        render_week2_workflow(metadata)
     else:
         st.info("Create an analysis run to begin profiling and cleaning.")
 
@@ -120,12 +122,20 @@ def render_metadata(metadata: dict) -> None:
     st.dataframe(pd.DataFrame(metadata["preview"]), use_container_width=True)
 
 
-def render_week2_workflow(run_id: str) -> None:
+def render_week2_workflow(metadata: dict[str, Any]) -> None:
     """Render profiling and cleaning controls for one run."""
 
+    run_id = metadata["run_id"]
+
     st.divider()
-    profile_tab, plan_tab, clean_tab, next_tab = st.tabs(
-        ["Dataset Profile", "Cleaning Plan", "Safe Cleaning", "Week 3"]
+    profile_tab, plan_tab, clean_tab, eda_tab, next_tab = st.tabs(
+        [
+            "Dataset Profile",
+            "Cleaning Plan",
+            "Safe Cleaning",
+            "Exploratory Data Analysis",
+            "Next",
+        ]
     )
 
     with profile_tab:
@@ -163,16 +173,20 @@ def render_week2_workflow(run_id: str) -> None:
             )
             if summary:
                 st.session_state["cleaning_summary"] = summary
+                st.session_state.pop("eda_response", None)
 
         summary = st.session_state.get("cleaning_summary")
         if summary:
             render_cleaning_summary(summary)
 
+    with eda_tab:
+        render_eda_workflow(run_id=run_id, column_names=metadata.get("column_names", []))
+
     with next_tab:
-        st.subheader("Next: EDA generation and visualization")
+        st.subheader("Next: Hypothesis generation and modeling")
         st.write(
-            "Week 3 can build on `cleaned_data.csv` with deterministic charts, "
-            "EDA summaries, and richer analyst-style observations."
+            "Week 4 can build on the saved EDA artifacts to generate hypotheses "
+            "and prepare baseline modeling. Week 3 does not train models yet."
         )
 
 
@@ -323,12 +337,205 @@ def render_cleaning_summary(summary: dict[str, Any]) -> None:
             st.warning(warning)
 
 
-def post_json(path: str, spinner_message: str) -> dict[str, Any] | None:
+def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
+    """Render Week 3 EDA controls and outputs."""
+
+    st.subheader("Exploratory Data Analysis")
+    st.caption(
+        "EDA uses `cleaned_data.csv` when available and falls back to the raw upload with a warning."
+    )
+
+    target_options = ["No target column"] + list(column_names)
+    selected_target = st.selectbox(
+        "Optional target column",
+        options=target_options,
+        index=0,
+        key="eda_target_column",
+    )
+    target_column = None if selected_target == "No target column" else selected_target
+
+    with st.expander("Plot limits"):
+        max_numeric_plots = st.number_input(
+            "Numeric histograms",
+            min_value=0,
+            max_value=25,
+            value=10,
+            step=1,
+        )
+        max_categorical_plots = st.number_input(
+            "Categorical bar charts",
+            min_value=0,
+            max_value=25,
+            value=10,
+            step=1,
+        )
+        max_target_relationship_plots = st.number_input(
+            "Target relationship plots",
+            min_value=0,
+            max_value=15,
+            value=5,
+            step=1,
+        )
+
+    if st.button("Generate EDA", type="primary", key="generate_eda"):
+        payload = {
+            "target_column": target_column,
+            "max_numeric_plots": int(max_numeric_plots),
+            "max_categorical_plots": int(max_categorical_plots),
+            "max_target_relationship_plots": int(max_target_relationship_plots),
+        }
+        response = post_json(
+            f"/runs/{run_id}/eda",
+            "Generating EDA summaries and plots...",
+            payload=payload,
+        )
+        if response:
+            st.session_state["eda_response"] = response
+
+    eda_response = st.session_state.get("eda_response")
+    if eda_response:
+        render_eda_response(run_id, eda_response)
+
+
+def render_eda_response(run_id: str, eda_response: dict[str, Any]) -> None:
+    """Render EDA summary, findings, next steps, and generated plots."""
+
+    summary = eda_response["summary"]
+    findings = eda_response["findings"]
+
+    if summary["dataset_used"] == "raw":
+        st.warning("EDA was generated from the raw uploaded dataset.")
+    else:
+        st.success("EDA was generated from the cleaned dataset.")
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Dataset used", summary["dataset_used"])
+    metric_cols[1].metric("Rows", summary["rows"])
+    metric_cols[2].metric("Columns", summary["columns"])
+    metric_cols[3].metric("Duplicate rows", summary["duplicate_rows_remaining"])
+
+    st.write(f"Target column: `{summary.get('target_column') or 'None selected'}`")
+
+    type_counts = {
+        "numeric": len(summary.get("numeric_columns", [])),
+        "categorical": len(summary.get("categorical_columns", [])),
+        "boolean": len(summary.get("boolean_columns", [])),
+        "datetime": len(summary.get("datetime_columns", [])),
+        "text": len(summary.get("text_columns", [])),
+        "id": len(summary.get("id_columns", [])),
+    }
+    st.subheader("Column Type Summary")
+    st.dataframe(
+        pd.DataFrame(type_counts.items(), columns=["Type", "Count"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Remaining Missing Values")
+    remaining_missing = {
+        column: count
+        for column, count in summary.get("missing_values_remaining", {}).items()
+        if int(count) > 0
+    }
+    if remaining_missing:
+        st.dataframe(
+            pd.DataFrame(
+                remaining_missing.items(),
+                columns=["Column", "Missing values"],
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.success("No missing values remain in the EDA dataset.")
+
+    warnings = summary.get("warnings", [])
+    if warnings:
+        st.subheader("Warnings And Notes")
+        for warning in warnings:
+            st.warning(warning)
+
+    st.subheader("Key Findings")
+    render_findings_group("Univariate findings", findings.get("univariate_findings", []))
+    render_findings_group("Bivariate findings", findings.get("bivariate_findings", []))
+    render_findings_group("Target findings", findings.get("target_findings", []))
+    render_findings_group("Data quality notes", findings.get("data_quality_notes", []))
+
+    st.subheader("Recommended Next Steps")
+    for step in findings.get("recommended_next_steps", []):
+        st.write(f"- {step}")
+
+    st.subheader("Generated Plots")
+    plots = summary.get("generated_plots", [])
+    render_plot_section(
+        "Missing values",
+        _plots_by_category(plots, "missing_values"),
+        run_id,
+    )
+    render_plot_section(
+        "Numeric distributions",
+        _plots_by_category(plots, "numeric_distribution"),
+        run_id,
+    )
+    render_plot_section(
+        "Categorical distributions",
+        _plots_by_category(plots, "categorical_distribution"),
+        run_id,
+    )
+    render_plot_section(
+        "Correlation heatmap",
+        _plots_by_category(plots, "correlation_heatmap"),
+        run_id,
+    )
+    render_plot_section(
+        "Target relationships",
+        _plots_by_category(plots, "target_relationship"),
+        run_id,
+    )
+
+
+def render_findings_group(title: str, values: list[str]) -> None:
+    """Render a group of findings inside a compact expander."""
+
+    with st.expander(title, expanded=bool(values)):
+        if values:
+            for value in values:
+                st.write(f"- {value}")
+        else:
+            st.write("None")
+
+
+def render_plot_section(title: str, plots: list[dict[str, Any]], run_id: str) -> None:
+    """Render generated plot images in a two-column grid."""
+
+    with st.expander(title, expanded=bool(plots)):
+        if not plots:
+            st.write("No plot generated.")
+            return
+
+        image_columns = st.columns(2)
+        for index, plot in enumerate(plots):
+            with image_columns[index % 2]:
+                st.image(
+                    _plot_image_url(run_id, plot["path"]),
+                    caption=plot["label"],
+                    use_column_width=True,
+                )
+
+
+def post_json(
+    path: str,
+    spinner_message: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """POST to the backend and return JSON."""
 
     try:
         with st.spinner(spinner_message):
-            response = requests.post(f"{BACKEND_URL}{path}", timeout=120)
+            request_kwargs: dict[str, Any] = {"timeout": 120}
+            if payload is not None:
+                request_kwargs["json"] = payload
+            response = requests.post(f"{BACKEND_URL}{path}", **request_kwargs)
             response.raise_for_status()
     except requests.exceptions.ConnectionError:
         st.error(
@@ -349,6 +556,15 @@ def post_json(path: str, spinner_message: str) -> dict[str, Any] | None:
 
 def _shape_text(shape: list[int]) -> str:
     return f"{shape[0]} x {shape[1]}"
+
+
+def _plots_by_category(plots: list[dict[str, Any]], category: str) -> list[dict[str, Any]]:
+    return [plot for plot in plots if plot.get("category") == category]
+
+
+def _plot_image_url(run_id: str, plot_path: str) -> str:
+    path = plot_path.removeprefix("plots/")
+    return f"{BACKEND_URL}/runs/{quote(run_id, safe='')}/plots/{quote(path, safe='/')}"
 
 
 def _extract_error_detail(response: requests.Response) -> str:

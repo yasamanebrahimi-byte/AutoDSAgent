@@ -1,8 +1,6 @@
 # AutoDS Agent
 
-**AutoDS Agent: An Autonomous Multi-Agent Data Science Analyst** is a resume-quality AI side project designed to grow into a system that can ingest raw tabular datasets, profile them, clean them, run EDA, train baseline models, evaluate results, generate visualizations, and write final analysis reports.
-
-Week 2 adds deterministic dataset profiling and conservative cleaning. The project still does not use LLM API calls, paid credits, MLflow, LangGraph, databases, EDA plots, or model training.
+**AutoDS Agent: An Autonomous Multi-Agent Data Science Analyst** is designed to grow into a system that can ingest raw tabular datasets, profile them, clean them, run EDA, train baseline models, evaluate results, generate visualizations, and write final analysis reports.
 
 ## Long-Term Vision
 
@@ -55,6 +53,24 @@ The current implementation keeps those boundaries visible while using determinis
 - Streamlit buttons and views for profiling, cleaning planning, and safe cleaning
 - Tests for schema inference, profiling, and cleaning services
 
+### Week 3 Exploratory Data Analysis And Visualization
+
+- Deterministic EDA service that prefers `intermediate/cleaned_data.csv`
+- Raw dataset fallback when cleaned data is missing, with a clear warning
+- Structured EDA summary saved at `runs/<run_id>/intermediate/eda_summary.json`
+- Structured EDA findings saved at `runs/<run_id>/intermediate/eda_findings.json`
+- Markdown EDA report saved at `runs/<run_id>/reports/eda_summary.md`
+- Matplotlib plot generation under `runs/<run_id>/plots/`
+- Missing-values chart when missing values remain
+- Numeric histograms for useful numeric columns, limited by request options
+- Categorical top-value bar charts, limited by request options
+- Numeric correlation heatmap when at least two useful numeric columns exist
+- Optional target-column analysis with target distribution and relationship plots
+- Streamlit EDA section for target selection, summaries, findings, next steps, and plots
+- EDA agent boundary that wraps deterministic service logic
+- Tests for EDA analysis helpers, visualization helpers, and EDA service artifacts
+- No LLM API calls, paid credits, MLflow, LangGraph, or model training in Week 3
+
 ## Project Architecture
 
 ```text
@@ -73,16 +89,19 @@ autods-agent/
         runs.py
         profile.py
         cleaning.py
+        eda.py
       services/
         run_manager.py
         dataset_service.py
         profiling_service.py
         cleaning_service.py
+        eda_service.py
       schemas/
         run.py
         dataset.py
         profile.py
         cleaning.py
+        eda.py
 
     frontend/
       streamlit_app.py
@@ -102,7 +121,10 @@ autods-agent/
       schema_inference.py
       data_quality.py
       cleaning.py
+      eda_analysis.py
       file_utils.py
+      statistics_utils.py
+      visualization.py
 
     workflows/
       analysis_graph.py
@@ -120,6 +142,9 @@ autods-agent/
     test_schema_inference.py
     test_profiling_service.py
     test_cleaning_service.py
+    test_eda_analysis.py
+    test_visualization.py
+    test_eda_service.py
 ```
 
 ## Installation
@@ -193,10 +218,14 @@ The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKE
 9. Review duplicate handling, missing-value strategies, recommended drops, type conversions, and warnings.
 10. Click `Apply Safe Cleaning`.
 11. Review the cleaning summary and saved artifacts.
+12. Open `Exploratory Data Analysis`.
+13. Optionally select a target column.
+14. Click `Generate EDA`.
+15. Review dataset choice, column type summaries, remaining data quality notes, findings, recommended next steps, and generated plots.
 
 ## Run Artifacts
 
-After a successful Week 2 flow, a run can contain:
+After a successful Week 3 flow, a run can contain:
 
 ```text
 runs/<run_id>/
@@ -208,9 +237,20 @@ runs/<run_id>/
     cleaning_plan.json
     cleaned_data.csv
     cleaning_summary.json
+    eda_summary.json
+    eda_findings.json
   models/
   plots/
+    missing_values.png
+    numeric_distributions/
+      <column_name>_histogram.png
+    categorical_distributions/
+      <column_name>_bar.png
+    correlation_heatmap.png
+    target_relationships/
+      ...
   reports/
+    eda_summary.md
   logs/
 ```
 
@@ -229,6 +269,29 @@ Safe cleaning intentionally avoids aggressive decisions:
 - Recommends dropping constant columns and drops them only within the configured automatic drop limit.
 - Recommends review for very high missingness instead of automatically dropping those columns.
 - Preserves all actions and warnings in JSON artifacts.
+
+## Exploratory Data Analysis Rules
+
+EDA uses a production-minded artifact flow rather than notebook state:
+
+- Uses `runs/<run_id>/intermediate/cleaned_data.csv` when it exists.
+- Falls back to `runs/<run_id>/input/raw_data.csv` when cleaned data is missing.
+- Adds this warning on fallback: `Cleaned dataset was not found. EDA was generated from the raw uploaded dataset.`
+- Saves machine-readable summaries and findings for later agents.
+- Saves static Matplotlib PNG plots for the UI and reports.
+- Limits numeric, categorical, and target relationship plots to avoid chart sprawl.
+- Skips ID-like columns for automatic distribution plots.
+- Does not train models or infer causality.
+
+Optional target-column support is available through the API and Streamlit UI. When a target is selected, the service validates that it exists, generates target distribution plots, adds simple target findings, and saves relationship plots under `plots/target_relationships/`. If no target is selected, general EDA still runs and target-specific analysis is skipped.
+
+Generated plot types:
+
+- `missing_values.png`: bar chart of columns with remaining missing values.
+- `numeric_distributions/*.png`: histograms for useful numeric columns.
+- `categorical_distributions/*.png`: top-category bar charts for categorical and boolean columns.
+- `correlation_heatmap.png`: numeric correlation heatmap when enough numeric columns exist.
+- `target_relationships/*.png`: target distribution and simple feature-target relationship plots when a target is provided.
 
 ## API Endpoints
 
@@ -272,18 +335,58 @@ Ensures a cleaning plan exists, applies safe cleaning, saves `cleaned_data.csv` 
 
 Returns an existing cleaning summary or `404`.
 
+### `POST /runs/{run_id}/eda`
+
+Generates EDA artifacts and returns the summary plus findings. The request body is optional.
+
+Example request body:
+
+```json
+{
+  "target_column": "SalePrice",
+  "max_numeric_plots": 10,
+  "max_categorical_plots": 10,
+  "max_target_relationship_plots": 5
+}
+```
+
+Saved artifacts:
+
+- `intermediate/eda_summary.json`
+- `intermediate/eda_findings.json`
+- `reports/eda_summary.md`
+- `plots/**/*.png`
+
+### `GET /runs/{run_id}/eda`
+
+Returns existing EDA summary and findings or `404` if EDA has not been generated.
+
+### `GET /runs/{run_id}/plots`
+
+Returns generated plot files with relative paths, labels, and categories.
+
+### `GET /runs/{run_id}/plots/{plot_path}`
+
+Returns one generated PNG plot. This is used by the Streamlit UI to display backend-generated images.
+
 ## Run Tests
 
 ```bash
 pytest
 ```
 
-## Week 3 Direction
+If the local default temp directory has permission issues on Windows, this equivalent command keeps Pytest scratch files inside the workspace:
 
-Recommended Week 3 work:
+```bash
+pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_tmp_cache
+```
 
-- Add deterministic EDA summaries and visualizations.
-- Use `cleaned_data.csv` as the default input for EDA when available.
-- Save plots under `runs/<run_id>/plots/`.
-- Save EDA artifacts under `runs/<run_id>/intermediate/`.
-- Keep model training, MLflow, LangGraph, and LLM calls out until later weeks.
+## Week 4 Direction
+
+Recommended Week 4 work:
+
+- Generate deterministic hypothesis candidates from `profile.json`, `cleaning_summary.json`, `eda_summary.json`, and `eda_findings.json`.
+- Prepare target-aware feature selection guidance.
+- Add baseline modeling only after the Week 3 EDA artifacts are stable.
+- Keep correlation findings framed as relationships, not causal claims.
+- Continue avoiding LLM API calls and paid credits until the project intentionally adds them.
