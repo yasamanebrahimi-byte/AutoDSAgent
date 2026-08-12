@@ -1,4 +1,4 @@
-"""Deterministic Week 5 analysis state machine.
+"""Deterministic Week 6 analysis state machine.
 
 The project can swap this for LangGraph or an LLM-backed agent runtime later.
 For now, the graph is intentionally local, auditable, and dependency-free.
@@ -13,11 +13,13 @@ from app.agents.cleaning_agent import CleaningAgent
 from app.agents.eda_agent import EDAAgent
 from app.agents.modeling_agent import ModelingAgent
 from app.agents.profiler_agent import ProfilerAgent
+from app.agents.report_agent import ReportAgent
 from app.backend.services.cleaning_service import CleaningService
 from app.backend.services.eda_service import EDAService
 from app.backend.services.evaluation_service import EvaluationService
 from app.backend.services.modeling_service import ModelingService
 from app.backend.services.profiling_service import ProfilingService
+from app.backend.services.report_service import ReportService
 from app.backend.services.run_manager import RunManager
 from app.tools.approval import cleaning_approval_decision, modeling_approval_decision
 from app.tools.trace_logger import TraceLogger
@@ -43,6 +45,7 @@ from app.workflows.workflow_steps import (
     EDA_STEP,
     MODELING_STEP,
     PROFILE_STEP,
+    REPORT_STEP,
 )
 
 
@@ -59,6 +62,7 @@ class AnalysisGraph:
         cleaning_agent: CleaningAgent | None = None,
         eda_agent: EDAAgent | None = None,
         modeling_agent: ModelingAgent | None = None,
+        report_agent: ReportAgent | None = None,
     ) -> None:
         self.run_manager = run_manager or RunManager()
         self.trace_logger = trace_logger or TraceLogger(self.run_manager)
@@ -74,11 +78,13 @@ class AnalysisGraph:
             run_manager=self.run_manager,
             evaluation_service=evaluation_service,
         )
+        report_service = ReportService(self.run_manager)
 
         self.profiler_agent = profiler_agent or ProfilerAgent(profiling_service)
         self.cleaning_agent = cleaning_agent or CleaningAgent(cleaning_service)
         self.eda_agent = eda_agent or EDAAgent(eda_service)
         self.modeling_agent = modeling_agent or ModelingAgent(modeling_service)
+        self.report_agent = report_agent or ReportAgent(report_service)
 
     def run_until_pause_or_complete(self, state: dict[str, Any]) -> dict[str, Any]:
         """Run pending steps until the workflow completes, fails, or needs approval."""
@@ -217,6 +223,8 @@ class AnalysisGraph:
                 updated_state = self.eda_agent.run(state)
             elif step == MODELING_STEP:
                 updated_state = self.modeling_agent.run(state)
+            elif step == REPORT_STEP:
+                updated_state = self.report_agent.run(state)
             else:
                 raise ValueError(f"Unknown workflow step: {step}")
         except Exception as exc:
@@ -412,6 +420,8 @@ class AnalysisGraph:
             return self.eda_agent.name
         if step == MODELING_STEP:
             return self.modeling_agent.name
+        if step == REPORT_STEP:
+            return self.report_agent.name
         return self.orchestrator_name
 
 
@@ -419,6 +429,6 @@ def build_analysis_graph(
     run_manager: RunManager | None = None,
     trace_logger: TraceLogger | None = None,
 ) -> AnalysisGraph:
-    """Build the deterministic Week 5 analysis graph."""
+    """Build the deterministic Week 6 analysis graph."""
 
     return AnalysisGraph(run_manager=run_manager, trace_logger=trace_logger)

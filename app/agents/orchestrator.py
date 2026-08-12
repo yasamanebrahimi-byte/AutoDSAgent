@@ -1,4 +1,4 @@
-"""Coordinator for the deterministic Week 5 analysis workflow."""
+"""Coordinator for the deterministic analysis workflow."""
 
 from __future__ import annotations
 

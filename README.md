@@ -110,6 +110,23 @@ The current implementation keeps those boundaries visible while using determinis
 - Tests for workflow state, orchestration, approval gates, retries, trace logging, and workflow API routes
 - No LLM API calls, paid credits, MLflow, LangGraph dependency, or final full analyst report generation in Week 5
 
+### Week 6 Final Report Generation Layer
+
+- Deterministic report service that reads saved run artifacts and writes analyst-quality Markdown reports
+- Full final analysis report saved at `runs/<run_id>/reports/final_report.md`
+- Concise executive summary saved at `runs/<run_id>/reports/executive_summary.md`
+- Technical methodology summary saved at `runs/<run_id>/reports/technical_summary.md`
+- Limitations and next steps report saved at `runs/<run_id>/reports/limitations.md`
+- Report metadata saved at `runs/<run_id>/intermediate/report_metadata.json`
+- Report index saved at `runs/<run_id>/reports/report_index.json`
+- Optional lightweight HTML export when requested
+- Partial-report support when EDA, modeling, workflow, or trace artifacts are missing
+- Report API endpoints for generation, metadata/index retrieval, content preview, and download
+- Report agent integrated as the final autonomous workflow step after optional modeling
+- Streamlit `Final Reports` section with generation controls, metadata, previews, index, and download buttons
+- Tests for report builders, report service, report agent, API routes, and workflow integration
+- No LLM API calls, paid credits, MLflow, or cloud deployment in Week 6
+
 ## Project Architecture
 
 ```text
@@ -130,6 +147,7 @@ autods-agent/
         cleaning.py
         eda.py
         modeling.py
+        reports.py
         workflow.py
       services/
         run_manager.py
@@ -139,6 +157,7 @@ autods-agent/
         eda_service.py
         modeling_service.py
         evaluation_service.py
+        report_service.py
         workflow_service.py
       schemas/
         run.py
@@ -147,6 +166,7 @@ autods-agent/
         cleaning.py
         eda.py
         modeling.py
+        reports.py
         workflow.py
 
     frontend/
@@ -172,6 +192,9 @@ autods-agent/
       preprocessing.py
       modeling.py
       evaluation.py
+      report_sections.py
+      report_builder.py
+      report_export.py
       model_persistence.py
       approval.py
       trace_logger.py
@@ -204,6 +227,10 @@ autods-agent/
     test_modeling_tools.py
     test_modeling_service.py
     test_evaluation_service.py
+    test_report_builder.py
+    test_report_service.py
+    test_report_agent.py
+    test_report_workflow_integration.py
     test_workflow_state.py
     test_workflow_service.py
     test_orchestrator.py
@@ -284,13 +311,15 @@ The frontend expects the backend at `http://localhost:8000` unless `AUTODS_BACKE
 11. If cleaning approval is required, review the reason and choose `Approve and Continue` or `Reject Step`.
 12. After cleaning is approved or skipped, the workflow generates EDA.
 13. If a target column is provided and modeling approval is required, review the modeling gate and approve or reject it.
-14. Review the final workflow status, step table, generated artifacts, retry controls, and agent trace.
+14. The workflow generates final Markdown reports from whichever artifacts are available.
+15. Review the final workflow status, step table, generated artifacts, report previews, retry controls, and agent trace.
 
 The original manual profiling, cleaning, EDA, and modeling controls remain available under `Advanced Manual Controls`.
+The `Final Reports` section can also generate reports manually for a partially completed run.
 
 ## Run Artifacts
 
-After a successful Week 5 workflow, a run can contain:
+After a successful Week 6 workflow, a run can contain:
 
 ```text
 runs/<run_id>/
@@ -306,6 +335,7 @@ runs/<run_id>/
     eda_findings.json
     modeling_summary.json
     evaluation_summary.json
+    report_metadata.json
   models/
     baseline_model.pkl
     best_model.pkl
@@ -327,6 +357,12 @@ runs/<run_id>/
       feature_importance.png
   reports/
     eda_summary.md
+    final_report.md
+    executive_summary.md
+    technical_summary.md
+    limitations.md
+    report_index.json
+    final_report.html
   logs/
     workflow_state.json
     agent_trace.json
@@ -337,15 +373,16 @@ Some evaluation plots are task-specific, so a run will only contain the plots th
 
 ## Autonomous Workflow Orchestration
 
-Week 5 uses a local deterministic state machine in `app/workflows/analysis_graph.py`. It deliberately avoids paid LLM calls and keeps future extension points open for LangGraph, OpenAI Agents SDK, or tool-calling agents.
+Week 6 uses a local deterministic state machine in `app/workflows/analysis_graph.py`. It deliberately avoids paid LLM calls and keeps future extension points open for LangGraph, OpenAI Agents SDK, or tool-calling agents.
 
 Canonical workflow order:
 
 ```text
-profile -> cleaning_plan -> cleaning -> eda -> modeling
+profile -> cleaning_plan -> cleaning -> eda -> modeling -> report
 ```
 
 The workflow saves state after each transition. Each step records attempts, timestamps, outputs, errors, and approval metadata. Required steps fail the workflow when they error; optional modeling is skipped clearly when no target column is provided.
+The report step runs after EDA and optional modeling. If modeling is skipped, the report still generates and clearly marks modeling and evaluation sections as unavailable.
 
 Approval gates:
 
@@ -362,6 +399,7 @@ Retry behavior:
 - Retry events are appended to `agent_trace.json`.
 
 Trace events include workflow start/completion, step start/completion/failure, approval required/granted/rejected, retries, and skipped steps.
+Report generation adds `ReportAgent` events and saves final report paths into workflow state.
 
 ## Conservative Cleaning Rules
 
@@ -428,6 +466,33 @@ Task inference follows simple, deterministic rules:
 - The API and UI can override task type with `regression` or `classification`.
 
 Baseline models set a plain reference point. Candidate models must beat the baseline to show useful predictive lift, but the baseline can remain the best model if candidates do not improve the primary metric.
+
+## Final Report Generation
+
+Week 6 adds a deterministic reporting layer in `app/backend/services/report_service.py`.
+It loads the JSON artifacts already saved under a run folder, records which source artifacts were used or missing, and writes polished Markdown reports under `runs/<run_id>/reports/`.
+
+Generated report artifacts:
+
+- `reports/final_report.md`: full end-to-end analysis report
+- `reports/executive_summary.md`: short nontechnical summary
+- `reports/technical_summary.md`: preprocessing, EDA, modeling, evaluation, and artifact methodology
+- `reports/limitations.md`: limitations, skipped steps, warnings, and next steps
+- `intermediate/report_metadata.json`: report status, generated sections, skipped sections, warnings, and source artifact audit
+- `reports/report_index.json`: list of generated report files and descriptions
+- `reports/final_report.html`: optional simple HTML export when requested
+
+Reports can be `completed` or `partial`.
+Partial reports are expected when optional or downstream artifacts are missing, such as when modeling is skipped because no target column was selected.
+Unavailable sections are included with explicit explanations instead of invented analysis.
+
+The report text follows deterministic interpretation rules:
+
+- EDA findings are described as associations, not causal claims.
+- Modeling metrics are included only when saved modeling and evaluation artifacts exist.
+- Failed models, skipped steps, missing artifacts, and warnings are surfaced.
+- Limitations are always included.
+- Week 6 does not use LLM API calls, paid credits, MLflow, or cloud deployment.
 
 ## API Endpoints
 
@@ -543,6 +608,45 @@ Returns an existing evaluation summary or `404` if models have not been trained.
 
 Returns saved model artifacts and model result files for one run.
 
+### `POST /runs/{run_id}/reports/generate`
+
+Generates final reports from available run artifacts.
+
+Example request body:
+
+```json
+{
+  "include_html": false,
+  "force_regenerate": true
+}
+```
+
+Saved artifacts:
+
+- `reports/final_report.md`
+- `reports/executive_summary.md`
+- `reports/technical_summary.md`
+- `reports/limitations.md`
+- `intermediate/report_metadata.json`
+- `reports/report_index.json`
+- `reports/final_report.html` when `include_html` is `true`
+
+The response returns report metadata plus the report index.
+
+### `GET /runs/{run_id}/reports`
+
+Returns `report_metadata.json` and `report_index.json`.
+If reports have not been generated yet, returns `404`.
+
+### `GET /runs/{run_id}/reports/{report_name}`
+
+Returns Markdown content for one report.
+Supported report names are `final_report`, `executive_summary`, `technical_summary`, and `limitations`.
+
+### `GET /runs/{run_id}/reports/download/{report_name}`
+
+Returns the selected Markdown report as a downloadable file.
+
 ### `POST /runs/{run_id}/workflow/start`
 
 Starts or restarts the autonomous deterministic workflow for an existing run.
@@ -558,7 +662,7 @@ Example request body:
 }
 ```
 
-The workflow runs until it completes, fails, or reaches a human approval gate. It returns `workflow_state.json` as structured JSON.
+The workflow runs until it completes, fails, or reaches a human approval gate. It returns `workflow_state.json` as structured JSON. In Week 6, successful workflows include a final report step.
 
 ### `GET /runs/{run_id}/workflow/state`
 
@@ -613,14 +717,12 @@ $env:TMP=$env:TEMP
 pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
 ```
 
-## Week 6 Direction
+## Week 7 Direction
 
-Recommended Week 6 work:
+Recommended Week 7 work:
 
-- Generate the first full analyst report from saved deterministic artifacts.
-- Add a report agent that reads workflow state, trace logs, EDA summaries, and modeling summaries.
-- Keep report generation auditable and tied to artifact paths.
-- Add optional LLM interfaces only as clean placeholders unless API usage is intentionally enabled.
-- Consider MLflow only when experiment tracking becomes a clear requirement.
-- Keep correlation findings framed as relationships, not causal claims.
-- Continue avoiding paid LLM calls until the project intentionally adds them.
+- Add MLflow or another lightweight experiment tracking layer when model runs need comparison history.
+- Polish local packaging, Docker setup, and portfolio-ready demo instructions.
+- Add richer report styling or optional LLM-assisted narrative only behind explicit user configuration.
+- Expand leakage checks, validation strategies, and target-specific modeling guardrails.
+- Keep raw data preservation, deterministic fallbacks, and missing-artifact transparency intact.

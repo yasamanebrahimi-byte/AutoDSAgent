@@ -25,7 +25,8 @@ def main() -> None:
     st.write(
         "Upload a CSV, profile the dataset, generate a conservative cleaning plan, "
         "apply safe cleaning, generate deterministic EDA, and train lightweight "
-        "baseline models while preserving the raw input."
+        "baseline models while preserving the raw input. Then generate final "
+        "Markdown reports from the saved artifacts."
     )
     st.caption(f"Backend: {BACKEND_URL}")
 
@@ -42,13 +43,15 @@ def main() -> None:
                 st.session_state.pop("eda_response", None)
                 st.session_state.pop("modeling_response", None)
                 st.session_state.pop("workflow_state", None)
+                st.session_state.pop("reports_response", None)
 
     metadata = st.session_state.get("metadata")
     if metadata:
         render_metadata(metadata)
         render_autonomous_workflow(metadata)
-        st.header("Advanced Manual Controls")
-        render_week2_workflow(metadata)
+        render_final_reports(metadata)
+        with st.expander("Advanced Manual Controls", expanded=False):
+            render_week2_workflow(metadata)
     else:
         st.info("Create an analysis run to begin profiling and cleaning.")
 
@@ -152,6 +155,7 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             )
             if profile:
                 st.session_state["profile"] = profile
+                st.session_state.pop("reports_response", None)
 
         profile = st.session_state.get("profile")
         if profile:
@@ -165,6 +169,7 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
             )
             if plan:
                 st.session_state["cleaning_plan"] = plan
+                st.session_state.pop("reports_response", None)
 
         plan = st.session_state.get("cleaning_plan")
         if plan:
@@ -181,6 +186,7 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
                 st.session_state["cleaning_summary"] = summary
                 st.session_state.pop("eda_response", None)
                 st.session_state.pop("modeling_response", None)
+                st.session_state.pop("reports_response", None)
 
         summary = st.session_state.get("cleaning_summary")
         if summary:
@@ -196,15 +202,15 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
         )
 
     with next_tab:
-        st.subheader("Next: Agent orchestration, retries, and human approval gates")
+        st.subheader("Next: Final report generation")
         st.write(
-            "Week 5 can connect these deterministic services through an agent workflow "
-            "with retry behavior and user review steps. Week 4 does not use LLM calls."
+            "Week 6 turns the saved artifacts into final Markdown reports. "
+            "The reports remain deterministic and do not use LLM calls."
         )
 
 
 def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
-    """Render Week 5 autonomous workflow controls and state."""
+    """Render Week 6 autonomous workflow controls and state."""
 
     run_id = metadata["run_id"]
     column_names = list(metadata.get("column_names", []))
@@ -212,7 +218,7 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
     st.divider()
     st.header("Autonomous Workflow")
     st.caption(
-        "Runs the deterministic Week 1-4 services through an auditable agent workflow. "
+        "Runs deterministic analysis services through an auditable agent workflow. "
         "No LLM API calls or paid credits are used."
     )
 
@@ -263,6 +269,7 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
             )
             if state:
                 st.session_state["workflow_state"] = state
+                st.session_state.pop("reports_response", None)
 
     with action_cols[1]:
         if st.button("Refresh Workflow"):
@@ -275,6 +282,190 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
         render_workflow_state(run_id, state)
     else:
         st.info("Start the autonomous workflow to profile, clean, analyze, and optionally model this run.")
+
+
+def render_final_reports(metadata: dict[str, Any]) -> None:
+    """Render Week 6 final report controls, previews, and downloads."""
+
+    run_id = metadata["run_id"]
+
+    st.divider()
+    st.header("Final Reports")
+    st.caption(
+        "Generate deterministic Markdown reports from the artifacts saved for this run. "
+        "No LLM API calls or paid credits are used."
+    )
+
+    control_cols = st.columns([1, 1, 2])
+    with control_cols[0]:
+        include_html = st.checkbox(
+            "Create simple HTML export",
+            value=False,
+            key="reports_include_html",
+        )
+    with control_cols[1]:
+        force_regenerate = st.checkbox(
+            "Regenerate reports",
+            value=True,
+            key="reports_force_regenerate",
+        )
+
+    action_cols = st.columns([1, 1, 4])
+    with action_cols[0]:
+        if st.button("Generate Reports", type="primary", key="generate_reports"):
+            response = post_json(
+                f"/runs/{run_id}/reports/generate",
+                "Generating final reports...",
+                payload={
+                    "include_html": bool(include_html),
+                    "force_regenerate": bool(force_regenerate),
+                },
+            )
+            if response:
+                st.session_state["reports_response"] = response
+
+    with action_cols[1]:
+        if st.button("Refresh Reports", key="refresh_reports"):
+            response = get_json(f"/runs/{run_id}/reports", show_error=False)
+            if response:
+                st.session_state["reports_response"] = response
+            else:
+                st.info("Reports have not been generated for this run yet.")
+
+    reports_response = st.session_state.get("reports_response")
+    if not reports_response:
+        reports_response = get_json(f"/runs/{run_id}/reports", show_error=False)
+        if reports_response:
+            st.session_state["reports_response"] = reports_response
+
+    if not reports_response:
+        st.info("Generate reports after profiling, cleaning, EDA, or modeling artifacts are available.")
+        return
+
+    render_reports_response(run_id, reports_response)
+
+
+def render_reports_response(run_id: str, response: dict[str, Any]) -> None:
+    """Render report metadata, index, previews, and downloads."""
+
+    metadata = response.get("metadata", {})
+    index = response.get("index", {})
+
+    render_report_metadata_summary(metadata)
+    render_report_index(index)
+
+    report_tabs = st.tabs(
+        [
+            "Executive Summary",
+            "Final Report",
+            "Technical Summary",
+            "Limitations",
+            "Downloads",
+        ]
+    )
+    preview_specs = [
+        ("executive_summary", "Executive Summary"),
+        ("final_report", "Final Report"),
+        ("technical_summary", "Technical Summary"),
+        ("limitations", "Limitations"),
+    ]
+    for tab, (report_name, label) in zip(report_tabs[:4], preview_specs):
+        with tab:
+            content = get_report_content(run_id, report_name)
+            if content:
+                st.markdown(content)
+            else:
+                st.info(f"{label} is not available yet.")
+
+    with report_tabs[4]:
+        render_report_downloads(run_id, preview_specs)
+
+
+def render_report_metadata_summary(metadata: dict[str, Any]) -> None:
+    """Render compact report metadata."""
+
+    status = metadata.get("report_status", "unknown")
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Report status", status)
+    metric_cols[1].metric("Reports", len(metadata.get("reports_generated", [])))
+    metric_cols[2].metric("Sources used", len(metadata.get("source_artifacts_used", [])))
+    metric_cols[3].metric("Sources missing", len(metadata.get("source_artifacts_missing", [])))
+
+    if status == "partial":
+        st.warning("This is a partial report. Missing or skipped sections are listed below.")
+    elif status == "completed":
+        st.success("Reports were generated from the available analysis artifacts.")
+
+    detail_tabs = st.tabs(["Sources", "Sections", "Warnings"])
+    with detail_tabs[0]:
+        source_cols = st.columns(2)
+        with source_cols[0]:
+            st.subheader("Used")
+            st.write(_bullet_text(metadata.get("source_artifacts_used", [])))
+        with source_cols[1]:
+            st.subheader("Missing")
+            st.write(_bullet_text(metadata.get("source_artifacts_missing", [])))
+
+    with detail_tabs[1]:
+        section_cols = st.columns(2)
+        with section_cols[0]:
+            st.subheader("Generated")
+            st.write(_bullet_text(metadata.get("sections_generated", [])))
+        with section_cols[1]:
+            st.subheader("Skipped")
+            st.write(_bullet_text(metadata.get("sections_skipped", [])))
+
+    with detail_tabs[2]:
+        warnings = metadata.get("warnings", [])
+        if warnings:
+            for warning in warnings:
+                st.warning(warning)
+        else:
+            st.write("No report warnings were saved.")
+
+
+def render_report_index(index: dict[str, Any]) -> None:
+    """Render generated report index."""
+
+    reports = index.get("reports", [])
+    with st.expander("Report Index", expanded=False):
+        if reports:
+            st.dataframe(pd.DataFrame(reports), use_container_width=True, hide_index=True)
+        else:
+            st.write("No report files are listed yet.")
+
+
+def render_report_downloads(
+    run_id: str,
+    report_specs: list[tuple[str, str]],
+) -> None:
+    """Render Markdown download buttons for generated reports."""
+
+    st.subheader("Download Markdown Reports")
+    for report_name, label in report_specs:
+        content = get_report_content(run_id, report_name)
+        if not content:
+            st.write(f"{label}: unavailable")
+            continue
+        st.download_button(
+            label=f"Download {label}",
+            data=content,
+            file_name=f"{report_name}.md",
+            mime="text/markdown",
+            key=f"download_{run_id}_{report_name}",
+        )
+
+
+def get_report_content(run_id: str, report_name: str) -> str | None:
+    """Load one report's Markdown content."""
+
+    response = get_json(
+        f"/runs/{run_id}/reports/{report_name}",
+        show_error=False,
+    )
+    if not isinstance(response, dict):
+        return None
+    return response.get("content")
 
 
 def render_workflow_state(run_id: str, state: dict[str, Any]) -> None:
@@ -433,6 +624,15 @@ def render_workflow_artifacts(run_id: str, state: dict[str, Any]) -> None:
                     use_container_width=True,
                     hide_index=True,
                 )
+
+    if artifacts.get("final_report") or artifacts.get("report_index"):
+        with st.expander("Final Reports", expanded=False):
+            reports_response = get_json(f"/runs/{run_id}/reports", show_error=False)
+            if reports_response:
+                render_report_metadata_summary(reports_response.get("metadata", {}))
+                render_report_index(reports_response.get("index", {}))
+            else:
+                st.write("Report metadata is not available yet.")
 
 
 def render_workflow_trace(run_id: str) -> None:
@@ -669,6 +869,7 @@ def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
         )
         if response:
             st.session_state["eda_response"] = response
+            st.session_state.pop("reports_response", None)
 
     eda_response = st.session_state.get("eda_response")
     if eda_response:
@@ -723,6 +924,7 @@ def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
         )
         if response:
             st.session_state["modeling_response"] = response
+            st.session_state.pop("reports_response", None)
 
     modeling_response = st.session_state.get("modeling_response")
     if modeling_response:
@@ -1091,6 +1293,12 @@ def _plots_by_category(plots: list[dict[str, Any]], category: str) -> list[dict[
 def _plot_image_url(run_id: str, plot_path: str) -> str:
     path = plot_path.removeprefix("plots/")
     return f"{BACKEND_URL}/runs/{quote(run_id, safe='')}/plots/{quote(path, safe='/')}"
+
+
+def _bullet_text(values: list[Any]) -> str:
+    if not values:
+        return "None"
+    return "\n".join(f"- `{value}`" for value in values)
 
 
 def _extract_error_detail(response: requests.Response) -> str:
