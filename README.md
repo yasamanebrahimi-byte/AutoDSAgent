@@ -1,6 +1,6 @@
 # AutoDS Agent: Autonomous Data Science Analyst
 
-AutoDS Agent is a portfolio-ready autonomous analyst for tabular CSV datasets. It preserves raw data, profiles the dataset, creates a conservative cleaning plan, performs EDA, trains baseline and candidate machine learning models, evaluates results, tracks the workflow, and generates analyst-style Markdown reports.
+AutoDS Agent is a autonomous analyst for tabular CSV datasets. It preserves raw data, profiles the dataset, creates a conservative cleaning plan, performs EDA, trains baseline and candidate machine learning models, evaluates results, tracks the workflow, and generates analyst-style Markdown reports.
 
 The project is deterministic by default and does not require paid LLM API calls.
 
@@ -29,6 +29,13 @@ Run a complete demo without starting the web app:
 ```bash
 python scripts/run_full_demo.py --dataset classification
 python scripts/run_full_demo.py --dataset regression
+```
+
+If `python` points to an older global install on Windows, run the project
+environment directly:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_full_demo.py --dataset classification
 ```
 
 Then open the printed final report path, usually:
@@ -191,10 +198,10 @@ Docker Compose mounts `runs/` and `mlruns/` so local artifacts persist between r
 
 Bundled synthetic datasets live in `examples/sample_data/`.
 
-| Dataset | File | Target | Task |
-| --- | --- | --- | --- |
-| Synthetic Customer Churn | `classification_churn.csv` | `churn` | Classification |
-| Synthetic Housing | `regression_housing.csv` | `sale_price` | Regression |
+| Dataset                  | File                       | Target       | Task           |
+| ------------------------ | -------------------------- | ------------ | -------------- |
+| Synthetic Customer Churn | `classification_churn.csv` | `churn`      | Classification |
+| Synthetic Housing        | `regression_housing.csv`   | `sale_price` | Regression     |
 
 In Streamlit, use `Try A Sample Dataset` to load either dataset. The UI sets the recommended target and task type for a smoother demo.
 
@@ -205,6 +212,13 @@ The full demo runner uses internal services and the autonomous workflow. It does
 ```bash
 python scripts/run_full_demo.py --dataset classification
 python scripts/run_full_demo.py --dataset regression
+```
+
+If `python` points to an older global install on Windows, run the project
+environment directly:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_full_demo.py --dataset classification
 ```
 
 Optional:
@@ -391,11 +405,7 @@ autods-agent/
 
 ## Resume Highlights
 
-- Built an autonomous multi-agent data science analyst with FastAPI, Streamlit, pandas, scikit-learn, optional MLflow, Docker Compose, and Pytest.
-- Designed an artifact-first workflow for profiling, conservative cleaning, EDA, modeling, evaluation, workflow tracing, and deterministic report generation.
-- Implemented human approval gates, retry logic, persistent workflow state, and agent trace logs for transparent autonomous analysis runs.
-- Packaged the project with sample datasets, full-demo scripts, smoke tests, CI, technical docs, recruiter materials, and interview talking points.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+- Built an autonomous data science analysis platform with FastAPI, Streamlit, Docker Compose, Pydantic, and Pytest, turning raw CSV uploads into reproducible run folders with saved artifacts and reports.
+- Designed modular services for upload, profiling, cleaning, EDA, modeling, evaluation, reporting, and workflow orchestration with clear API boundaries.
+- Implemented persistent workflow state, retry handling, human approval gates, and trace logs to make automated analysis runs auditable and recoverable.
+- Packaged the project for portfolio use with sample datasets, full-demo scripts, smoke tests, CI, Docker Compose, technical documentation, recruiter walkthroughs, and interview talking points.
