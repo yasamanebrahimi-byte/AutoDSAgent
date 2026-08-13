@@ -5,6 +5,7 @@ from app.tools.visualization import (
     create_correlation_heatmap,
     create_missing_values_plot,
     create_numeric_histogram,
+    safe_filename,
 )
 
 
@@ -27,7 +28,8 @@ def test_numeric_histogram_is_created_for_numeric_column(tmp_path):
     assert path is not None
     assert path.exists()
     assert path.parent == output_dir
-    assert path.name == "age_histogram.png"
+    assert path.name.startswith("age_")
+    assert path.name.endswith("_histogram.png")
 
 
 def test_categorical_bar_chart_is_created_for_categorical_column(tmp_path):
@@ -39,7 +41,8 @@ def test_categorical_bar_chart_is_created_for_categorical_column(tmp_path):
     assert path is not None
     assert path.exists()
     assert path.parent == output_dir
-    assert path.name == "city_bar.png"
+    assert path.name.startswith("city_")
+    assert path.name.endswith("_bar.png")
 
 
 def test_correlation_heatmap_is_created_with_enough_numeric_columns(tmp_path):
@@ -55,3 +58,14 @@ def test_correlation_heatmap_is_created_with_enough_numeric_columns(tmp_path):
     assert path is not None
     assert path.exists()
     assert path.name == "correlation_heatmap.png"
+
+
+def test_safe_filename_is_collision_resistant_for_similar_column_names():
+    filenames = {
+        safe_filename("a/b", "_histogram"),
+        safe_filename("a b", "_histogram"),
+        safe_filename("a-b", "_histogram"),
+    }
+
+    assert len(filenames) == 3
+    assert all(filename.endswith("_histogram") for filename in filenames)

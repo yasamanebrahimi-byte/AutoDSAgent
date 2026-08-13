@@ -58,7 +58,7 @@ def main() -> None:
         layout="wide",
     )
 
-    st.title("AutoDS Agent: Autonomous Data Science Analyst")
+    st.title("AutoDS Agent: Automated Data Science Workflow")
     st.caption(f"Backend: {BACKEND_URL}")
     render_project_overview()
     render_runtime_status()
@@ -69,7 +69,7 @@ def main() -> None:
         render_metadata(metadata)
         with st.expander("Advanced Manual Controls", expanded=False):
             render_week2_workflow(metadata)
-        render_autonomous_workflow(metadata)
+        render_automated_workflow(metadata)
         render_final_reports(metadata)
     else:
         st.info("Create an analysis run from an upload or sample dataset to begin.")
@@ -371,19 +371,19 @@ def render_week2_workflow(metadata: dict[str, Any]) -> None:
     with next_tab:
         st.subheader("Next: Final report generation")
         st.write(
-            "Week 6 turns the saved artifacts into final Markdown reports. "
+            "Final reports are generated from the saved workflow artifacts. "
             "The reports remain deterministic and do not use LLM calls."
         )
 
 
-def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
-    """Render Week 6 autonomous workflow controls and state."""
+def render_automated_workflow(metadata: dict[str, Any]) -> None:
+    """Render automated workflow controls and state."""
 
     run_id = metadata["run_id"]
     column_names = list(metadata.get("column_names", []))
 
     st.divider()
-    st.header("Autonomous Workflow")
+    st.header("Automated Workflow")
     st.caption(
         "Runs deterministic analysis services through an auditable agent workflow. "
         "No LLM API calls or paid credits are used."
@@ -431,7 +431,7 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
 
     action_cols = st.columns([1, 1, 4])
     with action_cols[0]:
-        if st.button("Start Autonomous Workflow", type="primary"):
+        if st.button("Start Automated Workflow", type="primary"):
             payload = {
                 "target_column": target_column,
                 "task_type": None
@@ -442,7 +442,7 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
             }
             state = post_json(
                 f"/runs/{run_id}/workflow/start",
-                "Running autonomous workflow...",
+                "Running automated workflow...",
                 payload=payload,
             )
             if state:
@@ -459,11 +459,11 @@ def render_autonomous_workflow(metadata: dict[str, Any]) -> None:
     if state:
         render_workflow_state(run_id, state)
     else:
-        st.info("Start the autonomous workflow to profile, clean, analyze, and optionally model this run.")
+        st.info("Start the automated workflow to profile, clean, analyze, and optionally model this run.")
 
 
 def render_final_reports(metadata: dict[str, Any]) -> None:
-    """Render Week 6 final report controls, previews, and downloads."""
+    """Render final report controls, previews, and downloads."""
 
     run_id = metadata["run_id"]
 
@@ -1002,7 +1002,7 @@ def render_cleaning_summary(summary: dict[str, Any]) -> None:
 
 
 def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
-    """Render Week 3 EDA controls and outputs."""
+    """Render EDA controls and outputs."""
 
     st.subheader("Exploratory Data Analysis")
     st.caption(
@@ -1067,7 +1067,7 @@ def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
 
 
 def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
-    """Render Week 4 modeling controls and outputs."""
+    """Render modeling controls and outputs."""
 
     st.subheader("Modeling and Evaluation")
     st.caption(

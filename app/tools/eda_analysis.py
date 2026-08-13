@@ -282,11 +282,11 @@ def generate_recommended_next_steps(
 
     if eda_summary.get("target_column"):
         recommendations.append(
-            "Use target-specific findings to guide Week 4 feature preparation without assuming causality."
+            "Use target-specific findings to guide feature preparation without assuming causality."
         )
     else:
         recommendations.append(
-            "Select a target column before supervised modeling in Week 4, if the project has one."
+            "Select a target column before supervised modeling, if the project has one."
         )
 
     recommendations.append(

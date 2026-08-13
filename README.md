@@ -1,6 +1,6 @@
-# AutoDS Agent: Autonomous Data Science Analyst
+# AutoDS Agent: Automated Data Science Workflow
 
-AutoDS Agent is a autonomous analyst for tabular CSV datasets. It preserves raw data, profiles the dataset, creates a conservative cleaning plan, performs EDA, trains baseline and candidate machine learning models, evaluates results, tracks the workflow, and generates analyst-style Markdown reports.
+AutoDS Agent is a deterministic, service-backed workflow for tabular CSV datasets. It preserves raw data, profiles the dataset, creates a conservative cleaning plan, performs EDA, trains baseline and candidate machine learning models, evaluates results, tracks the workflow, and generates analyst-style Markdown reports.
 
 The project is deterministic by default and does not require paid LLM API calls.
 
@@ -44,20 +44,6 @@ Then open the printed final report path, usually:
 runs/<run_id>/reports/final_report.md
 ```
 
-Screenshot placeholders:
-
-> Screenshot placeholder: Streamlit project overview
-
-> Screenshot placeholder: Sample dataset selection
-
-> Screenshot placeholder: Autonomous workflow status dashboard
-
-> Screenshot placeholder: EDA plots and modeling results
-
-> Screenshot placeholder: Final report preview
-
-See [docs/screenshots/README.md](docs/screenshots/README.md) for the full screenshot checklist.
-
 ## Why This Project
 
 Many data science projects live as notebooks that are difficult to reproduce, inspect, test, or demo. AutoDS Agent packages that workflow as a small application with APIs, services, saved artifacts, orchestration state, a demo UI, tests, Docker, and clear documentation.
@@ -78,14 +64,14 @@ It is designed to show engineering judgment as well as data science ability.
 - Task-specific evaluation metrics and plots.
 - Saved baseline and best model artifacts.
 - Optional MLflow experiment tracking.
-- Autonomous workflow orchestration with approval gates.
+- Deterministic workflow orchestration with approval gates.
 - Workflow state, retries, trace logs, and final report generation.
 - Streamlit demo UI with bundled sample datasets.
 - Docker Compose and GitHub Actions test workflow.
 
-## What Makes It Autonomous
+## Deterministic Agentic Workflow
 
-The project uses agent boundaries around deterministic services:
+The project uses agent boundaries around deterministic services. These agents are orchestration wrappers, not open-ended autonomous reasoning systems:
 
 - `ProfilerAgent`
 - `CleaningAgent`
@@ -157,8 +143,10 @@ Install dependencies:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]" -c constraints-dev.txt
 ```
+
+`pyproject.toml` keeps compatible dependency ranges for normal project installs. `constraints-dev.txt` pins the development and CI test environment for reproducible validation.
 
 Start the backend:
 
@@ -207,7 +195,7 @@ In Streamlit, use `Try A Sample Dataset` to load either dataset. The UI sets the
 
 ## Run The Full Demo
 
-The full demo runner uses internal services and the autonomous workflow. It does not require the backend server, Docker, MLflow, or paid API keys.
+The full demo runner uses internal services and the deterministic workflow. It does not require the backend server, Docker, MLflow, or paid API keys.
 
 ```bash
 python scripts/run_full_demo.py --dataset classification
@@ -327,7 +315,7 @@ See [docs/api_reference.md](docs/api_reference.md) for more detail.
 Run all tests:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 Run lightweight local checks:
@@ -342,8 +330,10 @@ If Windows temp permissions cause issues:
 ```powershell
 $env:TEMP=(Resolve-Path ".pytest_tmp").Path
 $env:TMP=$env:TEMP
-pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
+python -m pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
 ```
+
+GitHub Actions runs the smoke checks and full test suite on Python 3.11, 3.12, and 3.13.
 
 ## Project Structure
 
@@ -381,7 +371,6 @@ autods-agent/
 - [Project Showcase](docs/project_showcase.md)
 - [Portfolio Summary](docs/portfolio_summary.md)
 - [Demo Output Notes](examples/demo_outputs/README.md)
-- [Screenshot Checklist](docs/screenshots/README.md)
 - [Project Status](PROJECT_STATUS.md)
 - [Changelog](CHANGELOG.md)
 
@@ -405,7 +394,7 @@ autods-agent/
 
 ## Resume Highlights
 
-- Built an autonomous data science analysis platform with FastAPI, Streamlit, Docker Compose, Pydantic, and Pytest, turning raw CSV uploads into reproducible run folders with saved artifacts and reports.
+- Built an automated data science analysis platform with FastAPI, Streamlit, Docker Compose, Pydantic, and Pytest, turning raw CSV uploads into reproducible run folders with saved artifacts and reports.
 - Designed modular services for upload, profiling, cleaning, EDA, modeling, evaluation, reporting, and workflow orchestration with clear API boundaries.
 - Implemented persistent workflow state, retry handling, human approval gates, and trace logs to make automated analysis runs auditable and recoverable.
 - Packaged the project for portfolio use with sample datasets, full-demo scripts, smoke tests, CI, Docker Compose, technical documentation, recruiter walkthroughs, and interview talking points.

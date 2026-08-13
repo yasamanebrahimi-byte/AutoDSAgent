@@ -11,7 +11,7 @@ configure_logging()
 
 app = FastAPI(
     title="AutoDS Agent Backend",
-    description="Backend foundation for autonomous tabular data analysis.",
+    description="Backend foundation for deterministic tabular data analysis workflows.",
     version="0.1.0",
 )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from app.tools.eda_analysis import (
     summarize_categorical_columns,
     summarize_numeric_columns,
 )
-from app.tools.file_utils import ensure_directory, load_json, save_json
+from app.tools.file_utils import ensure_directory, load_json, save_json, write_text_atomic
 from app.tools.schema_inference import infer_schema
 from app.tools.statistics_utils import safe_correlation, to_json_safe
 from app.tools.visualization import (
@@ -97,6 +98,7 @@ class EDAService:
         useful_numeric_columns = self._useful_numeric_columns(dataframe, schema)
         useful_categorical_columns = self._useful_categorical_columns(dataframe, schema)
 
+        self._reset_plot_directory(paths.plots, paths.root)
         generated_plots = self._generate_plots(
             dataframe=dataframe,
             run_root=paths.root,
@@ -128,7 +130,7 @@ class EDAService:
         summary_payload: dict[str, Any] = {
             "run_id": run_id,
             "dataset_used": dataset_used,
-            "dataset_path": str(dataset_path),
+            "dataset_path": dataset_path.relative_to(paths.root).as_posix(),
             "target_column": target_column,
             "rows": int(dataframe.shape[0]),
             "columns": int(dataframe.shape[1]),
@@ -247,6 +249,14 @@ class EDAService:
             return raw_path, "raw", [RAW_DATASET_WARNING]
 
         raise FileNotFoundError(raw_path)
+
+    def _reset_plot_directory(self, plots_dir: Path, run_root: Path) -> None:
+        plots_root = plots_dir.resolve()
+        resolved_run_root = run_root.resolve()
+        if plots_root != resolved_run_root and resolved_run_root in plots_root.parents:
+            if plots_root.exists():
+                shutil.rmtree(plots_root)
+        ensure_directory(plots_root)
 
     def _generate_plots(
         self,
@@ -700,9 +710,9 @@ class EDAService:
             "## Limitations",
             "",
             "- EDA findings are deterministic heuristics, not causal claims.",
-            "- Week 3 does not train models, call LLM APIs, use MLflow, or generate final analyst reports.",
+            "- EDA does not by itself prove causality or validate production model readiness.",
         ]
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        write_text_atomic(path, "\n".join(lines) + "\n")
 
     def _markdown_list(self, values: list[str]) -> list[str]:
         if not values:

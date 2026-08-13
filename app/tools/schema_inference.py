@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 import pandas as pd
@@ -24,18 +25,21 @@ SemanticType = Literal[
     "unknown",
 ]
 
-BOOLEAN_TOKENS = {
-    "0",
-    "1",
-    "false",
-    "true",
-    "f",
-    "t",
-    "n",
-    "no",
-    "y",
-    "yes",
+BOOLEAN_TOKEN_PAIRS = {
+    frozenset({"true", "false"}),
+    frozenset({"t", "f"}),
+    frozenset({"yes", "no"}),
+    frozenset({"y", "n"}),
+    frozenset({"1", "0"}),
+    frozenset({"on", "off"}),
 }
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+CODE_PATTERN = re.compile(
+    r"^(?:[A-Za-z]{1,12}[-_ ]?\d{2,}[A-Za-z0-9_-]*|\d{2,}[-_ ]?[A-Za-z]{1,12}[A-Za-z0-9_-]*)$"
+)
 
 
 def infer_column_dtypes(dataframe: pd.DataFrame) -> dict[str, str]:
@@ -83,24 +87,42 @@ def infer_semantic_type(series: pd.Series, column_name: str) -> SemanticType:
 
 
 def is_likely_id_column(series: pd.Series, column_name: str) -> bool:
-    """Return whether a column looks like an identifier."""
+    """Return whether a column has explicit identifier evidence.
 
-    normalized_name = _normalize_column_name(column_name)
-    if (
-        normalized_name == "id"
-        or normalized_name.endswith("_id")
-        or normalized_name.startswith("id_")
-        or "_id_" in normalized_name
-        or "identifier" in normalized_name
-    ):
+    High cardinality alone is deliberately not enough: continuous numeric
+    measurements, regression targets, latitudes, probabilities, and random
+    floats are often unique without being identifiers.
+    """
+
+    non_null = series.dropna()
+    if non_null.empty:
+        return False
+
+    if _looks_like_uuid_values(non_null):
         return True
+
+    has_identifier_name = _is_identifier_name(column_name)
+    has_code_name = _is_code_name(column_name)
+    if has_identifier_name:
+        return not _contains_non_integer_numeric_values(non_null)
 
     non_null_count = int(series.notna().sum())
     if non_null_count < 20:
         return False
 
     unique_ratio = _unique_ratio(series)
-    return unique_ratio >= 0.98
+    if unique_ratio < 0.98:
+        return False
+
+    if is_numeric_dtype(non_null):
+        return has_code_name and _is_integer_like_numeric(non_null)
+
+    string_values = non_null.astype(str).str.strip()
+    average_length = float(string_values.str.len().mean())
+    if average_length >= 40:
+        return False
+
+    return has_code_name and _looks_like_fixed_format_codes(string_values)
 
 
 def is_boolean_like(series: pd.Series) -> bool:
@@ -113,15 +135,12 @@ def is_boolean_like(series: pd.Series) -> bool:
     if non_null.empty:
         return False
 
-    unique_values = non_null.drop_duplicates()
-    if len(unique_values) != 2:
+    normalized_values = frozenset(
+        _normalize_boolean_token(value) for value in non_null.unique()
+    )
+    if len(normalized_values) != 2:
         return False
-
-    normalized_values = {str(value).strip().lower() for value in unique_values}
-    if normalized_values.issubset(BOOLEAN_TOKENS):
-        return True
-
-    return not is_numeric_dtype(series)
+    return normalized_values in BOOLEAN_TOKEN_PAIRS
 
 
 def is_datetime_like(series: pd.Series, parse_threshold: float = 0.8) -> bool:
@@ -172,10 +191,7 @@ def is_categorical_like(series: pd.Series) -> bool:
     if non_null_count == 0:
         return False
 
-    unique_count = int(series.nunique(dropna=True))
-    unique_ratio = unique_count / non_null_count
-
-    return unique_count <= 20 or unique_ratio <= 0.2
+    return True
 
 
 def _unique_ratio(series: pd.Series) -> float:
@@ -190,3 +206,78 @@ def _normalize_column_name(column_name: str) -> str:
     for character in (" ", "-", ".", "/"):
         normalized = normalized.replace(character, "_")
     return normalized
+
+
+def _normalize_boolean_token(value: object) -> str:
+    token = str(value).strip().lower()
+    if token in {"1.0", "0.0"}:
+        return token.split(".", maxsplit=1)[0]
+    return token
+
+
+def _is_identifier_name(column_name: str) -> bool:
+    normalized = _normalize_column_name(column_name)
+    return (
+        normalized == "id"
+        or normalized.endswith("_id")
+        or normalized.startswith("id_")
+        or "_id_" in normalized
+        or "identifier" in normalized
+        or "uuid" in normalized
+        or "guid" in normalized
+    )
+
+
+def _is_code_name(column_name: str) -> bool:
+    normalized = _normalize_column_name(column_name)
+    parts = {part for part in normalized.split("_") if part}
+    return bool(
+        parts
+        & {
+            "id",
+            "identifier",
+            "uuid",
+            "guid",
+            "key",
+            "code",
+            "number",
+            "num",
+        }
+    )
+
+
+def _looks_like_uuid_values(series: pd.Series) -> bool:
+    values = series.astype(str).str.strip()
+    if values.empty:
+        return False
+    if len(values) < 3:
+        return False
+    parsed_ratio = float(values.map(lambda value: bool(UUID_PATTERN.match(value))).mean())
+    return parsed_ratio >= 0.95 and _unique_ratio(series) >= 0.95
+
+
+def _contains_non_integer_numeric_values(series: pd.Series) -> bool:
+    if not is_numeric_dtype(series):
+        return False
+
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return False
+    return not _is_integer_like_numeric(numeric)
+
+
+def _is_integer_like_numeric(series: pd.Series) -> bool:
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return False
+    return bool((numeric % 1 == 0).all())
+
+
+def _looks_like_fixed_format_codes(values: pd.Series) -> bool:
+    if values.empty:
+        return False
+    matched_ratio = float(values.map(lambda value: bool(CODE_PATTERN.match(value))).mean())
+    if matched_ratio < 0.95:
+        return False
+    lengths = values.str.len()
+    return int(lengths.nunique(dropna=True)) <= max(3, int(len(values) * 0.1))

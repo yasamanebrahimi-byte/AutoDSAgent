@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from app.backend.schemas.eda import EDARequest
 from app.backend.services.eda_service import EDAService, RAW_DATASET_WARNING
@@ -35,7 +36,8 @@ def test_eda_is_generated_from_cleaned_data_and_artifacts_are_saved(tmp_path):
     )
 
     assert response.summary.dataset_used == "cleaned"
-    assert response.summary.dataset_path.endswith("cleaned_data.csv")
+    assert response.summary.dataset_path == "intermediate/cleaned_data.csv"
+    assert not Path(response.summary.dataset_path).is_absolute()
     assert service.eda_summary_path(run_id).exists()
     assert service.eda_findings_path(run_id).exists()
     assert service.eda_report_path(run_id).exists()
@@ -72,9 +74,40 @@ def test_eda_falls_back_to_raw_data_when_cleaned_data_is_missing(tmp_path):
     response = service.generate_eda(run_id)
 
     assert response.summary.dataset_used == "raw"
-    assert response.summary.dataset_path.endswith("raw_data.csv")
+    assert response.summary.dataset_path == "input/raw_data.csv"
+    assert not Path(response.summary.dataset_path).is_absolute()
     assert RAW_DATASET_WARNING in response.summary.warnings
     assert service.eda_summary_path(run_id).exists()
     assert service.eda_findings_path(run_id).exists()
     assert service.eda_report_path(run_id).exists()
     assert response.summary.generated_plots
+
+
+def test_eda_rerun_clears_obsolete_target_plots(tmp_path):
+    manager = RunManager(runs_dir=tmp_path)
+    run_id = "eda-rerun-test"
+    paths = manager.create_run(run_id)
+    (paths.input / "raw_data.csv").write_text(
+        "age,income,churn\n"
+        "30,60000,yes\n"
+        "35,70000,no\n"
+        "40,80000,yes\n"
+        "45,90000,no\n"
+        "50,100000,yes\n",
+        encoding="utf-8",
+    )
+    service = EDAService(run_manager=manager)
+
+    first = service.generate_eda(run_id, EDARequest(target_column="churn"))
+    assert any(
+        plot.path.startswith("plots/target_relationships/")
+        for plot in first.summary.generated_plots
+    )
+
+    second = service.generate_eda(run_id, EDARequest(target_column=None))
+
+    assert not any(
+        plot.path.startswith("plots/target_relationships/")
+        for plot in second.summary.generated_plots
+    )
+    assert not (paths.plots / "target_relationships").exists()

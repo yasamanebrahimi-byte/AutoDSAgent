@@ -43,7 +43,11 @@ class CleaningService:
 
         return self.run_manager.get_paths(run_id).intermediate / "cleaning_summary.json"
 
-    def generate_cleaning_plan(self, run_id: str) -> CleaningPlan:
+    def generate_cleaning_plan(
+        self,
+        run_id: str,
+        target_column: str | None = None,
+    ) -> CleaningPlan:
         """Generate, save, and return a cleaning plan."""
 
         try:
@@ -54,6 +58,7 @@ class CleaningService:
         payload = generate_cleaning_plan_payload(
             profile=profile.model_dump(mode="json"),
             config=self.config,
+            target_column=target_column,
         )
         plan = CleaningPlan(**payload)
         save_json(self.cleaning_plan_path(run_id), plan.model_dump(mode="json"))
@@ -75,7 +80,11 @@ class CleaningService:
             raise FileNotFoundError(path)
         return CleaningPlan(**load_json(path))
 
-    def apply_cleaning(self, run_id: str) -> CleaningSummary:
+    def apply_cleaning(
+        self,
+        run_id: str,
+        target_column: str | None = None,
+    ) -> CleaningSummary:
         """Apply safe cleaning, save artifacts, and return a summary."""
 
         try:
@@ -98,6 +107,7 @@ class CleaningService:
             profile=profile.model_dump(mode="json"),
             plan=plan.model_dump(mode="json"),
             config=self.config,
+            target_column=target_column,
         )
 
         cleaned.to_csv(self.cleaned_data_path(run_id), index=False)

@@ -1,1 +1,1 @@
-"""Future autonomous analysis agents."""
+"""Deterministic analysis agent boundaries."""

@@ -23,11 +23,17 @@ class CleaningConfig:
 def generate_cleaning_plan_payload(
     profile: dict[str, Any],
     config: CleaningConfig | None = None,
+    target_column: str | None = None,
 ) -> dict[str, Any]:
     """Generate a conservative cleaning plan from a saved profile payload."""
 
     selected_config = config or CleaningConfig()
     columns = profile.get("column_profiles", [])
+    available_columns = {str(column["column_name"]) for column in columns}
+    selected_target = _normalize_optional_target(target_column)
+    if selected_target is not None and selected_target not in available_columns:
+        raise ValueError(f"Target column '{selected_target}' was not found in the profile.")
+
     duplicate_rows = int(profile.get("duplicate_rows", 0))
     total_columns = max(int(profile.get("columns", len(columns))), 1)
 
@@ -35,6 +41,7 @@ def generate_cleaning_plan_payload(
         str(column["column_name"])
         for column in columns
         if bool(column.get("is_constant", False))
+        and str(column["column_name"]) != selected_target
     ]
     auto_drop_constant_columns = (
         len(constant_columns) / total_columns
@@ -72,6 +79,12 @@ def generate_cleaning_plan_payload(
         column_name = str(column["column_name"])
         semantic_type = str(column.get("semantic_type", "unknown"))
         missing_percentage = float(column.get("missing_percentage", 0.0))
+        is_target = column_name == selected_target
+
+        if is_target and bool(column.get("is_constant", False)):
+            warnings_requiring_review.append(
+                f"Target column '{column_name}' is constant; it was preserved during cleaning."
+            )
 
         if column_name in constant_columns:
             action = {
@@ -90,16 +103,29 @@ def generate_cleaning_plan_payload(
             actions.append(action)
 
         if missing_percentage > 0:
-            missing_action = _missing_value_action(
-                column_name=column_name,
-                semantic_type=semantic_type,
-                missing_percentage=missing_percentage,
-                config=selected_config,
-            )
+            if is_target:
+                missing_action = _target_missing_value_action(
+                    column_name=column_name,
+                    missing_percentage=missing_percentage,
+                )
+                warnings_requiring_review.append(
+                    f"Target column '{column_name}' has {missing_percentage:.1f}% missing values; "
+                    "safe cleaning will preserve them and supervised modeling will exclude those rows."
+                )
+            else:
+                missing_action = _missing_value_action(
+                    column_name=column_name,
+                    semantic_type=semantic_type,
+                    missing_percentage=missing_percentage,
+                    config=selected_config,
+                )
             missing_value_strategies.append(missing_action)
             actions.append(missing_action)
 
-            if missing_percentage > selected_config.high_missing_percentage:
+            if (
+                not is_target
+                and missing_percentage >= selected_config.high_missing_percentage
+            ):
                 columns_recommended_for_dropping.append(column_name)
                 warnings_requiring_review.append(
                     f"Column '{column_name}' is {missing_percentage:.1f}% missing; "
@@ -112,9 +138,14 @@ def generate_cleaning_plan_payload(
                 "column": column_name,
                 "strategy": "parse_datetime_to_iso_string",
                 "reason": "Datetime-like values should be normalized for later analysis.",
-                "apply": True,
+                "apply": not is_target,
                 "details": {},
             }
+            if is_target:
+                action["reason"] = (
+                    "Datetime-like target values are preserved during cleaning unless a "
+                    "supervised target policy explicitly transforms them."
+                )
             type_conversion_recommendations.append(action)
             actions.append(action)
 
@@ -135,6 +166,7 @@ def generate_cleaning_plan_payload(
 
     return {
         "run_id": profile["run_id"],
+        "target_column": selected_target,
         "duplicate_row_handling": duplicate_action,
         "missing_value_strategies": missing_value_strategies,
         "columns_recommended_for_dropping": columns_recommended_for_dropping,
@@ -152,23 +184,36 @@ def apply_safe_cleaning(
     profile: dict[str, Any],
     plan: dict[str, Any],
     config: CleaningConfig | None = None,
+    target_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply only conservative cleaning actions from a cleaning plan."""
 
     selected_config = config or CleaningConfig()
+    selected_target = _normalize_optional_target(target_column) or _normalize_optional_target(
+        plan.get("target_column")
+    )
+    if selected_target is not None and selected_target not in dataframe.columns:
+        raise ValueError(f"Target column '{selected_target}' was not found in the dataset.")
+
     cleaned = dataframe.copy()
     original_shape = [int(dataframe.shape[0]), int(dataframe.shape[1])]
     missing_values_before = int(dataframe.isna().sum().sum())
+    target_missing_values_before = (
+        int(dataframe[selected_target].isna().sum())
+        if selected_target is not None
+        else None
+    )
     warnings = list(plan.get("warnings_requiring_review", []))
     imputation_strategies_used: dict[str, str] = {}
     type_conversions_applied: dict[str, str] = {}
+    datetime_parse_failures: dict[str, dict[str, Any]] = {}
 
     duplicate_rows_before = int(cleaned.duplicated().sum())
     if bool(plan.get("duplicate_row_handling", {}).get("apply", False)):
         cleaned = cleaned.drop_duplicates().reset_index(drop=True)
     duplicate_rows_removed = duplicate_rows_before - int(cleaned.duplicated().sum())
 
-    columns_to_drop = _columns_to_drop_from_plan(plan, cleaned.columns)
+    columns_to_drop = _columns_to_drop_from_plan(plan, cleaned.columns, selected_target)
     if columns_to_drop:
         drop_fraction = len(columns_to_drop) / max(len(cleaned.columns), 1)
         if drop_fraction > selected_config.max_auto_drop_column_fraction:
@@ -187,6 +232,8 @@ def apply_safe_cleaning(
 
         column = action.get("column")
         if column not in cleaned.columns:
+            continue
+        if selected_target is not None and column == selected_target:
             continue
 
         strategy = str(action.get("strategy"))
@@ -226,15 +273,51 @@ def apply_safe_cleaning(
         column = action.get("column")
         if column not in cleaned.columns:
             continue
+        if selected_target is not None and column == selected_target:
+            continue
 
         strategy = str(action.get("strategy"))
         if strategy == "parse_datetime_to_iso_string":
-            parsed = pd.to_datetime(cleaned[column], errors="coerce", format="mixed")
+            original = cleaned[column].copy()
+            parsed = pd.to_datetime(original, errors="coerce", format="mixed")
+            failed_mask = original.notna() & parsed.isna()
+            failed_count = int(failed_mask.sum())
+            if failed_count:
+                examples = (
+                    original[failed_mask]
+                    .astype(str)
+                    .drop_duplicates()
+                    .head(5)
+                    .tolist()
+                )
+                datetime_parse_failures[str(column)] = {
+                    "failed_values": failed_count,
+                    "examples": examples,
+                }
+                warnings.append(
+                    f"Column '{column}' was not converted to datetime because "
+                    f"{failed_count} non-null value(s) failed parsing."
+                )
+                continue
             cleaned[column] = parsed.dt.strftime("%Y-%m-%dT%H:%M:%S")
             type_conversions_applied[str(column)] = "parsed_datetime_to_iso_string"
 
+    target_missing_values_after = (
+        int(cleaned[selected_target].isna().sum())
+        if selected_target is not None and selected_target in cleaned.columns
+        else None
+    )
+    target_action = None
+    if selected_target is not None:
+        target_action = (
+            "missing target values preserved; supervised modeling excludes those rows"
+            if target_missing_values_before
+            else "target preserved"
+        )
+
     summary = {
         "run_id": profile["run_id"],
+        "target_column": selected_target,
         "original_shape": original_shape,
         "cleaned_shape": [int(cleaned.shape[0]), int(cleaned.shape[1])],
         "duplicate_rows_removed": int(duplicate_rows_removed),
@@ -243,6 +326,10 @@ def apply_safe_cleaning(
         "missing_values_after": int(cleaned.isna().sum().sum()),
         "imputation_strategies_used": imputation_strategies_used,
         "type_conversions_applied": type_conversions_applied,
+        "target_missing_values_before": target_missing_values_before,
+        "target_missing_values_after": target_missing_values_after,
+        "target_action": target_action,
+        "datetime_parse_failures": datetime_parse_failures,
         "warnings": _deduplicate(warnings),
     }
 
@@ -256,7 +343,7 @@ def _missing_value_action(
     config: CleaningConfig,
 ) -> dict[str, Any]:
     if semantic_type == "numeric":
-        if missing_percentage > config.high_missing_percentage:
+        if missing_percentage >= config.high_missing_percentage:
             return {
                 "action_type": "missing_values",
                 "column": column_name,
@@ -320,13 +407,34 @@ def _encoding_recommendation(column_name: str, semantic_type: str) -> dict[str, 
         "action_type": "future_encoding",
         "column": column_name,
         "strategy": strategy,
-        "reason": "Recommendation for future modeling; not applied in Week 2.",
+        "reason": "Recommendation for future modeling; not applied during safe cleaning.",
         "apply": False,
         "details": {},
     }
 
 
-def _columns_to_drop_from_plan(plan: dict[str, Any], available_columns: pd.Index) -> list[str]:
+def _target_missing_value_action(
+    column_name: str,
+    missing_percentage: float,
+) -> dict[str, Any]:
+    return {
+        "action_type": "target_missing_values",
+        "column": column_name,
+        "strategy": "preserve_missing_target",
+        "reason": (
+            "Supervised labels are not imputed during cleaning; modeling preparation "
+            "will exclude rows with missing target values."
+        ),
+        "apply": False,
+        "details": {"missing_percentage": missing_percentage},
+    }
+
+
+def _columns_to_drop_from_plan(
+    plan: dict[str, Any],
+    available_columns: pd.Index,
+    target_column: str | None = None,
+) -> list[str]:
     available = {str(column) for column in available_columns}
     return [
         str(action["column"])
@@ -334,6 +442,7 @@ def _columns_to_drop_from_plan(plan: dict[str, Any], available_columns: pd.Index
         if action.get("action_type") == "drop_constant_column"
         and bool(action.get("apply", False))
         and action.get("column") in available
+        and action.get("column") != target_column
     ]
 
 
@@ -358,3 +467,10 @@ def _deduplicate(values: list[str]) -> list[str]:
             seen.add(value)
             deduplicated.append(value)
     return deduplicated
+
+
+def _normalize_optional_target(target_column: Any) -> str | None:
+    if target_column is None:
+        return None
+    target = str(target_column).strip()
+    return target or None

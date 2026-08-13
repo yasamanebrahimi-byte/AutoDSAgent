@@ -1,4 +1,4 @@
-"""Deterministic Week 6 analysis state machine.
+"""Deterministic analysis state machine.
 
 The project can swap this for LangGraph or an LLM-backed agent runtime later.
 For now, the graph is intentionally local, auditable, and dependency-free.
@@ -429,6 +429,6 @@ def build_analysis_graph(
     run_manager: RunManager | None = None,
     trace_logger: TraceLogger | None = None,
 ) -> AnalysisGraph:
-    """Build the deterministic Week 6 analysis graph."""
+    """Build the deterministic analysis graph."""
 
     return AnalysisGraph(run_manager=run_manager, trace_logger=trace_logger)

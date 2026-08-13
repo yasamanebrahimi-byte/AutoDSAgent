@@ -1,0 +1,252 @@
+"""Modeling service for training and evaluation."""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from app.backend.schemas.modeling import (
+    ModelingRequest,
+    ModelingResponse,
+    ModelingSummary,
+    SavedModelInfo,
+)
+from app.backend.services.evaluation_service import EvaluationService
+from app.backend.services.run_manager import RunManager
+from app.tools.app_logging import get_logger, log_event
+from app.tools.data_loader import load_csv
+from app.tools.evaluation import PRIMARY_METRIC_BY_TASK
+from app.tools.file_utils import load_json, save_json
+from app.tools.mlflow_logger import MLflowLogger
+from app.tools.model_persistence import list_model_artifacts, save_model_artifacts
+from app.tools.modeling import ModelTrainingResult, train_models
+from app.tools.preprocessing import prepare_modeling_data
+
+
+class ModelingService:
+    """Train baseline and candidate models for cleaned tabular datasets."""
+
+    def __init__(
+        self,
+        run_manager: RunManager | None = None,
+        evaluation_service: EvaluationService | None = None,
+        mlflow_logger: MLflowLogger | None = None,
+    ) -> None:
+        self.run_manager = run_manager or RunManager()
+        self.evaluation_service = evaluation_service or EvaluationService(self.run_manager)
+        self.mlflow_logger = mlflow_logger or MLflowLogger()
+        self.logger = get_logger(__name__)
+
+    def modeling_summary_path(self, run_id: str) -> Path:
+        """Return the modeling summary artifact path."""
+
+        return self.run_manager.get_paths(run_id).intermediate / "modeling_summary.json"
+
+    def model_results_path(self, run_id: str) -> Path:
+        """Return the model results artifact path."""
+
+        return self.run_manager.get_paths(run_id).models / "model_results.json"
+
+    def baseline_model_path(self, run_id: str) -> Path:
+        """Return the baseline model artifact path."""
+
+        return self.run_manager.get_paths(run_id).models / "baseline_model.pkl"
+
+    def best_model_path(self, run_id: str) -> Path:
+        """Return the best model artifact path."""
+
+        return self.run_manager.get_paths(run_id).models / "best_model.pkl"
+
+    def train_and_evaluate(
+        self,
+        run_id: str,
+        request: ModelingRequest,
+    ) -> ModelingResponse:
+        """Train, evaluate, save artifacts, and return modeling outputs."""
+
+        paths = self.run_manager.get_paths(run_id)
+        if not paths.root.exists():
+            raise FileNotFoundError(paths.root)
+
+        dataset_path = paths.intermediate / "cleaned_data.csv"
+        if not dataset_path.exists():
+            raise ValueError(
+                "Cleaned dataset was not found. Apply safe cleaning before modeling."
+            )
+
+        log_event(
+            self.logger,
+            logging.INFO,
+            "Modeling run started.",
+            run_id=run_id,
+            target_column=request.target_column,
+            task_type=request.task_type or "auto",
+        )
+
+        dataframe = load_csv(dataset_path)
+        prepared = prepare_modeling_data(
+            dataframe=dataframe,
+            target_column=request.target_column,
+            task_type=request.task_type,
+            test_size=request.test_size,
+            random_state=request.random_state,
+        )
+        training_results = train_models(prepared, random_state=request.random_state)
+
+        evaluation_result = self.evaluation_service.evaluate_and_save(
+            run_id=run_id,
+            prepared=prepared,
+            training_results=training_results,
+            warnings=prepared.warnings,
+        )
+
+        if (
+            evaluation_result.baseline_result is None
+            or evaluation_result.baseline_result.status != "succeeded"
+        ):
+            raise RuntimeError("The baseline model did not train successfully.")
+
+        artifact_paths = self._artifact_paths_payload(paths.root)
+        model_results_payload = dict(evaluation_result.model_results_payload)
+        model_results_payload["artifact_paths"] = artifact_paths
+        save_model_artifacts(
+            models_dir=paths.models,
+            results=training_results,
+            best_result=evaluation_result.best_result,
+            model_results_payload=model_results_payload,
+        )
+
+        modeling_summary = self._build_modeling_summary(
+            run_id=run_id,
+            dataset_path=dataset_path.relative_to(paths.root).as_posix(),
+            prepared=prepared,
+            training_results=training_results,
+            best_model_name=evaluation_result.best_result.model_name,
+            baseline_model_name=evaluation_result.baseline_result.model_name,
+        )
+        save_json(
+            self.modeling_summary_path(run_id),
+            modeling_summary.model_dump(mode="json"),
+        )
+
+        try:
+            mlflow_warnings = self.mlflow_logger.log_modeling_run(
+                run_id=run_id,
+                request=request,
+                modeling_summary=modeling_summary.model_dump(mode="json"),
+                evaluation_summary=evaluation_result.summary.model_dump(mode="json"),
+                model_results=model_results_payload,
+                run_root=paths.root,
+            )
+        except Exception as exc:
+            mlflow_warnings = [f"MLflow logging failed and was skipped: {exc}"]
+            log_event(
+                self.logger,
+                logging.WARNING,
+                mlflow_warnings[0],
+                run_id=run_id,
+            )
+        if mlflow_warnings:
+            evaluation_result.summary.warnings.extend(mlflow_warnings)
+            save_json(
+                self.evaluation_service.evaluation_summary_path(run_id),
+                evaluation_result.summary.model_dump(mode="json"),
+            )
+
+        log_event(
+            self.logger,
+            logging.INFO,
+            "Modeling run completed.",
+            run_id=run_id,
+            target_column=modeling_summary.target_column,
+            task_type=modeling_summary.task_type,
+            best_model=modeling_summary.best_model_name,
+        )
+
+        return ModelingResponse(
+            modeling_summary=modeling_summary,
+            evaluation_summary=evaluation_result.summary,
+            model_results=model_results_payload,
+        )
+
+    def load_modeling_summary(self, run_id: str) -> ModelingSummary:
+        """Load an existing modeling summary."""
+
+        path = self.modeling_summary_path(run_id)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return ModelingSummary(**load_json(path))
+
+    def load_model_results(self, run_id: str) -> dict[str, Any]:
+        """Load saved model comparison details."""
+
+        path = self.model_results_path(run_id)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return load_json(path)
+
+    def list_saved_models(self, run_id: str) -> list[SavedModelInfo]:
+        """Return saved model artifact metadata for one run."""
+
+        paths = self.run_manager.get_paths(run_id)
+        if not paths.root.exists():
+            raise FileNotFoundError(paths.root)
+        return [
+            SavedModelInfo(**artifact)
+            for artifact in list_model_artifacts(paths.models, paths.root)
+        ]
+
+    def _build_modeling_summary(
+        self,
+        run_id: str,
+        dataset_path: str,
+        prepared,
+        training_results: list[ModelTrainingResult],
+        best_model_name: str,
+        baseline_model_name: str,
+    ) -> ModelingSummary:
+        models_attempted = [result.model_name for result in training_results]
+        models_succeeded = [
+            result.model_name for result in training_results if result.status == "succeeded"
+        ]
+        models_failed = [
+            result.model_name for result in training_results if result.status == "failed"
+        ]
+
+        return ModelingSummary(
+            run_id=run_id,
+            dataset_path=dataset_path,
+            target_column=prepared.target_column,
+            task_type=prepared.task_type,
+            rows_used=prepared.rows_used,
+            columns_used=prepared.columns_used,
+            features_used=prepared.features_used,
+            features_excluded=prepared.features_excluded,
+            excluded_feature_reasons=prepared.excluded_feature_reasons,
+            train_rows=prepared.train_rows,
+            test_rows=prepared.test_rows,
+            models_attempted=models_attempted,
+            models_succeeded=models_succeeded,
+            models_failed=models_failed,
+            best_model_name=best_model_name,
+            baseline_model_name=baseline_model_name,
+            primary_metric=PRIMARY_METRIC_BY_TASK[prepared.task_type],
+            warnings=prepared.warnings,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _artifact_paths_payload(self, run_root: Path) -> dict[str, str]:
+        models_dir = run_root / "models"
+        return {
+            "baseline_model_path": (models_dir / "baseline_model.pkl")
+            .relative_to(run_root)
+            .as_posix(),
+            "best_model_path": (models_dir / "best_model.pkl")
+            .relative_to(run_root)
+            .as_posix(),
+            "model_results_path": (models_dir / "model_results.json")
+            .relative_to(run_root)
+            .as_posix(),
+        }

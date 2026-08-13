@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,9 +117,9 @@ class RunManager:
 
         for run_path in run_paths:
             metadata_path = run_path / "intermediate" / "metadata.json"
-            metadata: dict[str, Any] = {}
-            if metadata_path.exists():
-                metadata = load_json(metadata_path)
+            if not metadata_path.exists():
+                continue
+            metadata = load_json(metadata_path)
 
             summaries.append(
                 {
@@ -131,6 +132,13 @@ class RunManager:
             )
 
         return summaries
+
+    def delete_run(self, run_id: str) -> None:
+        """Remove a run directory after a failed transactional operation."""
+
+        root = self._resolve_run_path(run_id)
+        if root.exists():
+            shutil.rmtree(root)
 
     def _resolve_run_path(self, run_id: str) -> Path:
         """Resolve a run path and keep it inside the configured runs directory."""

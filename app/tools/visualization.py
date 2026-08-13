@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -17,13 +18,15 @@ from app.tools.file_utils import ensure_directory
 
 
 def safe_filename(value: str, suffix: str = "") -> str:
-    """Create a readable, filesystem-safe filename stem."""
+    """Create a readable, deterministic, collision-resistant filename stem."""
 
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     normalized = normalized.strip("._-") or "column"
-    if len(normalized) > 80:
-        normalized = normalized[:80].rstrip("._-")
-    return f"{normalized}{suffix}"
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    max_base_length = max(20, 80 - len(suffix) - len(digest) - 1)
+    if len(normalized) > max_base_length:
+        normalized = normalized[:max_base_length].rstrip("._-") or "column"
+    return f"{normalized}_{digest}{suffix}"
 
 
 def create_missing_values_plot(

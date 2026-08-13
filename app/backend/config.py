@@ -32,7 +32,7 @@ class Settings:
 
         return {
             "environment": self.environment,
-            "project_root": str(self.project_root),
+            "project_root": ".",
             "runs_dir": _display_path(self.runs_dir, self.project_root),
             "backend_url": self.backend_url,
             "max_upload_size_mb": self.max_upload_size_mb,
@@ -110,7 +110,7 @@ def _display_path(path: Path, project_root: Path) -> str:
     try:
         return path.relative_to(project_root).as_posix()
     except ValueError:
-        return str(path)
+        return path.name
 
 
 settings = load_settings()

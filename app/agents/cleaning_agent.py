@@ -31,7 +31,10 @@ class CleaningAgent(BaseAgent):
 
         run_id = self._require_run_id(state)
         paths = self.cleaning_service.run_manager.get_paths(run_id)
-        plan = self.cleaning_service.generate_cleaning_plan(run_id)
+        plan = self.cleaning_service.generate_cleaning_plan(
+            run_id,
+            target_column=state.get("target_column"),
+        )
 
         updated_state = self._copy_state(state)
         self._set_artifact(
@@ -59,7 +62,10 @@ class CleaningAgent(BaseAgent):
 
         run_id = self._require_run_id(state)
         paths = self.cleaning_service.run_manager.get_paths(run_id)
-        summary = self.cleaning_service.apply_cleaning(run_id)
+        summary = self.cleaning_service.apply_cleaning(
+            run_id,
+            target_column=state.get("target_column"),
+        )
 
         updated_state = self._copy_state(state)
         self._set_artifact(

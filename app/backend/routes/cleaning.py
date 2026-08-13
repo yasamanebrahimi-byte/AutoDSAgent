@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.backend.schemas.cleaning import CleaningPlan, CleaningSummary
+from app.backend.schemas.cleaning import CleaningPlan, CleaningRequest, CleaningSummary
 from app.backend.services.cleaning_service import CleaningService
 
 
@@ -13,16 +13,24 @@ cleaning_service = CleaningService()
 
 
 @router.post("/runs/{run_id}/cleaning-plan", response_model=CleaningPlan)
-def generate_cleaning_plan(run_id: str) -> CleaningPlan:
+def generate_cleaning_plan(
+    run_id: str,
+    request: CleaningRequest | None = None,
+) -> CleaningPlan:
     """Generate and save a conservative cleaning plan."""
 
     try:
-        return cleaning_service.generate_cleaning_plan(run_id)
-    except (FileNotFoundError, ValueError) as exc:
+        return cleaning_service.generate_cleaning_plan(
+            run_id,
+            target_column=(request.target_column if request else None),
+        )
+    except FileNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Raw dataset for run '{run_id}' was not found.",
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/cleaning-plan", response_model=CleaningPlan)
@@ -39,16 +47,24 @@ def get_cleaning_plan(run_id: str) -> CleaningPlan:
 
 
 @router.post("/runs/{run_id}/clean", response_model=CleaningSummary)
-def apply_cleaning(run_id: str) -> CleaningSummary:
+def apply_cleaning(
+    run_id: str,
+    request: CleaningRequest | None = None,
+) -> CleaningSummary:
     """Apply safe cleaning and save cleaned artifacts."""
 
     try:
-        return cleaning_service.apply_cleaning(run_id)
-    except (FileNotFoundError, ValueError) as exc:
+        return cleaning_service.apply_cleaning(
+            run_id,
+            target_column=(request.target_column if request else None),
+        )
+    except FileNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Raw dataset for run '{run_id}' was not found.",
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/cleaning-summary", response_model=CleaningSummary)

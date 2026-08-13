@@ -18,10 +18,17 @@ class CleaningAction(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class CleaningRequest(BaseModel):
+    """Optional cleaning context supplied by API or workflow callers."""
+
+    target_column: str | None = None
+
+
 class CleaningPlan(BaseModel):
     """Conservative cleaning plan for one run."""
 
     run_id: str
+    target_column: str | None = None
     duplicate_row_handling: CleaningAction
     missing_value_strategies: list[CleaningAction] = Field(default_factory=list)
     columns_recommended_for_dropping: list[str] = Field(default_factory=list)
@@ -37,6 +44,7 @@ class CleaningSummary(BaseModel):
     """Summary of safe cleaning that was applied."""
 
     run_id: str
+    target_column: str | None = None
     original_shape: list[int]
     cleaned_shape: list[int]
     duplicate_rows_removed: int
@@ -45,4 +53,8 @@ class CleaningSummary(BaseModel):
     missing_values_after: int
     imputation_strategies_used: dict[str, str] = Field(default_factory=dict)
     type_conversions_applied: dict[str, str] = Field(default_factory=dict)
+    target_missing_values_before: int | None = None
+    target_missing_values_after: int | None = None
+    target_action: str | None = None
+    datetime_parse_failures: dict[str, dict[str, Any]] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)

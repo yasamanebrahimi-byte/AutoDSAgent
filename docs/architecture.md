@@ -1,0 +1,78 @@
+# AutoDS Agent Architecture
+
+AutoDS Agent is a deterministic, agent-structured data science workflow for tabular CSV datasets. The project is organized around a persistent run folder so every step produces auditable files that can be inspected, downloaded, reported on, or tracked in MLflow.
+
+## System Overview
+
+The system has two user-facing surfaces:
+
+- FastAPI backend: upload, analysis, modeling, workflow, report, and config endpoints.
+- Streamlit frontend: upload flow, workflow controls, artifact previews, final reports, and download buttons.
+
+The backend is intentionally service-oriented. Agents wrap deterministic services rather than calling paid LLM APIs. This keeps the project reproducible while leaving clear extension points for future LLM-assisted planning and narrative generation.
+
+## Backend Structure
+
+```text
+app/backend/
+  main.py
+  config.py
+  routes/
+  services/
+  schemas/
+```
+
+Routes expose HTTP endpoints. Services implement the actual data work. Schemas keep API responses and saved artifacts structured.
+
+## Artifact Lifecycle
+
+Each upload creates a unique run folder:
+
+```text
+runs/<run_id>/
+  input/
+  intermediate/
+  models/
+  plots/
+  reports/
+  logs/
+```
+
+The raw CSV is preserved at `input/raw_data.csv`. Later steps save machine-readable JSON, plots, model files, Markdown reports, and workflow logs. Report generation reads available artifacts and produces partial reports when optional upstream artifacts are missing.
+
+## Agent Workflow
+
+The automated workflow uses a deterministic state machine:
+
+```text
+profile -> cleaning_plan -> cleaning -> eda -> modeling -> report
+```
+
+Each step updates `logs/workflow_state.json`. Human approval gates can pause cleaning and modeling. `logs/agent_trace.json` records workflow events separately from application logs.
+
+## Manual Endpoints Versus Workflow
+
+Manual endpoints let users run profiling, cleaning, EDA, modeling, and reports directly. The automated workflow calls the same deterministic services through agent wrappers, so manual and workflow behavior stay aligned.
+
+## MLflow Integration
+
+MLflow is optional and controlled by environment variables:
+
+```text
+AUTODS_ENABLE_MLFLOW=true
+AUTODS_MLFLOW_TRACKING_URI=http://localhost:5000
+AUTODS_MLFLOW_EXPERIMENT_NAME=AutoDS-Agent
+```
+
+When enabled, modeling logs a parent run for the AutoDS run and nested runs for each attempted model. Parameters, metrics, tags, model summaries, evaluation summaries, model results, evaluation plots, and selected model artifacts are logged when available. If MLflow is disabled or unreachable, modeling continues and local artifacts remain the source of truth.
+
+## Future LLM Integration Points
+
+Future LLM-assisted work can plug into these boundaries:
+
+- Agent planning before workflow steps
+- Hypothesis generation from profile and EDA summaries
+- Narrative polishing for reports
+- Interactive Q&A over saved run artifacts
+
+The current project does not require paid LLM API calls.
