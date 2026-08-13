@@ -53,8 +53,13 @@ class MLflowLogger:
 
             tags = format_run_tags(run_id, modeling_summary)
             parent_params = format_run_parameters(request, modeling_summary)
+            final_test_metrics = (
+                evaluation_summary.get("final_test_metrics")
+                or evaluation_summary.get("holdout_metrics")
+                or evaluation_summary.get("best_model_metrics", {})
+            )
             parent_metrics = prefix_metrics(
-                evaluation_summary.get("best_model_metrics", {}),
+                final_test_metrics,
                 prefix="best",
             )
 
@@ -81,7 +86,10 @@ class MLflowLogger:
                             "primary_metric": model_results.get("primary_metric"),
                         }
                         mlflow.log_params(_drop_none(params))
-                        metrics = format_metric_dict(model_result.get("metrics", {}))
+                        metrics = format_metric_dict(
+                            model_result.get("cv_metrics")
+                            or model_result.get("metrics", {})
+                        )
                         if metrics:
                             mlflow.log_metrics(metrics)
                         if model_result.get("error"):

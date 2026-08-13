@@ -170,7 +170,12 @@ def run_demo(
     )
     primary_metric_value = None
     if primary_metric:
-        value = evaluation_summary.get("best_model_metrics", {}).get(primary_metric)
+        final_test_metrics = (
+            evaluation_summary.get("final_test_metrics")
+            or evaluation_summary.get("holdout_metrics")
+            or evaluation_summary.get("best_model_metrics", {})
+        )
+        value = final_test_metrics.get(primary_metric)
         if value is not None:
             primary_metric_value = float(value)
 

@@ -84,11 +84,15 @@ class EvaluationSummary(BaseModel):
     baseline_metrics: dict[str, Any] = Field(default_factory=dict)
     best_model_metrics: dict[str, Any] = Field(default_factory=dict)
     all_model_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    candidate_cv_results: dict[str, dict[str, Any]] = Field(default_factory=dict)
     cv_model_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    final_test_metrics: dict[str, Any] = Field(default_factory=dict)
     holdout_metrics: dict[str, Any] = Field(default_factory=dict)
     cv_folds: int | None = None
     cv_strategy: str | None = None
     selection_metric: str | None = None
+    selection_direction: Literal["lower", "higher"] | None = None
+    selection_tiebreaker: str | None = None
     test_evaluated_model_names: list[str] = Field(default_factory=list)
     baseline_comparison: dict[str, Any] = Field(default_factory=dict)
     generated_plots: list[EvaluationPlotInfo] = Field(default_factory=list)

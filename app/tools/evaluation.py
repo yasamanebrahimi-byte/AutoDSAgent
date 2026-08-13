@@ -46,6 +46,7 @@ SELECTION_DIRECTION_BY_TASK: dict[TaskType, str] = {
     "regression": "lower",
     "classification": "higher",
 }
+SELECTION_TIEBREAKER = "original_result_order"
 
 
 def evaluate_holdout_model(
@@ -76,6 +77,28 @@ def evaluate_holdout_model(
         result.status = "failed"
         result.error = str(exc)
         result.holdout_metrics = {}
+        raise
+
+    return result
+
+
+def refit_model_on_training_partition(
+    result: ModelTrainingResult,
+    prepared: PreprocessingResult,
+) -> ModelTrainingResult:
+    """Fit the selected estimator on the full training partition before testing."""
+
+    if result.status != "succeeded" or result.estimator is None:
+        raise RuntimeError("The selected model is unavailable for final training.")
+
+    try:
+        result.estimator.fit(prepared.X_train, prepared.y_train)
+        result.holdout_metrics = {}
+        result.holdout_predictions = None
+        result.holdout_probabilities = None
+    except Exception as exc:
+        result.status = "failed"
+        result.error = str(exc)
         raise
 
     return result
@@ -179,7 +202,11 @@ def select_best_model(
     results: list[ModelTrainingResult],
     task_type: TaskType,
 ) -> ModelTrainingResult:
-    """Select the best successful model using the task primary metric."""
+    """Select the best successful model using CV scores only.
+
+    Ties are resolved by the original result order so final holdout metrics are
+    never needed for model selection.
+    """
 
     successful_results = [
         result
@@ -193,8 +220,23 @@ def select_best_model(
     selection_pool = candidate_results or successful_results
 
     if task_type == "regression":
-        return min(selection_pool, key=lambda result: float(result.primary_metric_value))
-    return max(selection_pool, key=lambda result: float(result.primary_metric_value))
+        return _select_by_ordered_score(selection_pool, lower_is_better=True)
+    return _select_by_ordered_score(selection_pool, lower_is_better=False)
+
+
+def _select_by_ordered_score(
+    results: list[ModelTrainingResult],
+    lower_is_better: bool,
+) -> ModelTrainingResult:
+    best_result = results[0]
+    best_value = float(best_result.primary_metric_value)
+    for result in results[1:]:
+        value = float(result.primary_metric_value)
+        is_better = value < best_value if lower_is_better else value > best_value
+        if is_better:
+            best_result = result
+            best_value = value
+    return best_result
 
 
 def baseline_comparison(
@@ -273,7 +315,7 @@ def create_evaluation_plots(
         generated,
         comparison_path,
         run_root,
-        "Model Comparison",
+        "CV Model Comparison",
         "evaluation_model_comparison",
     )
 
@@ -351,9 +393,9 @@ def create_model_comparison_plot(
 
     fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.35), 5))
     ax.bar(labels, values, color=colors)
-    ax.set_title(f"Model Comparison by {primary_metric.upper()} ({direction})")
+    ax.set_title(f"CV Model Comparison by {primary_metric.upper()} ({direction})")
     ax.set_xlabel("Model")
-    ax.set_ylabel(primary_metric.upper())
+    ax.set_ylabel(f"Mean CV {primary_metric.upper()}")
     ax.tick_params(axis="x", rotation=30)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)

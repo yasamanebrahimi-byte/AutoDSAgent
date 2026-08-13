@@ -334,14 +334,20 @@ def evaluation_summary_payload(run_id: str) -> dict:
             "baseline_most_frequent": {"cv_macro_f1_mean": 0.3333},
             "logistic_regression": {"cv_macro_f1_mean": 1.0},
         },
+        "candidate_cv_results": {
+            "logistic_regression": {"cv_macro_f1_mean": 1.0},
+        },
         "cv_model_metrics": {
             "baseline_most_frequent": {"cv_macro_f1_mean": 0.3333},
             "logistic_regression": {"cv_macro_f1_mean": 1.0},
         },
+        "final_test_metrics": {"macro_f1": 1.0},
         "holdout_metrics": {"macro_f1": 1.0},
         "cv_folds": 2,
         "cv_strategy": "stratified_kfold",
         "selection_metric": "macro_f1",
+        "selection_direction": "higher",
+        "selection_tiebreaker": "original_result_order",
         "test_evaluated_model_names": ["logistic_regression"],
         "baseline_comparison": {
             "absolute_improvement": 0.6667,
@@ -351,7 +357,7 @@ def evaluation_summary_payload(run_id: str) -> dict:
         "generated_plots": [
             {
                 "path": "plots/evaluation/model_comparison.png",
-                "label": "Model Comparison",
+                "label": "CV Model Comparison",
                 "category": "evaluation_model_comparison",
             }
         ],
@@ -367,8 +373,22 @@ def model_results_payload(run_id: str) -> dict:
         "task_type": "classification",
         "primary_metric": "macro_f1",
         "selection_direction": "higher",
+        "selection_tiebreaker": "original_result_order",
         "baseline_model_name": "baseline_most_frequent",
         "best_model_name": "logistic_regression",
+        "cv_folds": 2,
+        "cv_strategy": "stratified_kfold",
+        "selection_metric": "macro_f1",
+        "candidate_cv_results": {
+            "logistic_regression": {"cv_macro_f1_mean": 1.0},
+        },
+        "cv_model_metrics": {
+            "baseline_most_frequent": {"cv_macro_f1_mean": 0.3333},
+            "logistic_regression": {"cv_macro_f1_mean": 1.0},
+        },
+        "final_test_metrics": {"macro_f1": 1.0},
+        "holdout_metrics": {"macro_f1": 1.0},
+        "test_evaluated_model_names": ["logistic_regression"],
         "results": [
             {
                 "model_name": "baseline_most_frequent",

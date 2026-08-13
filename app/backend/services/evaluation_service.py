@@ -12,9 +12,11 @@ from app.backend.services.run_manager import RunManager
 from app.tools.evaluation import (
     PRIMARY_METRIC_BY_TASK,
     SELECTION_DIRECTION_BY_TASK,
+    SELECTION_TIEBREAKER,
     baseline_comparison,
     create_evaluation_plots,
     evaluate_holdout_model,
+    refit_model_on_training_partition,
     select_best_model,
 )
 from app.tools.file_utils import load_json, save_json
@@ -57,6 +59,7 @@ class EvaluationService:
             raise FileNotFoundError(paths.root)
 
         best_result = select_best_model(training_results, prepared.task_type)
+        best_result = refit_model_on_training_partition(best_result, prepared)
         best_result = evaluate_holdout_model(best_result, prepared)
         baseline_result = next(
             (result for result in training_results if result.role == "baseline"),
@@ -77,6 +80,11 @@ class EvaluationService:
             for result in training_results
             if result.status == "succeeded"
         }
+        candidate_cv_results = {
+            result.model_name: result.cv_metrics
+            for result in training_results
+            if result.status == "succeeded" and result.role == "candidate"
+        }
         model_failures = [
             f"{result.model_name}: {result.error}"
             for result in training_results
@@ -89,6 +97,7 @@ class EvaluationService:
             )
 
         created_at = datetime.now(timezone.utc).isoformat()
+        selection_direction = SELECTION_DIRECTION_BY_TASK[prepared.task_type]
         summary_payload = {
             "run_id": run_id,
             "target_column": prepared.target_column,
@@ -98,11 +107,15 @@ class EvaluationService:
             "baseline_metrics": baseline_result.cv_metrics if baseline_result else {},
             "best_model_metrics": best_result.holdout_metrics,
             "all_model_metrics": all_model_metrics,
+            "candidate_cv_results": candidate_cv_results,
             "cv_model_metrics": all_model_metrics,
+            "final_test_metrics": best_result.holdout_metrics,
             "holdout_metrics": best_result.holdout_metrics,
             "cv_folds": prepared.cv_folds,
             "cv_strategy": prepared.cv_strategy,
             "selection_metric": primary_metric,
+            "selection_direction": selection_direction,
+            "selection_tiebreaker": SELECTION_TIEBREAKER,
             "test_evaluated_model_names": [best_result.model_name],
             "baseline_comparison": baseline_comparison(
                 baseline_result,
@@ -121,13 +134,16 @@ class EvaluationService:
             "target_column": prepared.target_column,
             "task_type": prepared.task_type,
             "primary_metric": primary_metric,
-            "selection_direction": SELECTION_DIRECTION_BY_TASK[prepared.task_type],
+            "selection_direction": selection_direction,
+            "selection_tiebreaker": SELECTION_TIEBREAKER,
             "baseline_model_name": baseline_result.model_name if baseline_result else None,
             "best_model_name": best_result.model_name,
             "cv_folds": prepared.cv_folds,
             "cv_strategy": prepared.cv_strategy,
             "selection_metric": primary_metric,
+            "candidate_cv_results": candidate_cv_results,
             "cv_model_metrics": all_model_metrics,
+            "final_test_metrics": best_result.holdout_metrics,
             "holdout_metrics": best_result.holdout_metrics,
             "test_evaluated_model_names": [best_result.model_name],
             "results": serialize_training_results(training_results),

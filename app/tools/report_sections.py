@@ -126,11 +126,17 @@ def build_executive_summary_section(artifacts: Artifacts) -> ReportSection:
             "best_model_name",
         )
         metric_value = _metric_value(
-            evaluation_summary.get("best_model_metrics", {}),
+            _final_test_metrics(evaluation_summary),
             str(primary_metric) if primary_metric else None,
         )
-        suffix = f" ({primary_metric}: {metric_value})" if metric_value is not None else ""
-        bullets.append(f"Modeling result: `{best_model}` was selected as the best model{suffix}.")
+        suffix = (
+            f"; final test {primary_metric}: {metric_value}"
+            if metric_value is not None
+            else ""
+        )
+        bullets.append(
+            f"Modeling result: `{best_model}` was selected by training-only CV{suffix}."
+        )
     else:
         bullets.append("Modeling result: modeling artifacts were not available, so this report does not claim model performance.")
 
@@ -579,9 +585,9 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
         )
 
     primary_metric = summary.get("primary_metric")
-    best_metrics = summary.get("best_model_metrics") or {}
+    best_metrics = _final_test_metrics(summary)
     baseline_metrics = summary.get("baseline_metrics") or {}
-    all_model_metrics = summary.get("all_model_metrics") or {}
+    all_model_metrics = _cv_model_metrics(summary)
     comparison = summary.get("baseline_comparison") or {}
     parts = [
         _metric_definitions(str(summary.get("task_type"))),
@@ -589,7 +595,7 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
         "Baseline CV metrics:",
         _markdown_table(["Metric", "Value"], sorted(baseline_metrics.items())),
         "",
-        "Selected model holdout metrics:",
+        "Selected model final test metrics:",
         _markdown_table(["Metric", "Value"], sorted(best_metrics.items())),
     ]
     if all_model_metrics:
@@ -639,13 +645,17 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
 
     if primary_metric:
         parts.extend(["", f"Primary metric used for CV model selection: `{primary_metric}`."])
+    if summary.get("selection_direction"):
+        parts.append(f"Selection direction: `{summary.get('selection_direction')}`.")
+    if summary.get("selection_tiebreaker"):
+        parts.append(f"Tie-breaker: `{summary.get('selection_tiebreaker')}`.")
 
     evaluated_models = _as_list(summary.get("test_evaluated_model_names"))
     if evaluated_models:
         parts.extend(
             [
                 "",
-                "Holdout test evaluation was run for:",
+                "Final holdout test evaluation was run for:",
                 *_markdown_list(evaluated_models),
             ]
         )
@@ -679,7 +689,7 @@ def build_best_model_section(artifacts: Artifacts) -> ReportSection:
         "primary_metric",
     )
     best_value = _metric_value(
-        evaluation_summary.get("best_model_metrics", {}) if evaluation_summary else {},
+        _final_test_metrics(evaluation_summary) if evaluation_summary else {},
         str(primary_metric) if primary_metric else None,
     )
     comparison = evaluation_summary.get("baseline_comparison") if evaluation_summary else {}
@@ -690,7 +700,7 @@ def build_best_model_section(artifacts: Artifacts) -> ReportSection:
                 ("Best model", best_model),
                 ("Baseline model", baseline_model),
                 ("Primary metric", primary_metric),
-                ("Best model primary metric value", best_value),
+                ("Best model final test metric value", best_value),
                 ("Baseline absolute improvement", (comparison or {}).get("absolute_improvement")),
                 ("Baseline percent improvement", _percent_text((comparison or {}).get("percent_improvement"))),
             ],
@@ -1019,6 +1029,28 @@ def _metric_value(metrics: Mapping[str, Any], primary_metric: str | None) -> Any
     if not primary_metric:
         return None
     return metrics.get(primary_metric)
+
+
+def _final_test_metrics(summary: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not summary:
+        return {}
+    return (
+        summary.get("final_test_metrics")
+        or summary.get("holdout_metrics")
+        or summary.get("best_model_metrics")
+        or {}
+    )
+
+
+def _cv_model_metrics(summary: Mapping[str, Any] | None) -> Mapping[str, Mapping[str, Any]]:
+    if not summary:
+        return {}
+    return (
+        summary.get("cv_model_metrics")
+        or summary.get("candidate_cv_results")
+        or summary.get("all_model_metrics")
+        or {}
+    )
 
 
 def _shape_text(shape: Any) -> str:

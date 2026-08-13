@@ -802,7 +802,7 @@ def render_workflow_artifacts(run_id: str, state: dict[str, Any]) -> None:
                 )
             if evaluation_summary:
                 st.dataframe(
-                    _metrics_dataframe(evaluation_summary.get("best_model_metrics", {})),
+                    _metrics_dataframe(_final_test_metrics(evaluation_summary)),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -1164,7 +1164,7 @@ def render_modeling_response(run_id: str, response: dict[str, Any]) -> None:
     split_cols[1].metric("Train rows", modeling_summary["train_rows"])
     split_cols[2].metric("Test rows", modeling_summary["test_rows"])
 
-    st.subheader("Model Metrics")
+    st.subheader("CV Model Selection Metrics")
     comparison_table = _model_comparison_dataframe(model_results, evaluation_summary)
     if not comparison_table.empty:
         st.dataframe(comparison_table, use_container_width=True, hide_index=True)
@@ -1180,9 +1180,9 @@ def render_modeling_response(run_id: str, response: dict[str, Any]) -> None:
             hide_index=True,
         )
     with right:
-        st.subheader("Best Model Metrics")
+        st.subheader("Final Test Metrics")
         st.dataframe(
-            _metrics_dataframe(evaluation_summary.get("best_model_metrics", {})),
+            _metrics_dataframe(_final_test_metrics(evaluation_summary)),
             use_container_width=True,
             hide_index=True,
         )
@@ -1463,15 +1463,20 @@ def _model_comparison_dataframe(
                 "Role": record.get("role"),
                 "Status": record.get("status"),
             }
-            row.update(record.get("metrics", {}))
+            row.update(record.get("cv_metrics") or record.get("metrics", {}))
             if record.get("primary_metric_value") is not None:
-                row["Primary metric value"] = record.get("primary_metric_value")
+                row["Selection metric value"] = record.get("primary_metric_value")
             if record.get("error"):
                 row["Error"] = record.get("error")
             rows.append(row)
         return pd.DataFrame(rows)
 
-    all_metrics = evaluation_summary.get("all_model_metrics", {})
+    all_metrics = (
+        evaluation_summary.get("cv_model_metrics")
+        or evaluation_summary.get("candidate_cv_results")
+        or evaluation_summary.get("all_model_metrics")
+        or {}
+    )
     if not all_metrics:
         return pd.DataFrame()
 
@@ -1481,6 +1486,15 @@ def _model_comparison_dataframe(
         row.update(metrics)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _final_test_metrics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
+    return (
+        evaluation_summary.get("final_test_metrics")
+        or evaluation_summary.get("holdout_metrics")
+        or evaluation_summary.get("best_model_metrics")
+        or {}
+    )
 
 
 def _metrics_dataframe(metrics: dict[str, Any]) -> pd.DataFrame:
