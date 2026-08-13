@@ -1,5 +1,13 @@
 # Changelog
 
+## Methodology Hardening
+
+- Changed model selection to use cross-validation on the training partition, followed by one final holdout evaluation for the selected model.
+- Moved learned missing-value handling out of structural cleaning and into sklearn preprocessing pipelines.
+- Added stricter target validation, rare-class handling, target inference reasons, sparse one-hot defaults, and richer classification metrics.
+- Isolated EDA plots under `plots/eda/` so EDA reruns do not delete `plots/evaluation/` artifacts.
+- Updated Docker builds to install with the repository constraints file and added local Compose healthchecks.
+
 ## Week 8 - Portfolio Readiness
 
 - Added full demo runner for regression and classification sample datasets.

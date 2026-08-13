@@ -29,11 +29,11 @@ Each step has a specialist agent wrapper. The orchestrator runs steps until comp
 
 ## Data Cleaning And Safety Explanation
 
-Cleaning is intentionally conservative. It removes exact duplicate rows, imputes moderate missing values, handles categorical unknowns, and records warnings for risky cases. Raw uploads are never overwritten; cleaned data is saved separately as `intermediate/cleaned_data.csv`.
+Cleaning is intentionally conservative. It removes exact duplicate rows, handles structural issues such as safe constant-column drops and deterministic datetime normalization, and records warnings for risky cases. It does not learn medians, modes, or categorical fill values across the full dataset; those preprocessing steps live inside sklearn pipelines. Raw uploads are never overwritten; cleaned data is saved separately as `intermediate/cleaned_data.csv`.
 
 ## Modeling And Evaluation Explanation
 
-Modeling requires a target column and cleaned data. The preprocessing pipeline is fit on the training split, then applied to test data. Regression uses MAE, RMSE, and R2, with RMSE as the primary metric. Classification uses accuracy, precision, recall, F1, and optional ROC-AUC, with F1 as the primary metric.
+Modeling requires an explicit target column and cleaned data. The workflow creates one train/test split, keeps the test split untouched during model selection, compares candidates with cross-validation on the training split, then fits the selected model on the full training partition and evaluates it once on the holdout. Regression uses MAE, RMSE, and R2, with RMSE as the primary CV metric. Classification uses macro F1 for selection and reports weighted F1, macro F1, balanced accuracy, per-class precision/recall/F1, a confusion matrix, and binary ROC-AUC/average precision when feasible.
 
 ## MLflow And Reproducibility Explanation
 
@@ -50,14 +50,14 @@ MLflow is optional. When enabled, modeling logs parameters, metrics, tags, and a
 
 - No paid LLM API calls or natural-language reasoning in the current workflow.
 - No deep learning, time-series, geospatial, or text modeling.
-- Leakage detection is conservative and should be expanded.
+- Temporal leakage checks are still future work.
 - Docker Compose is for local demos, not hardened production deployment.
 - Authentication, authorization, and multi-tenant storage are out of scope.
 
 ## Future Improvements
 
 - Add stronger leakage detection and validation strategies.
-- Add richer cross-validation and model comparison.
+- Add user-facing model selection controls and lightweight hyperparameter options.
 - Add optional LLM-assisted report narration behind explicit configuration.
 - Add production auth and object storage.
 - Add monitoring for run failures, model drift, and data quality trends.
@@ -70,7 +70,7 @@ Because profiling, cleaning, modeling, and evaluation need reproducibility. Dete
 
 ### How do you prevent data leakage?
 
-The project preserves the raw dataset, separates cleaning from modeling, excludes ID-like columns from modeling, and fits preprocessing inside sklearn pipelines on the training split. I would add stronger future checks for target leakage and temporal leakage.
+The project preserves the raw dataset, separates structural cleaning from learned preprocessing, excludes ID-like columns from modeling, performs model selection with CV on the training split only, and evaluates the selected model once on the untouched holdout. I would still add stronger future checks for temporal leakage and domain-specific target leakage.
 
 ### How do approval gates work?
 
@@ -78,11 +78,11 @@ The workflow can pause before cleaning or modeling. The state file records the w
 
 ### How do you decide regression vs. classification?
 
-The preprocessing layer uses deterministic target heuristics. Numeric targets with many unique values are regression; low-cardinality categorical, boolean, or numeric targets are classification. The API and UI can override this.
+The preprocessing layer uses deterministic target heuristics and saves the inference reason. Boolean targets, low-cardinality categorical strings, and low-cardinality discrete numeric targets are classification; continuous numeric and numeric-string targets are regression. Identifier-like, constant, high-cardinality text, and rare-class targets are rejected. Explicit classification requests are validated instead of blindly accepted.
 
 ### How do you choose the best model?
 
-All successful models are evaluated on the holdout test set. Regression selects the lowest RMSE. Classification selects the highest F1. Failed model attempts are recorded and excluded from selection.
+Successful candidates are compared with cross-validation on the training partition only. Regression selects the lowest mean CV RMSE; classification selects the highest mean CV macro F1. After selection, the chosen model is fit on the complete training partition and evaluated once on the untouched holdout test set.
 
 ### What makes this agentic?
 

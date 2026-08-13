@@ -98,11 +98,12 @@ class EDAService:
         useful_numeric_columns = self._useful_numeric_columns(dataframe, schema)
         useful_categorical_columns = self._useful_categorical_columns(dataframe, schema)
 
-        self._reset_plot_directory(paths.plots, paths.root)
+        eda_plots_dir = paths.plots / "eda"
+        self._reset_plot_directory(eda_plots_dir, paths.root)
         generated_plots = self._generate_plots(
             dataframe=dataframe,
             run_root=paths.root,
-            plots_dir=paths.plots,
+            plots_dir=eda_plots_dir,
             schema=schema,
             useful_numeric_columns=useful_numeric_columns,
             useful_categorical_columns=useful_categorical_columns,

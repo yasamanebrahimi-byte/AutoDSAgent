@@ -24,7 +24,7 @@ def test_full_classification_demo_runs_end_to_end(tmp_path):
     assert result.target_column == "churn"
     assert result.task_type == "classification"
     assert result.best_model_name
-    assert result.primary_metric == "f1"
+    assert result.primary_metric == "macro_f1"
     assert result.primary_metric_value is not None
     assert_expected_artifacts_exist(result.artifacts)
 

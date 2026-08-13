@@ -10,14 +10,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml constraints-dev.txt README.md ./
 COPY app ./app
 COPY examples ./examples
 COPY scripts ./scripts
 COPY runs/.gitkeep ./runs/.gitkeep
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install -e ".[mlflow]"
+    && python -m pip install -e ".[mlflow]" -c constraints-dev.txt
 
 EXPOSE 8000 8501
 

@@ -85,7 +85,7 @@ A successful run saves:
 ## Future Work
 
 - Add richer leakage detection.
-- Add cross-validation and model selection controls.
+- Add user-facing model selection controls and lightweight hyperparameter options.
 - Add optional LLM-assisted narrative generation.
 - Add production authentication and artifact storage.
 - Add monitoring dashboards for workflow health and model quality.

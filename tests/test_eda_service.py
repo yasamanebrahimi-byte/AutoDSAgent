@@ -43,7 +43,7 @@ def test_eda_is_generated_from_cleaned_data_and_artifacts_are_saved(tmp_path):
     assert service.eda_report_path(run_id).exists()
     assert response.summary.generated_plots
     assert any(
-        plot.path.startswith("plots/numeric_distributions/")
+        plot.path.startswith("plots/eda/numeric_distributions/")
         for plot in response.summary.generated_plots
     )
     assert any(
@@ -100,14 +100,38 @@ def test_eda_rerun_clears_obsolete_target_plots(tmp_path):
 
     first = service.generate_eda(run_id, EDARequest(target_column="churn"))
     assert any(
-        plot.path.startswith("plots/target_relationships/")
+        plot.path.startswith("plots/eda/target_relationships/")
         for plot in first.summary.generated_plots
     )
 
     second = service.generate_eda(run_id, EDARequest(target_column=None))
 
     assert not any(
-        plot.path.startswith("plots/target_relationships/")
+        plot.path.startswith("plots/eda/target_relationships/")
         for plot in second.summary.generated_plots
     )
-    assert not (paths.plots / "target_relationships").exists()
+    assert not (paths.plots / "eda" / "target_relationships").exists()
+
+
+def test_eda_rerun_does_not_delete_evaluation_plots(tmp_path):
+    manager = RunManager(runs_dir=tmp_path)
+    run_id = "eda-evaluation-isolation-test"
+    paths = manager.create_run(run_id)
+    (paths.input / "raw_data.csv").write_text(
+        "age,income,churn\n"
+        "30,60000,yes\n"
+        "35,70000,no\n"
+        "40,80000,yes\n"
+        "45,90000,no\n"
+        "50,100000,yes\n",
+        encoding="utf-8",
+    )
+    evaluation_plot = paths.plots / "evaluation" / "model_comparison.png"
+    evaluation_plot.parent.mkdir(parents=True, exist_ok=True)
+    evaluation_plot.write_text("existing evaluation artifact", encoding="utf-8")
+
+    service = EDAService(run_manager=manager)
+    service.generate_eda(run_id, EDARequest(target_column="churn"))
+
+    assert evaluation_plot.exists()
+    assert evaluation_plot.read_text(encoding="utf-8") == "existing evaluation artifact"

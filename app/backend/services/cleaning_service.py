@@ -87,10 +87,14 @@ class CleaningService:
     ) -> CleaningSummary:
         """Apply safe cleaning, save artifacts, and return a summary."""
 
+        requested_target = _normalize_optional_target(target_column)
         try:
             plan = self.load_cleaning_plan(run_id)
         except FileNotFoundError:
-            plan = self.generate_cleaning_plan(run_id)
+            plan = self.generate_cleaning_plan(run_id, target_column=requested_target)
+
+        if _normalize_optional_target(plan.target_column) != requested_target:
+            plan = self.generate_cleaning_plan(run_id, target_column=requested_target)
 
         try:
             profile = self.profiling_service.load_profile(run_id)
@@ -107,7 +111,7 @@ class CleaningService:
             profile=profile.model_dump(mode="json"),
             plan=plan.model_dump(mode="json"),
             config=self.config,
-            target_column=target_column,
+            target_column=requested_target,
         )
 
         cleaned.to_csv(self.cleaned_data_path(run_id), index=False)
@@ -132,3 +136,10 @@ class CleaningService:
         if not path.exists():
             raise FileNotFoundError(path)
         return CleaningSummary(**load_json(path))
+
+
+def _normalize_optional_target(target_column: str | None) -> str | None:
+    if target_column is None:
+        return None
+    target = str(target_column).strip()
+    return target or None

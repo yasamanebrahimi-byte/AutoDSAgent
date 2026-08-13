@@ -13,7 +13,7 @@ Use these as source material and tailor the wording to the role.
 
 - Developed a deterministic tabular ML workflow that profiles datasets, detects data quality issues, applies conservative cleaning, performs EDA, trains regression and classification models, and evaluates results with task-specific metrics.
 - Built sklearn preprocessing pipelines that handle numeric, categorical, boolean, and datetime-like features while excluding ID-like and unsupported free-text columns.
-- Compared baseline and candidate models using RMSE for regression and F1 for classification, saving evaluation summaries, plots, model artifacts, and reproducible metadata.
+- Compared baseline and candidate models with training-only cross-validation using RMSE for regression and macro F1 for classification, then saved holdout evaluation summaries, plots, model artifacts, and reproducible metadata.
 - Integrated optional MLflow experiment tracking for model parameters, metrics, tags, and artifacts without requiring external services for local execution.
 
 ## AI And Agent Version

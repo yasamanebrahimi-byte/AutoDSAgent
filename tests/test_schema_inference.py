@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from app.tools.schema_inference import infer_semantic_type
+from app.tools.schema_inference import infer_identifier, infer_semantic_type
 
 
 def test_numeric_column_detected_as_numeric():
@@ -116,3 +116,51 @@ def test_text_like_column_detected_as_text():
     )
 
     assert infer_semantic_type(series, "customer_notes") == "text"
+
+
+def test_decimal_numeric_strings_are_detected_as_numeric():
+    series = pd.Series(["1.2", "2.4", "3.1", None, "4.8"])
+
+    assert infer_semantic_type(series, "measurement") == "numeric"
+
+
+def test_integer_numeric_strings_are_detected_as_numeric():
+    series = pd.Series(["10", "20", "30", "40"])
+
+    assert infer_semantic_type(series, "amount") == "numeric"
+
+
+def test_mostly_numeric_strings_with_small_malformed_share_are_numeric():
+    series = pd.Series(["10.5", "20.0", "malformed", "30.2", "40.1"])
+
+    assert infer_semantic_type(series, "amount") == "numeric"
+
+
+def test_account_ids_stored_as_numeric_strings_remain_ids():
+    series = pd.Series([f"{100000 + index}" for index in range(30)])
+
+    assert infer_semantic_type(series, "account_id") == "id"
+
+
+def test_zip_code_strings_remain_categorical_codes():
+    series = pd.Series(["02139", "10001", "94105", "02139", "10001"])
+
+    assert infer_semantic_type(series, "zip_code") == "categorical"
+
+
+def test_zero_one_strings_remain_boolean():
+    series = pd.Series(["0", "1", "1", "0", None])
+
+    assert infer_semantic_type(series, "active_flag") == "boolean"
+
+
+def test_infer_identifier_allows_continuous_unique_target_values():
+    series = pd.Series([100_000.0 + index * 1234.56 for index in range(100)])
+
+    assert infer_identifier(series, "revenue", context="target") is False
+
+
+def test_ordinary_integer_scores_are_not_identifiers():
+    series = pd.Series([1, 2, 3, 4, 5] * 10)
+
+    assert infer_identifier(series, "score", context="feature") is False

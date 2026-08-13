@@ -27,8 +27,12 @@ class ModelMetricResult(BaseModel):
     model_name: str
     role: Literal["baseline", "candidate"]
     status: Literal["succeeded", "failed"]
-    metrics: dict[str, float | None] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    cv_metrics: dict[str, Any] = Field(default_factory=dict)
+    holdout_metrics: dict[str, Any] = Field(default_factory=dict)
     primary_metric_value: float | None = None
+    fold_count: int | None = None
+    selection_metric: str | None = None
     error: str | None = None
 
 
@@ -54,6 +58,11 @@ class ModelingSummary(BaseModel):
     excluded_feature_reasons: dict[str, str] = Field(default_factory=dict)
     train_rows: int
     test_rows: int
+    actual_test_size: float | None = None
+    cv_folds: int | None = None
+    cv_strategy: str | None = None
+    task_inference_reason: str | None = None
+    classification_validation: dict[str, Any] = Field(default_factory=dict)
     models_attempted: list[str] = Field(default_factory=list)
     models_succeeded: list[str] = Field(default_factory=list)
     models_failed: list[str] = Field(default_factory=list)
@@ -72,9 +81,15 @@ class EvaluationSummary(BaseModel):
     task_type: TaskType
     primary_metric: str
     best_model_name: str
-    baseline_metrics: dict[str, float | None] = Field(default_factory=dict)
-    best_model_metrics: dict[str, float | None] = Field(default_factory=dict)
-    all_model_metrics: dict[str, dict[str, float | None]] = Field(default_factory=dict)
+    baseline_metrics: dict[str, Any] = Field(default_factory=dict)
+    best_model_metrics: dict[str, Any] = Field(default_factory=dict)
+    all_model_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    cv_model_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    holdout_metrics: dict[str, Any] = Field(default_factory=dict)
+    cv_folds: int | None = None
+    cv_strategy: str | None = None
+    selection_metric: str | None = None
+    test_evaluated_model_names: list[str] = Field(default_factory=list)
     baseline_comparison: dict[str, Any] = Field(default_factory=dict)
     generated_plots: list[EvaluationPlotInfo] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

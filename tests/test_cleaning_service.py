@@ -43,14 +43,13 @@ def test_cleaning_plan_and_safe_cleaning_artifacts_are_saved(tmp_path):
     assert summary.original_shape == [5, 4]
     assert summary.cleaned_shape == [4, 3]
     assert summary.columns_dropped == ["constant"]
-    assert summary.imputation_strategies_used["age"] == "median"
-    assert summary.imputation_strategies_used["segment"] == "Unknown"
-    assert summary.missing_values_after == 0
+    assert summary.imputation_strategies_used == {}
+    assert summary.missing_values_after == 2
 
     cleaned = pd.read_csv(cleaned_path)
     assert "constant" not in cleaned.columns
-    assert cleaned["age"].isna().sum() == 0
-    assert "Unknown" in set(cleaned["segment"])
+    assert cleaned["age"].isna().sum() == 1
+    assert cleaned["segment"].isna().sum() == 1
 
     raw = pd.read_csv(raw_path)
     assert raw.shape == (5, 4)
@@ -92,7 +91,7 @@ def test_numeric_target_missing_values_are_preserved(tmp_path):
     assert summary.target_missing_values_before == 1
     assert summary.target_missing_values_after == 1
     assert cleaned["revenue"].isna().sum() == 1
-    assert cleaned["feature"].isna().sum() == 0
+    assert cleaned["feature"].isna().sum() == 1
     assert raw["revenue"].isna().sum() == 1
 
 
@@ -123,8 +122,39 @@ def test_categorical_target_missing_values_are_preserved(tmp_path):
     assert summary.target_missing_values_before == 1
     assert summary.target_missing_values_after == 1
     assert cleaned["churn"].isna().sum() == 1
-    assert cleaned["feature"].isna().sum() == 0
-    assert "Unknown" in set(cleaned["segment"])
+    assert cleaned["feature"].isna().sum() == 1
+    assert cleaned["segment"].isna().sum() == 1
+
+
+def test_cleaning_regenerates_plan_when_target_changes(tmp_path):
+    manager = RunManager(runs_dir=tmp_path)
+    run_id = "target-change-cleaning-test"
+    paths = manager.create_run(run_id)
+    (paths.input / "raw_data.csv").write_text(
+        "feature,revenue,segment\n"
+        "10,100,A\n"
+        ",200,B\n"
+        "30,,A\n"
+        "40,400,\n"
+        "50,500,B\n",
+        encoding="utf-8",
+    )
+    service = CleaningService(
+        run_manager=manager,
+        profiling_service=ProfilingService(manager),
+    )
+
+    no_target_plan = service.generate_cleaning_plan(run_id)
+    assert no_target_plan.target_column is None
+
+    summary = service.apply_cleaning(run_id, target_column="revenue")
+    regenerated_plan = service.load_cleaning_plan(run_id)
+    cleaned = pd.read_csv(service.cleaned_data_path(run_id))
+
+    assert regenerated_plan.target_column == "revenue"
+    assert summary.target_column == "revenue"
+    assert cleaned["revenue"].isna().sum() == 1
+    assert "revenue" not in summary.imputation_strategies_used
 
 
 def test_high_missingness_threshold_is_consistent_at_eighty_percent():
@@ -143,8 +173,8 @@ def test_high_missingness_threshold_is_consistent_at_eighty_percent():
     plan = generate_cleaning_plan_payload(profile, CleaningConfig())
     by_column = {action["column"]: action for action in plan["missing_value_strategies"]}
 
-    assert by_column["missing_799"]["strategy"] == "median_imputation"
-    assert by_column["missing_799"]["apply"] is True
+    assert by_column["missing_799"]["strategy"] == "defer_to_model_preprocessing"
+    assert by_column["missing_799"]["apply"] is False
     assert by_column["missing_800"]["strategy"] == "review_high_missingness"
     assert by_column["missing_800"]["apply"] is False
     assert by_column["missing_801"]["strategy"] == "review_high_missingness"

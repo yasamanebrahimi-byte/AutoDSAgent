@@ -40,6 +40,8 @@ runs/<run_id>/
 
 The raw CSV is preserved at `input/raw_data.csv`. Later steps save machine-readable JSON, plots, model files, Markdown reports, and workflow logs. Report generation reads available artifacts and produces partial reports when optional upstream artifacts are missing.
 
+EDA and evaluation plots have separate ownership under `plots/eda/` and `plots/evaluation/`. Regenerating EDA clears only EDA plots and does not delete model-evaluation artifacts.
+
 ## Agent Workflow
 
 The automated workflow uses a deterministic state machine:
@@ -53,6 +55,22 @@ Each step updates `logs/workflow_state.json`. Human approval gates can pause cle
 ## Manual Endpoints Versus Workflow
 
 Manual endpoints let users run profiling, cleaning, EDA, modeling, and reports directly. The automated workflow calls the same deterministic services through agent wrappers, so manual and workflow behavior stay aligned.
+
+## Supervised Modeling Flow
+
+Modeling uses one train/test split per run. The test partition is not used for candidate selection:
+
+```text
+target selection
+  -> structural cleaning
+  -> train/test split
+  -> training-only preprocessing
+  -> cross-validated candidate selection on training data
+  -> fit selected model on the complete training partition
+  -> one final evaluation on untouched test data
+```
+
+Structural cleaning may remove exact duplicates, drop safe constant columns, or normalize deterministic datatypes. Learned operations such as numeric imputation, categorical filling, scaling, and one-hot encoding belong to sklearn pipelines and are fit only within CV folds or on the final training partition. Classification uses stratified splitting and stratified CV when class counts make that mathematically reliable; otherwise the workflow fails with a clear rare-class or split-feasibility message.
 
 ## MLflow Integration
 

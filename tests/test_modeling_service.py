@@ -52,7 +52,7 @@ def test_classification_modeling_run_completes_and_saves_artifacts(tmp_path):
 
     assert response.modeling_summary.task_type == "classification"
     assert response.modeling_summary.baseline_model_name == "baseline_most_frequent"
-    assert response.evaluation_summary.primary_metric == "f1"
+    assert response.evaluation_summary.primary_metric == "macro_f1"
     assert "baseline_most_frequent" in response.modeling_summary.models_succeeded
     assert _has_successful_candidate(response.model_results)
     assert (paths.plots / "evaluation" / "model_comparison.png").exists()

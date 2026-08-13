@@ -7,21 +7,39 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_integer_dtype, is_numeric_dtype
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from app.tools.schema_inference import infer_semantic_type
+from app.tools.schema_inference import (
+    infer_identifier,
+    infer_semantic_type,
+    is_boolean_like,
+)
 
 
 TaskType = Literal["regression", "classification"]
 
 VALID_TASK_TYPES: set[str] = {"regression", "classification"}
 MIN_TARGET_NON_NULL_VALUES = 5
+MIN_CLASS_OBSERVATIONS_FOR_HOLDOUT_AND_CV = 3
+DEFAULT_CV_FOLDS = 5
 MAX_TEXT_TARGET_CLASSES = 50
+MAX_CATEGORICAL_FEATURE_LEVELS = 50
+MAX_TOTAL_ONE_HOT_LEVELS = 500
+
+
+@dataclass(frozen=True)
+class TaskInferenceResult:
+    """Task decision with a compact reason for reports and debugging."""
+
+    task_type: TaskType
+    reason: str
+    validation: dict[str, object] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -46,6 +64,11 @@ class PreprocessingResult:
     features_excluded: list[str]
     excluded_feature_reasons: dict[str, str]
     warnings: list[str] = field(default_factory=list)
+    task_inference_reason: str | None = None
+    classification_validation: dict[str, object] = field(default_factory=dict)
+    cv_folds: int = DEFAULT_CV_FOLDS
+    cv_strategy: str = "kfold"
+    actual_test_size: float = 0.2
 
 
 def infer_task_type(
@@ -54,6 +77,21 @@ def infer_task_type(
     requested_task_type: TaskType | str | None = None,
 ) -> TaskType:
     """Infer or validate whether a modeling target is regression or classification."""
+
+    return infer_task_type_with_reason(
+        dataframe=dataframe,
+        target_column=target_column,
+        requested_task_type=requested_task_type,
+    ).task_type
+
+
+def infer_task_type_with_reason(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    requested_task_type: TaskType | str | None = None,
+    test_size: float = 0.2,
+) -> TaskInferenceResult:
+    """Infer or validate the task type and explain the decision."""
 
     _validate_target_exists(dataframe, target_column)
     target = dataframe[target_column]
@@ -69,7 +107,7 @@ def infer_task_type(
     if unique_values <= 1:
         raise ValueError(f"Target column '{target_column}' is constant and cannot be modeled.")
 
-    if _is_likely_id_target(non_null, target_column):
+    if infer_identifier(non_null, target_column, context="target"):
         raise ValueError(
             f"Target column '{target_column}' appears to be an identifier. "
             "Choose an outcome column instead."
@@ -88,29 +126,146 @@ def infer_task_type(
                     f"Target column '{target_column}' cannot be used for regression "
                     "because it is not numeric."
                 )
-        return task_type  # type: ignore[return-value]
+            return TaskInferenceResult(
+                task_type="regression",
+                reason="explicit regression request with numeric target",
+            )
 
-    if is_bool_dtype(target) or _is_boolean_like(non_null):
-        return "classification"
+        validation = validate_classification_target(
+            non_null,
+            target_column=target_column,
+            test_size=test_size,
+            allow_numeric_continuous=False,
+        )
+        return TaskInferenceResult(
+            task_type="classification",
+            reason="explicit classification request validated against target structure",
+            validation=validation,
+        )
+
+    if is_bool_dtype(target) or is_boolean_like(non_null):
+        validation = validate_classification_target(
+            non_null,
+            target_column=target_column,
+            test_size=test_size,
+            allow_numeric_continuous=True,
+        )
+        return TaskInferenceResult(
+            task_type="classification",
+            reason="boolean target -> classification",
+            validation=validation,
+        )
 
     numeric_target = pd.to_numeric(non_null, errors="coerce")
     numeric_ratio = float(numeric_target.notna().mean())
     if is_numeric_dtype(target) or numeric_ratio >= 0.95:
-        numeric_unique_values = int(numeric_target.nunique(dropna=True))
-        if numeric_unique_values <= _low_cardinality_limit(len(non_null)):
-            return "classification"
-        return "regression"
+        if _is_low_cardinality_discrete_numeric_target(numeric_target, len(non_null)):
+            validation = validate_classification_target(
+                non_null,
+                target_column=target_column,
+                test_size=test_size,
+                allow_numeric_continuous=True,
+            )
+            return TaskInferenceResult(
+                task_type="classification",
+                reason="low-cardinality discrete numeric target -> classification",
+                validation=validation,
+            )
+
+        return TaskInferenceResult(
+            task_type="regression",
+            reason="continuous numeric target -> regression",
+        )
 
     unique_ratio = unique_values / max(len(non_null), 1)
-    if unique_values <= MAX_TEXT_TARGET_CLASSES and (
-        unique_values <= 20 or unique_ratio <= 0.5
-    ):
-        return "classification"
+    if unique_values <= 20 and (unique_values <= 5 or unique_ratio <= 0.5):
+        validation = validate_classification_target(
+            non_null,
+            target_column=target_column,
+            test_size=test_size,
+            allow_numeric_continuous=True,
+        )
+        return TaskInferenceResult(
+            task_type="classification",
+            reason="low-cardinality categorical string target -> classification",
+            validation=validation,
+        )
 
     raise ValueError(
         f"Target column '{target_column}' has too many unique text values for the current "
         "classification workflow. Text modeling is future work."
     )
+
+
+def validate_classification_target(
+    series: pd.Series,
+    target_column: str,
+    test_size: float = 0.2,
+    allow_numeric_continuous: bool = False,
+) -> dict[str, object]:
+    """Validate that a target can support classification selection and holdout testing."""
+
+    non_null = series.dropna()
+    row_count = int(len(non_null))
+    if row_count < MIN_TARGET_NON_NULL_VALUES:
+        raise ValueError(
+            f"Target column '{target_column}' must have at least "
+            f"{MIN_TARGET_NON_NULL_VALUES} non-null values."
+        )
+
+    class_counts = non_null.astype(str).value_counts(dropna=False)
+    class_count = int(len(class_counts))
+    if class_count <= 1:
+        raise ValueError(f"Target column '{target_column}' is constant and cannot be modeled.")
+
+    unique_ratio = class_count / max(row_count, 1)
+    min_class_count = int(class_counts.min())
+    if infer_identifier(non_null, target_column, context="target"):
+        raise ValueError(
+            f"Target column '{target_column}' appears to be an identifier. "
+            "Choose an outcome column instead."
+        )
+
+    numeric_target = pd.to_numeric(non_null, errors="coerce")
+    numeric_ratio = float(numeric_target.notna().mean())
+    if (
+        not allow_numeric_continuous
+        and numeric_ratio >= 0.95
+        and not is_boolean_like(non_null)
+        and not _is_low_cardinality_discrete_numeric_target(numeric_target, row_count)
+    ):
+        raise ValueError(
+            f"Target column '{target_column}' looks continuous/high-cardinality, "
+            "so it is not a valid classification target. Use regression or choose "
+            "a discrete outcome."
+        )
+
+    if class_count > MAX_TEXT_TARGET_CLASSES or (
+        class_count > 20 and unique_ratio > 0.5
+    ):
+        raise ValueError(
+            f"Target column '{target_column}' has {class_count} classes "
+            f"({unique_ratio:.1%} unique values), which is too high-cardinality "
+            "for reliable classification."
+        )
+
+    if min_class_count < MIN_CLASS_OBSERVATIONS_FOR_HOLDOUT_AND_CV:
+        raise ValueError(
+            f"Target column '{target_column}' has a rare class with only "
+            f"{min_class_count} observation(s). Classification needs at least "
+            f"{MIN_CLASS_OBSERVATIONS_FOR_HOLDOUT_AND_CV} observations per class "
+            "so one holdout row and at least two training rows remain for CV."
+        )
+
+    split_plan = _classification_split_plan(non_null.astype(str), float(test_size))
+    return {
+        "class_count": class_count,
+        "min_class_count": min_class_count,
+        "unique_ratio": float(unique_ratio),
+        "requested_test_size": float(test_size),
+        "planned_test_rows": int(split_plan["test_rows"]),
+        "planned_train_rows": int(row_count - int(split_plan["test_rows"])),
+    }
 
 
 def prepare_modeling_data(
@@ -125,7 +280,13 @@ def prepare_modeling_data(
     if not 0 < float(test_size) < 1:
         raise ValueError("test_size must be greater than 0 and less than 1.")
 
-    inferred_task_type = infer_task_type(dataframe, target_column, task_type)
+    inference = infer_task_type_with_reason(
+        dataframe=dataframe,
+        target_column=target_column,
+        requested_task_type=task_type,
+        test_size=float(test_size),
+    )
+    inferred_task_type = inference.task_type
     working = dataframe.copy()
 
     if inferred_task_type == "regression":
@@ -145,8 +306,13 @@ def prepare_modeling_data(
 
     if inferred_task_type == "regression":
         y = pd.to_numeric(working[target_column], errors="coerce")
+        split_test_size: float | int = float(test_size)
+        split_warnings: list[str] = []
     else:
         y = working[target_column].astype(str)
+        split_plan = _classification_split_plan(y, float(test_size))
+        split_test_size = int(split_plan["test_rows"])
+        split_warnings = list(split_plan["warnings"])
 
     preprocessor = build_preprocessor(
         numeric_features=feature_metadata["numeric_features"],
@@ -154,27 +320,32 @@ def prepare_modeling_data(
         boolean_features=feature_metadata["boolean_features"],
     )
 
-    stratify_target = (
-        _stratify_target(y, float(test_size))
-        if inferred_task_type == "classification"
-        else None
-    )
     try:
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
-            test_size=float(test_size),
+            test_size=split_test_size,
             random_state=int(random_state),
-            stratify=stratify_target,
+            stratify=y if inferred_task_type == "classification" else None,
         )
-    except ValueError:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=float(test_size),
-            random_state=int(random_state),
-            stratify=None,
-        )
+    except ValueError as exc:
+        if inferred_task_type == "classification":
+            raise ValueError(
+                "The classification target cannot be split into stratified train/test "
+                f"partitions for the requested test_size: {exc}"
+            ) from exc
+        raise
+
+    cv_folds, cv_strategy, cv_warnings = _cv_metadata(
+        y_train=y_train,
+        task_type=inferred_task_type,
+    )
+    warnings = (
+        list(feature_metadata["warnings"])
+        + list(inference.warnings)
+        + split_warnings
+        + cv_warnings
+    )
 
     return PreprocessingResult(
         X_train=X_train,
@@ -194,7 +365,12 @@ def prepare_modeling_data(
         boolean_features=feature_metadata["boolean_features"],
         features_excluded=feature_metadata["features_excluded"],
         excluded_feature_reasons=feature_metadata["excluded_feature_reasons"],
-        warnings=feature_metadata["warnings"],
+        warnings=_deduplicate(warnings),
+        task_inference_reason=inference.reason,
+        classification_validation=inference.validation,
+        cv_folds=cv_folds,
+        cv_strategy=cv_strategy,
+        actual_test_size=float(len(X_test) / len(working)),
     )
 
 
@@ -202,6 +378,7 @@ def build_preprocessor(
     numeric_features: list[str],
     categorical_features: list[str],
     boolean_features: list[str],
+    sparse_output: bool = True,
 ) -> ColumnTransformer:
     """Build a reusable sklearn ColumnTransformer for tabular features."""
 
@@ -220,7 +397,7 @@ def build_preprocessor(
         categorical_pipeline = Pipeline(
             steps=[
                 ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
-                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=sparse_output)),
             ]
         )
         transformers.append(("categorical", categorical_pipeline, categorical_features))
@@ -229,7 +406,7 @@ def build_preprocessor(
         boolean_pipeline = Pipeline(
             steps=[
                 ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=sparse_output)),
             ]
         )
         transformers.append(("boolean", boolean_pipeline, boolean_features))
@@ -240,7 +417,7 @@ def build_preprocessor(
     return ColumnTransformer(
         transformers=transformers,
         remainder="drop",
-        sparse_threshold=0.0,
+        sparse_threshold=1.0 if sparse_output else 0.0,
         verbose_feature_names_out=False,
     )
 
@@ -266,6 +443,7 @@ def _build_feature_frame(
     features_excluded: list[str] = []
     excluded_feature_reasons: dict[str, str] = {}
     warnings: list[str] = []
+    estimated_one_hot_levels = 0
 
     def exclude(column: str, reason: str) -> None:
         if column not in excluded_feature_reasons:
@@ -289,7 +467,7 @@ def _build_feature_frame(
             exclude(column_name, "constant feature")
             continue
 
-        if _is_likely_id_feature(series, column_name):
+        if infer_identifier(series, column_name, context="feature"):
             exclude(column_name, "likely identifier")
             continue
 
@@ -302,6 +480,14 @@ def _build_feature_frame(
         elif semantic_type == "boolean":
             boolean_features.append(column_name)
         elif semantic_type == "categorical":
+            level_count = int(series.nunique(dropna=True))
+            if _is_high_cardinality_categorical(series):
+                exclude(column_name, "high-cardinality categorical feature")
+                continue
+            if estimated_one_hot_levels + level_count > MAX_TOTAL_ONE_HOT_LEVELS:
+                exclude(column_name, "one-hot feature budget exceeded")
+                continue
+            estimated_one_hot_levels += level_count
             categorical_features.append(column_name)
         elif semantic_type == "datetime":
             created_columns = _expand_datetime_feature(working, column_name)
@@ -326,10 +512,15 @@ def _build_feature_frame(
         X[column] = X[column].astype("object")
         X.loc[~missing_mask, column] = X.loc[~missing_mask, column].astype(str)
 
-    if any(reason == "free-text modeling is future work" for reason in excluded_feature_reasons.values()):
+    excluded_reasons = set(excluded_feature_reasons.values())
+    if "free-text modeling is future work" in excluded_reasons:
         warnings.append("Free-text columns were excluded from the current modeling workflow.")
-    if any(reason == "likely identifier" for reason in excluded_feature_reasons.values()):
+    if "likely identifier" in excluded_reasons:
         warnings.append("Likely ID columns were excluded from modeling.")
+    if any("cardinality" in reason or "one-hot" in reason for reason in excluded_reasons):
+        warnings.append(
+            "High-cardinality categorical columns were excluded to avoid excessive one-hot expansion."
+        )
 
     return X, {
         "features_used": features_used,
@@ -385,65 +576,91 @@ def _validate_rows_for_split(row_count: int, test_size: float) -> None:
         )
 
 
-def _stratify_target(y: pd.Series, test_size: float) -> pd.Series | None:
-    class_counts = y.value_counts(dropna=False)
-    if class_counts.empty or int(class_counts.min()) < 2:
-        return None
+def _classification_split_plan(y: pd.Series, test_size: float) -> dict[str, object]:
+    class_counts = y.astype(str).value_counts(dropna=False)
+    row_count = int(len(y))
+    class_count = int(len(class_counts))
+    requested_test_rows = int(math.ceil(row_count * test_size))
+    min_test_rows = class_count
+    max_test_rows = int(sum(max(int(count) - 2, 0) for count in class_counts))
 
-    row_count = len(y)
-    class_count = len(class_counts)
-    test_rows = int(math.ceil(row_count * test_size))
-    train_rows = row_count - test_rows
-    if test_rows < class_count or train_rows < class_count:
-        return None
-
-    return y
-
-
-def _is_likely_id_target(series: pd.Series, column_name: str) -> bool:
-    if _is_id_like_name(column_name):
-        return True
-
-    if is_numeric_dtype(series):
-        numeric = pd.to_numeric(series, errors="coerce")
-        return (
-            len(numeric) >= 20
-            and _unique_ratio(numeric) >= 0.98
-            and is_integer_dtype(numeric)
-            and (numeric.is_monotonic_increasing or numeric.is_monotonic_decreasing)
+    if max_test_rows < min_test_rows:
+        raise ValueError(
+            "The classification target cannot support both a stratified holdout set "
+            "and stratified cross-validation. Each class needs at least three rows."
         )
 
-    return len(series) >= 20 and _unique_ratio(series) >= 0.98
+    test_rows = min(max(requested_test_rows, min_test_rows), max_test_rows)
+    warnings: list[str] = []
+    if test_rows != requested_test_rows:
+        warnings.append(
+            "Classification test_size was adjusted so every class can appear in the "
+            "holdout set while at least two training rows per class remain for CV."
+        )
+
+    train_rows = row_count - test_rows
+    if train_rows < class_count * 2:
+        raise ValueError(
+            "The classification train split would not leave enough rows per class "
+            "for cross-validation."
+        )
+
+    return {"test_rows": int(test_rows), "warnings": warnings}
 
 
-def _is_likely_id_feature(series: pd.Series, column_name: str) -> bool:
-    if _is_id_like_name(column_name):
-        return True
+def _cv_metadata(y_train: pd.Series, task_type: TaskType) -> tuple[int, str, list[str]]:
+    warnings: list[str] = []
+    if task_type == "regression":
+        folds = min(DEFAULT_CV_FOLDS, int(len(y_train)))
+        if folds < 2:
+            raise ValueError("At least two training rows are required for regression CV.")
+        if folds < DEFAULT_CV_FOLDS:
+            warnings.append(f"Regression CV was reduced to {folds} folds for the training size.")
+        return folds, "kfold", warnings
 
-    non_null = series.dropna()
-    if len(non_null) < 20 or _unique_ratio(series) < 0.98:
+    class_counts = y_train.astype(str).value_counts(dropna=False)
+    min_class_count = int(class_counts.min()) if not class_counts.empty else 0
+    folds = min(DEFAULT_CV_FOLDS, min_class_count)
+    if folds < 2:
+        raise ValueError(
+            "The classification train split has a class with fewer than two rows, "
+            "so stratified cross-validation is not reliable."
+        )
+    if folds < DEFAULT_CV_FOLDS:
+        warnings.append(
+            f"Classification CV was reduced to {folds} folds because of rare classes."
+        )
+    return folds, "stratified_kfold", warnings
+
+
+def _is_low_cardinality_discrete_numeric_target(
+    numeric_target: pd.Series,
+    row_count: int,
+) -> bool:
+    numeric = pd.to_numeric(numeric_target, errors="coerce").dropna()
+    if numeric.empty:
         return False
-
-    if is_numeric_dtype(non_null):
-        numeric = pd.to_numeric(non_null, errors="coerce")
-        if is_integer_dtype(numeric) and (
-            numeric.is_monotonic_increasing or numeric.is_monotonic_decreasing
-        ):
-            return True
+    unique_values = int(numeric.nunique(dropna=True))
+    unique_ratio = unique_values / max(row_count, 1)
+    if not _is_integer_like(numeric):
         return False
+    return unique_values <= 10 or (unique_values <= 20 and unique_ratio <= 0.02)
 
-    average_length = float(non_null.astype(str).str.len().mean())
-    if average_length >= 40:
+
+def _is_high_cardinality_categorical(series: pd.Series) -> bool:
+    non_null_count = int(series.notna().sum())
+    if non_null_count == 0:
         return False
+    unique_values = int(series.nunique(dropna=True))
+    unique_ratio = unique_values / non_null_count
+    return unique_values > MAX_CATEGORICAL_FEATURE_LEVELS and unique_ratio > 0.5
 
-    return True
 
-
-def _is_boolean_like(series: pd.Series) -> bool:
-    normalized_values = {str(value).strip().lower() for value in series.dropna().unique()}
-    return len(normalized_values) == 2 and normalized_values.issubset(
-        {"0", "1", "false", "true", "f", "t", "n", "no", "y", "yes"}
-    )
+def _is_integer_like(series: pd.Series) -> bool:
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return False
+    return bool((numeric % 1 == 0).all())
 
 
 def _looks_like_free_text(series: pd.Series) -> bool:
@@ -457,35 +674,11 @@ def _looks_like_free_text(series: pd.Series) -> bool:
     )
 
 
-def _low_cardinality_limit(row_count: int) -> int:
-    return max(10, int(row_count * 0.05))
-
-
 def _unique_ratio(series: pd.Series) -> float:
     non_null_count = int(series.notna().sum())
     if non_null_count == 0:
         return 0.0
     return float(series.nunique(dropna=True) / non_null_count)
-
-
-def _is_id_like_name(column_name: str) -> bool:
-    normalized = _normalize_column_name(column_name)
-    return (
-        normalized == "id"
-        or normalized.endswith("_id")
-        or normalized.startswith("id_")
-        or "_id_" in normalized
-        or "identifier" in normalized
-        or "uuid" in normalized
-        or "guid" in normalized
-    )
-
-
-def _normalize_column_name(column_name: str) -> str:
-    normalized = column_name.strip().lower()
-    for character in (" ", "-", ".", "/"):
-        normalized = normalized.replace(character, "_")
-    return normalized
 
 
 def _unique_feature_name(dataframe: pd.DataFrame, base_name: str) -> str:
@@ -496,3 +689,13 @@ def _unique_feature_name(dataframe: pd.DataFrame, base_name: str) -> str:
     while f"{base_name}_{index}" in dataframe.columns:
         index += 1
     return f"{base_name}_{index}"
+
+
+def _deduplicate(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduplicated: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            deduplicated.append(value)
+    return deduplicated

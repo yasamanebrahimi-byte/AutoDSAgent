@@ -22,19 +22,19 @@ This is a practical summary of the AutoDS Agent API. Full interactive docs are a
 
 - `POST /runs/{run_id}/cleaning-plan`: generate `intermediate/cleaning_plan.json`.
 - `GET /runs/{run_id}/cleaning-plan`: return an existing cleaning plan.
-- `POST /runs/{run_id}/clean`: apply conservative cleaning and save `intermediate/cleaned_data.csv` plus `intermediate/cleaning_summary.json`.
+- `POST /runs/{run_id}/clean`: apply structural cleaning and save `intermediate/cleaned_data.csv` plus `intermediate/cleaning_summary.json`. Learned imputation is deferred to modeling pipelines.
 - `GET /runs/{run_id}/cleaning-summary`: return an existing cleaning summary.
 
 ## EDA And Plots
 
-- `POST /runs/{run_id}/eda`: generate EDA summaries, findings, Markdown EDA summary, and plots.
+- `POST /runs/{run_id}/eda`: generate EDA summaries, findings, Markdown EDA summary, and plots under `plots/eda/`.
 - `GET /runs/{run_id}/eda`: return existing EDA summary and findings.
 - `GET /runs/{run_id}/plots`: list generated plot files.
 - `GET /runs/{run_id}/plots/{plot_path}`: return one generated plot image.
 
 ## Modeling And Evaluation
 
-- `POST /runs/{run_id}/model`: train baseline and candidate models against `intermediate/cleaned_data.csv`, save model artifacts, evaluation summaries, and plots.
+- `POST /runs/{run_id}/model`: train baseline and candidate models against `intermediate/cleaned_data.csv`, select candidates with training-only CV, evaluate the selected model once on the holdout, and save model artifacts, evaluation summaries, and plots under `plots/evaluation/`.
 - `GET /runs/{run_id}/modeling-summary`: return `intermediate/modeling_summary.json`.
 - `GET /runs/{run_id}/evaluation-summary`: return `intermediate/evaluation_summary.json`.
 - `GET /runs/{run_id}/models`: list saved model and result artifacts.

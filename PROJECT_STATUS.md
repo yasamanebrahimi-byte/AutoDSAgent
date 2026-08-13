@@ -12,7 +12,7 @@ AutoDS Agent is portfolio-ready for local demos, GitHub review, interviews, resu
 - Conservative cleaning plans and safe cleaning execution.
 - EDA summaries, findings, Markdown reports, and plots.
 - Regression and classification modeling.
-- Baseline and candidate model evaluation.
+- Training-only cross-validation for candidate selection and final holdout evaluation.
 - Saved model artifacts.
 - Optional MLflow tracking.
 - Autonomous workflow orchestration with approval gates.
@@ -26,15 +26,15 @@ AutoDS Agent is portfolio-ready for local demos, GitHub review, interviews, resu
 
 - No paid LLM API calls or true LLM reasoning are used in the current implementation.
 - Text, time-series, geospatial, deep learning, and causal inference workflows are out of scope.
-- Leakage detection is conservative and should be expanded before production use.
+- Temporal and domain-specific leakage detection should be expanded before production use.
 - Model training is intentionally lightweight for local demo speed.
 - Streamlit and Docker Compose are configured for local demos, not hardened production deployment.
 - Authentication, authorization, user accounts, and multi-tenant storage are not implemented.
 
 ## Future Improvements
 
-- Stronger leakage and target-contamination checks.
-- Cross-validation and richer model selection.
+- Stronger temporal leakage and target-contamination checks.
+- Model selection controls and lightweight hyperparameter options.
 - Optional LLM-assisted narrative generation behind explicit configuration.
 - Production-grade background workers and job queues.
 - Database-backed run metadata.

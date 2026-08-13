@@ -14,7 +14,7 @@ from app.tools.evaluation import (
     SELECTION_DIRECTION_BY_TASK,
     baseline_comparison,
     create_evaluation_plots,
-    evaluate_trained_models,
+    evaluate_holdout_model,
     select_best_model,
 )
 from app.tools.file_utils import load_json, save_json
@@ -50,22 +50,22 @@ class EvaluationService:
         training_results: list[ModelTrainingResult],
         warnings: list[str] | None = None,
     ) -> EvaluationServiceResult:
-        """Evaluate trained models, create plots, and save the evaluation summary."""
+        """Select from CV results, evaluate the best model, and save artifacts."""
 
         paths = self.run_manager.get_paths(run_id)
         if not paths.root.exists():
             raise FileNotFoundError(paths.root)
 
-        evaluated_results = evaluate_trained_models(training_results, prepared)
-        best_result = select_best_model(evaluated_results, prepared.task_type)
+        best_result = select_best_model(training_results, prepared.task_type)
+        best_result = evaluate_holdout_model(best_result, prepared)
         baseline_result = next(
-            (result for result in evaluated_results if result.role == "baseline"),
+            (result for result in training_results if result.role == "baseline"),
             None,
         )
         primary_metric = PRIMARY_METRIC_BY_TASK[prepared.task_type]
 
         generated_plots = create_evaluation_plots(
-            results=evaluated_results,
+            results=training_results,
             prepared=prepared,
             best_result=best_result,
             run_root=paths.root,
@@ -73,13 +73,13 @@ class EvaluationService:
         )
 
         all_model_metrics = {
-            result.model_name: result.metrics
-            for result in evaluated_results
+            result.model_name: result.cv_metrics
+            for result in training_results
             if result.status == "succeeded"
         }
         model_failures = [
             f"{result.model_name}: {result.error}"
-            for result in evaluated_results
+            for result in training_results
             if result.status == "failed" and result.error
         ]
         evaluation_warnings = list(warnings or [])
@@ -95,9 +95,15 @@ class EvaluationService:
             "task_type": prepared.task_type,
             "primary_metric": primary_metric,
             "best_model_name": best_result.model_name,
-            "baseline_metrics": baseline_result.metrics if baseline_result else {},
-            "best_model_metrics": best_result.metrics,
+            "baseline_metrics": baseline_result.cv_metrics if baseline_result else {},
+            "best_model_metrics": best_result.holdout_metrics,
             "all_model_metrics": all_model_metrics,
+            "cv_model_metrics": all_model_metrics,
+            "holdout_metrics": best_result.holdout_metrics,
+            "cv_folds": prepared.cv_folds,
+            "cv_strategy": prepared.cv_strategy,
+            "selection_metric": primary_metric,
+            "test_evaluated_model_names": [best_result.model_name],
             "baseline_comparison": baseline_comparison(
                 baseline_result,
                 best_result,
@@ -118,14 +124,20 @@ class EvaluationService:
             "selection_direction": SELECTION_DIRECTION_BY_TASK[prepared.task_type],
             "baseline_model_name": baseline_result.model_name if baseline_result else None,
             "best_model_name": best_result.model_name,
-            "results": serialize_training_results(evaluated_results),
+            "cv_folds": prepared.cv_folds,
+            "cv_strategy": prepared.cv_strategy,
+            "selection_metric": primary_metric,
+            "cv_model_metrics": all_model_metrics,
+            "holdout_metrics": best_result.holdout_metrics,
+            "test_evaluated_model_names": [best_result.model_name],
+            "results": serialize_training_results(training_results),
             "failed_models": [
                 {
                     "model_name": result.model_name,
                     "role": result.role,
                     "error": result.error,
                 }
-                for result in evaluated_results
+                for result in training_results
                 if result.status == "failed"
             ],
             "created_at": created_at,

@@ -383,6 +383,14 @@ def build_cleaning_methodology_section(artifacts: Artifacts) -> ReportSection:
                     _markdown_table(["Column", "Strategy"], sorted(imputations.items())),
                 ]
             )
+        else:
+            parts.extend(
+                [
+                    "",
+                    "No learned imputation was applied during structural cleaning. "
+                    "Model pipelines learn missing-value preprocessing from training data.",
+                ]
+            )
         if summary.get("warnings"):
             parts.extend(["", "Cleaning warnings:", *_markdown_list(summary.get("warnings", []))])
 
@@ -527,6 +535,9 @@ def build_modeling_methodology_section(artifacts: Artifacts) -> ReportSection:
                 ("Rows used", summary.get("rows_used")),
                 ("Training rows", summary.get("train_rows")),
                 ("Test rows", summary.get("test_rows")),
+                ("CV folds", summary.get("cv_folds")),
+                ("CV strategy", summary.get("cv_strategy")),
+                ("Task inference reason", summary.get("task_inference_reason")),
                 ("Primary metric", summary.get("primary_metric")),
                 ("Best model selection", _selection_logic(summary.get("task_type"), summary.get("primary_metric"))),
             ],
@@ -575,10 +586,10 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
     parts = [
         _metric_definitions(str(summary.get("task_type"))),
         "",
-        "Baseline metrics:",
+        "Baseline CV metrics:",
         _markdown_table(["Metric", "Value"], sorted(baseline_metrics.items())),
         "",
-        "Best model metrics:",
+        "Selected model holdout metrics:",
         _markdown_table(["Metric", "Value"], sorted(best_metrics.items())),
     ]
     if all_model_metrics:
@@ -586,7 +597,7 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
         parts.extend(
             [
                 "",
-                "Model comparison:",
+                "CV model comparison:",
                 _markdown_table(
                     ["Model", *[metric.upper() for metric in metric_names]],
                     [
@@ -627,7 +638,17 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
         parts.extend(["", "Evaluation warnings:", *_markdown_list(summary.get("warnings", []))])
 
     if primary_metric:
-        parts.extend(["", f"Primary metric used for model selection: `{primary_metric}`."])
+        parts.extend(["", f"Primary metric used for CV model selection: `{primary_metric}`."])
+
+    evaluated_models = _as_list(summary.get("test_evaluated_model_names"))
+    if evaluated_models:
+        parts.extend(
+            [
+                "",
+                "Holdout test evaluation was run for:",
+                *_markdown_list(evaluated_models),
+            ]
+        )
 
     return ReportSection(
         "evaluation_results",
@@ -1059,10 +1080,10 @@ def _percent_text(value: Any) -> str:
 
 def _selection_logic(task_type: Any, primary_metric: Any) -> str:
     if task_type == "regression":
-        return f"Lowest {primary_metric} among successful models."
+        return f"Lowest mean CV {primary_metric} among successful candidate models."
     if task_type == "classification":
-        return f"Highest {primary_metric} among successful models."
-    return "Best successful model by the saved primary metric."
+        return f"Highest mean CV {primary_metric} among successful candidate models."
+    return "Best successful candidate model by the saved CV primary metric."
 
 
 def _metric_definitions(task_type: str) -> str:
@@ -1073,8 +1094,10 @@ def _metric_definitions(task_type: str) -> str:
         )
     if task_type == "classification":
         return (
-            "Classification metrics: accuracy is overall percent correct; precision is how often "
-            "positive predictions were correct; recall is how many actual positives were found; "
-            "F1 balances precision and recall."
+            "Classification metrics: macro F1 weights classes equally; weighted F1 follows "
+            "class support; balanced accuracy averages recall across classes; per-class "
+            "precision, recall, F1, and the confusion matrix show class-specific behavior. "
+            "Binary classifiers also report ROC-AUC and average precision when probabilities "
+            "are available."
         )
     return "Metric definitions were unavailable because the task type was not saved."

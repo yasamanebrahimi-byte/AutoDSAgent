@@ -24,6 +24,7 @@ SemanticType = Literal[
     "id",
     "unknown",
 ]
+IdentifierContext = Literal["feature", "target", "profile"]
 
 BOOLEAN_TOKEN_PAIRS = {
     frozenset({"true", "false"}),
@@ -65,7 +66,7 @@ def infer_semantic_type(series: pd.Series, column_name: str) -> SemanticType:
     if non_null.empty:
         return "unknown"
 
-    if is_likely_id_column(series, column_name):
+    if infer_identifier(series, column_name, context="profile"):
         return "id"
 
     if is_boolean_like(series):
@@ -77,6 +78,9 @@ def infer_semantic_type(series: pd.Series, column_name: str) -> SemanticType:
     if is_numeric_dtype(series):
         return "numeric"
 
+    if is_numeric_like_string_feature(series, column_name):
+        return "numeric"
+
     if is_text_like(series):
         return "text"
 
@@ -86,12 +90,16 @@ def infer_semantic_type(series: pd.Series, column_name: str) -> SemanticType:
     return "unknown"
 
 
-def is_likely_id_column(series: pd.Series, column_name: str) -> bool:
-    """Return whether a column has explicit identifier evidence.
+def infer_identifier(
+    series: pd.Series,
+    column_name: str,
+    context: IdentifierContext = "feature",
+) -> bool:
+    """Return whether a column has identifier evidence in the given context.
 
-    High cardinality alone is deliberately not enough: continuous numeric
-    measurements, regression targets, latitudes, probabilities, and random
-    floats are often unique without being identifiers.
+    Feature/profile inference can remove obvious identifiers aggressively. Target
+    inference is intentionally narrower so continuous regression outcomes are
+    not rejected merely because every value is unique.
     """
 
     non_null = series.dropna()
@@ -114,15 +122,93 @@ def is_likely_id_column(series: pd.Series, column_name: str) -> bool:
     if unique_ratio < 0.98:
         return False
 
-    if is_numeric_dtype(non_null):
-        return has_code_name and _is_integer_like_numeric(non_null)
+    numeric = pd.to_numeric(non_null, errors="coerce")
+    numeric_ratio = float(numeric.notna().mean()) if len(non_null) else 0.0
+    if is_numeric_dtype(non_null) or numeric_ratio >= 0.98:
+        numeric = numeric.dropna()
+        if numeric.empty or not _is_integer_like_numeric(numeric):
+            return False
+        if context == "target":
+            return has_code_name and bool(
+                numeric.is_monotonic_increasing or numeric.is_monotonic_decreasing
+            )
+        return has_code_name or bool(
+            numeric.is_monotonic_increasing or numeric.is_monotonic_decreasing
+        )
 
     string_values = non_null.astype(str).str.strip()
     average_length = float(string_values.str.len().mean())
     if average_length >= 40:
         return False
 
+    if context == "target":
+        return has_code_name and _looks_like_fixed_format_codes(string_values)
+
     return has_code_name and _looks_like_fixed_format_codes(string_values)
+
+
+def is_likely_id_column(series: pd.Series, column_name: str) -> bool:
+    """Return whether a column has explicit identifier evidence.
+
+    High cardinality alone is deliberately not enough: continuous numeric
+    measurements, regression targets, latitudes, probabilities, and random
+    floats are often unique without being identifiers.
+    """
+
+    return infer_identifier(series, column_name, context="profile")
+
+
+def is_numeric_like_string_feature(
+    series: pd.Series,
+    column_name: str,
+    parse_threshold: float = 0.8,
+) -> bool:
+    """Return whether an object/string feature should be modeled as numeric."""
+
+    if is_numeric_dtype(series):
+        return False
+    if not (is_object_dtype(series) or is_string_dtype(series)):
+        return False
+    if infer_identifier(series, column_name, context="feature"):
+        return False
+    if is_boolean_like(series):
+        return False
+
+    non_null = series.dropna()
+    if len(non_null) < 3:
+        return False
+
+    text_values = non_null.astype(str).str.strip()
+    numeric = pd.to_numeric(text_values, errors="coerce")
+    if float(numeric.notna().mean()) < parse_threshold:
+        return False
+    if int(numeric.nunique(dropna=True)) <= 1:
+        return False
+    if _looks_like_categorical_numeric_codes(text_values, numeric, column_name):
+        return False
+
+    return True
+
+
+def _looks_like_categorical_numeric_codes(
+    values: pd.Series,
+    numeric: pd.Series,
+    column_name: str,
+) -> bool:
+    if not _is_postal_or_code_name(column_name):
+        return False
+
+    numeric_non_null = numeric.dropna()
+    if numeric_non_null.empty or not _is_integer_like_numeric(numeric_non_null):
+        return False
+
+    integer_like_values = values[numeric.notna()]
+    stripped = integer_like_values.str.replace(r"^[+-]", "", regex=True)
+    if not stripped.str.fullmatch(r"\d+").all():
+        return False
+
+    lengths = stripped.str.len()
+    return int(lengths.nunique(dropna=True)) <= 2 and float(lengths.mean()) >= 2
 
 
 def is_boolean_like(series: pd.Series) -> bool:
@@ -242,6 +328,22 @@ def _is_code_name(column_name: str) -> bool:
             "code",
             "number",
             "num",
+        }
+    )
+
+
+def _is_postal_or_code_name(column_name: str) -> bool:
+    normalized = _normalize_column_name(column_name)
+    parts = {part for part in normalized.split("_") if part}
+    return bool(
+        parts
+        & {
+            "zip",
+            "zipcode",
+            "postal",
+            "postcode",
+            "code",
+            "fips",
         }
     )
 

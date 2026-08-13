@@ -1,4 +1,5 @@
 import pandas as pd
+from scipy import sparse
 
 from app.tools.preprocessing import prepare_modeling_data
 
@@ -67,3 +68,63 @@ def test_preprocessing_excludes_rows_with_missing_target_values():
     assert prepared.train_rows + prepared.test_rows == 5
     assert prepared.y_train.isna().sum() == 0
     assert prepared.y_test.isna().sum() == 0
+
+
+def test_preprocessing_uses_numeric_looking_string_features_as_numeric():
+    dataframe = pd.DataFrame(
+        {
+            "numeric_text": ["1.2", "2.4", "3.1", None, "5.5", "6.2"] * 5,
+            "target": [float(index) for index in range(30)],
+        }
+    )
+
+    prepared = prepare_modeling_data(
+        dataframe=dataframe,
+        target_column="target",
+        task_type="regression",
+        random_state=42,
+    )
+
+    assert "numeric_text" in prepared.numeric_features
+    assert "numeric_text" not in prepared.categorical_features
+
+
+def test_high_cardinality_categorical_feature_is_excluded_before_one_hot():
+    dataframe = pd.DataFrame(
+        {
+            "category": [f"category-{index:03d}" for index in range(80)],
+            "signal": [index % 7 for index in range(80)],
+            "target": [float(index) for index in range(80)],
+        }
+    )
+
+    prepared = prepare_modeling_data(
+        dataframe=dataframe,
+        target_column="target",
+        task_type="regression",
+        random_state=42,
+    )
+
+    assert prepared.excluded_feature_reasons["category"] == (
+        "high-cardinality categorical feature"
+    )
+    assert "category" not in prepared.features_used
+
+
+def test_sparse_one_hot_output_is_preserved_for_compatible_pipelines():
+    dataframe = pd.DataFrame(
+        {
+            "category": [f"group_{index % 20}" for index in range(80)],
+            "target": [float(index % 11) for index in range(80)],
+        }
+    )
+
+    prepared = prepare_modeling_data(
+        dataframe=dataframe,
+        target_column="target",
+        task_type="regression",
+        random_state=42,
+    )
+    transformed = prepared.preprocessor.fit_transform(prepared.X_train, prepared.y_train)
+
+    assert sparse.issparse(transformed)

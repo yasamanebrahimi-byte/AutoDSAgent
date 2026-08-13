@@ -16,10 +16,13 @@ import pandas as pd
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
     confusion_matrix,
     f1_score,
     mean_absolute_error,
     mean_squared_error,
+    precision_recall_fscore_support,
     precision_score,
     r2_score,
     recall_score,
@@ -37,7 +40,7 @@ from app.tools.preprocessing import (
 
 PRIMARY_METRIC_BY_TASK: dict[TaskType, str] = {
     "regression": "rmse",
-    "classification": "f1",
+    "classification": "macro_f1",
 }
 SELECTION_DIRECTION_BY_TASK: dict[TaskType, str] = {
     "regression": "lower",
@@ -45,38 +48,37 @@ SELECTION_DIRECTION_BY_TASK: dict[TaskType, str] = {
 }
 
 
-def evaluate_trained_models(
-    results: list[ModelTrainingResult],
+def evaluate_holdout_model(
+    result: ModelTrainingResult,
     prepared: PreprocessingResult,
-) -> list[ModelTrainingResult]:
-    """Evaluate successful models and record prediction failures as model failures."""
+) -> ModelTrainingResult:
+    """Evaluate the selected model once on the untouched holdout partition."""
 
-    primary_metric = PRIMARY_METRIC_BY_TASK[prepared.task_type]
+    if result.status != "succeeded" or result.estimator is None:
+        raise RuntimeError("The selected model is unavailable for holdout evaluation.")
 
-    for result in results:
-        if result.status != "succeeded" or result.estimator is None:
-            continue
+    try:
+        predictions = result.estimator.predict(prepared.X_test)
+        result.holdout_predictions = predictions
+        if prepared.task_type == "regression":
+            metrics = compute_regression_metrics(prepared.y_test, predictions)
+        else:
+            probabilities, classes = _predict_probabilities(result.estimator, prepared.X_test)
+            result.holdout_probabilities = probabilities
+            metrics = compute_classification_metrics(
+                prepared.y_test,
+                predictions,
+                probabilities,
+                classes,
+            )
+        result.holdout_metrics = metrics
+    except Exception as exc:
+        result.status = "failed"
+        result.error = str(exc)
+        result.holdout_metrics = {}
+        raise
 
-        try:
-            predictions = result.estimator.predict(prepared.X_test)
-            if prepared.task_type == "regression":
-                metrics = compute_regression_metrics(prepared.y_test, predictions)
-            else:
-                probabilities = _predict_probabilities(result.estimator, prepared.X_test)
-                metrics = compute_classification_metrics(
-                    prepared.y_test,
-                    predictions,
-                    probabilities,
-                )
-            result.metrics = metrics
-            result.primary_metric_value = metrics.get(primary_metric)
-        except Exception as exc:
-            result.status = "failed"
-            result.error = str(exc)
-            result.metrics = {}
-            result.primary_metric_value = None
-
-    return results
+    return result
 
 
 def compute_regression_metrics(
@@ -99,26 +101,76 @@ def compute_classification_metrics(
     y_true: pd.Series | np.ndarray,
     y_pred: pd.Series | np.ndarray,
     y_proba: np.ndarray | None = None,
-) -> dict[str, float | None]:
-    """Compute classification metrics with weighted averaging."""
+    classes: np.ndarray | list[object] | None = None,
+) -> dict[str, Any]:
+    """Compute classification metrics with weighted, macro, and per-class detail."""
 
-    metrics: dict[str, float | None] = {
-        "accuracy": _finite_or_none(accuracy_score(y_true, y_pred)),
-        "precision": _finite_or_none(
-            precision_score(y_true, y_pred, average="weighted", zero_division=0)
+    y_true_labels = np.asarray([str(value) for value in y_true])
+    y_pred_labels = np.asarray([str(value) for value in y_pred])
+    labels = sorted(set(y_true_labels) | set(y_pred_labels), key=str)
+    precision_values, recall_values, f1_values, support_values = (
+        precision_recall_fscore_support(
+            y_true_labels,
+            y_pred_labels,
+            labels=labels,
+            zero_division=0,
+        )
+    )
+    matrix = confusion_matrix(y_true_labels, y_pred_labels, labels=labels)
+    weighted_precision = _finite_or_none(
+        precision_score(y_true_labels, y_pred_labels, average="weighted", zero_division=0)
+    )
+    weighted_recall = _finite_or_none(
+        recall_score(y_true_labels, y_pred_labels, average="weighted", zero_division=0)
+    )
+    weighted_f1 = _finite_or_none(
+        f1_score(y_true_labels, y_pred_labels, average="weighted", zero_division=0)
+    )
+
+    metrics: dict[str, Any] = {
+        "accuracy": _finite_or_none(accuracy_score(y_true_labels, y_pred_labels)),
+        "precision": weighted_precision,
+        "recall": weighted_recall,
+        "f1": weighted_f1,
+        "precision_weighted": weighted_precision,
+        "recall_weighted": weighted_recall,
+        "weighted_f1": weighted_f1,
+        "macro_f1": _finite_or_none(
+            f1_score(y_true_labels, y_pred_labels, average="macro", zero_division=0)
         ),
-        "recall": _finite_or_none(
-            recall_score(y_true, y_pred, average="weighted", zero_division=0)
+        "balanced_accuracy": _finite_or_none(
+            balanced_accuracy_score(y_true_labels, y_pred_labels)
         ),
-        "f1": _finite_or_none(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "per_class": {
+            label: {
+                "precision": _finite_or_none(float(precision_values[index])),
+                "recall": _finite_or_none(float(recall_values[index])),
+                "f1": _finite_or_none(float(f1_values[index])),
+                "support": int(support_values[index]),
+            }
+            for index, label in enumerate(labels)
+        },
+        "confusion_matrix": matrix.astype(int).tolist(),
+        "confusion_matrix_labels": labels,
     }
 
-    unique_classes = sorted({str(value) for value in list(y_true)}, key=str)
-    if y_proba is not None and len(unique_classes) == 2 and y_proba.ndim == 2:
+    if y_proba is not None and len(labels) == 2 and y_proba.ndim == 2:
+        model_classes = [str(value) for value in classes] if classes is not None else labels
+        positive_label = model_classes[-1] if len(model_classes) == 2 else labels[-1]
         try:
-            metrics["roc_auc"] = _finite_or_none(roc_auc_score(y_true, y_proba[:, 1]))
+            positive_index = model_classes.index(positive_label)
+            y_binary = (y_true_labels == positive_label).astype(int)
+            if len(set(y_binary.tolist())) == 2:
+                positive_scores = y_proba[:, positive_index]
+                metrics["roc_auc"] = _finite_or_none(
+                    roc_auc_score(y_binary, positive_scores)
+                )
+                metrics["average_precision"] = _finite_or_none(
+                    average_precision_score(y_binary, positive_scores)
+                )
         except Exception:
             metrics["roc_auc"] = None
+            metrics["average_precision"] = None
 
     return metrics
 
@@ -137,9 +189,12 @@ def select_best_model(
     if not successful_results:
         raise RuntimeError("No models completed successfully.")
 
+    candidate_results = [result for result in successful_results if result.role == "candidate"]
+    selection_pool = candidate_results or successful_results
+
     if task_type == "regression":
-        return min(successful_results, key=lambda result: float(result.primary_metric_value))
-    return max(successful_results, key=lambda result: float(result.primary_metric_value))
+        return min(selection_pool, key=lambda result: float(result.primary_metric_value))
+    return max(selection_pool, key=lambda result: float(result.primary_metric_value))
 
 
 def baseline_comparison(
@@ -225,7 +280,11 @@ def create_evaluation_plots(
     if best_result.estimator is None:
         return generated
 
-    predictions = best_result.estimator.predict(prepared.X_test)
+    predictions = (
+        best_result.holdout_predictions
+        if best_result.holdout_predictions is not None
+        else best_result.estimator.predict(prepared.X_test)
+    )
 
     if prepared.task_type == "regression":
         _append_plot(
@@ -423,13 +482,21 @@ def create_feature_importance_plot(
     return output_path
 
 
-def _predict_probabilities(estimator: Any, X_test: pd.DataFrame) -> np.ndarray | None:
+def _predict_probabilities(
+    estimator: Any,
+    X_test: pd.DataFrame,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     if not hasattr(estimator, "predict_proba"):
-        return None
+        return None, None
     try:
-        return estimator.predict_proba(X_test)
+        probabilities = estimator.predict_proba(X_test)
+        classes = None
+        model = getattr(estimator, "named_steps", {}).get("model")
+        if model is not None and hasattr(model, "classes_"):
+            classes = np.asarray(model.classes_)
+        return probabilities, classes
     except Exception:
-        return None
+        return None, None
 
 
 def _extract_feature_values(model: object) -> np.ndarray | None:

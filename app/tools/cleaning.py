@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -153,6 +152,12 @@ def generate_cleaning_plan_payload(
         if encoding_recommendation is not None:
             encoding_recommendations.append(encoding_recommendation)
 
+    if selected_target is None and missing_value_strategies:
+        warnings_requiring_review.append(
+            "No target column was selected; missing-value fills are deferred so a future "
+            "target column is never accidentally imputed."
+        )
+
     for issue in profile.get("data_quality_issues", []):
         if issue.get("severity") in {"warning", "critical"}:
             warnings_requiring_review.append(str(issue.get("message")))
@@ -237,34 +242,11 @@ def apply_safe_cleaning(
             continue
 
         strategy = str(action.get("strategy"))
-        if strategy == "median_imputation":
-            numeric = pd.to_numeric(cleaned[column], errors="coerce")
-            median = numeric.median()
-            if _is_finite_number(median):
-                cleaned[column] = numeric.fillna(median)
-                imputation_strategies_used[str(column)] = "median"
-            else:
-                warnings.append(
-                    f"Column '{column}' could not be median-imputed because no median was available."
-                )
-        elif strategy == "fill_unknown":
-            cleaned[column] = _fill_missing_preserving_future_behavior(
-                cleaned[column],
-                selected_config.categorical_missing_value,
-            )
-            imputation_strategies_used[str(column)] = selected_config.categorical_missing_value
-        elif strategy == "mode_imputation":
-            modes = cleaned[column].mode(dropna=True)
-            if not modes.empty:
-                cleaned[column] = _fill_missing_preserving_future_behavior(
-                    cleaned[column],
-                    modes.iloc[0],
-                )
-                imputation_strategies_used[str(column)] = "mode"
-            else:
-                warnings.append(
-                    f"Column '{column}' could not be mode-imputed because no mode was available."
-                )
+        warnings.append(
+            f"Missing-value strategy '{strategy}' for column '{column}' was not "
+            "applied during structural cleaning. Model pipelines learn imputation "
+            "statistics from the training partition only."
+        )
 
     for action in plan.get("type_conversion_recommendations", []):
         if not bool(action.get("apply", False)):
@@ -356,9 +338,12 @@ def _missing_value_action(
         return {
             "action_type": "missing_values",
             "column": column_name,
-            "strategy": "median_imputation",
-            "reason": "Median imputation is a conservative numeric default.",
-            "apply": True,
+            "strategy": "defer_to_model_preprocessing",
+            "reason": (
+                "Numeric imputation learns a statistic, so it is deferred to sklearn "
+                "pipelines fitted inside the training workflow."
+            ),
+            "apply": False,
             "details": {"missing_percentage": missing_percentage},
         }
 
@@ -366,9 +351,12 @@ def _missing_value_action(
         return {
             "action_type": "missing_values",
             "column": column_name,
-            "strategy": "fill_unknown",
-            "reason": "Missing labels can be preserved as an explicit Unknown category.",
-            "apply": True,
+            "strategy": "defer_to_model_preprocessing",
+            "reason": (
+                "Categorical missing-value filling is deferred to sklearn pipelines so "
+                "the training partition owns learned preprocessing."
+            ),
+            "apply": False,
             "details": {"missing_percentage": missing_percentage},
         }
 
@@ -376,9 +364,12 @@ def _missing_value_action(
         return {
             "action_type": "missing_values",
             "column": column_name,
-            "strategy": "mode_imputation",
-            "reason": "Mode imputation is a conservative boolean default.",
-            "apply": True,
+            "strategy": "defer_to_model_preprocessing",
+            "reason": (
+                "Boolean mode imputation is deferred to sklearn pipelines fitted on "
+                "training data only."
+            ),
+            "apply": False,
             "details": {"missing_percentage": missing_percentage},
         }
 
@@ -444,19 +435,6 @@ def _columns_to_drop_from_plan(
         and action.get("column") in available
         and action.get("column") != target_column
     ]
-
-
-def _is_finite_number(value: Any) -> bool:
-    try:
-        return math.isfinite(float(value))
-    except (TypeError, ValueError):
-        return False
-
-
-def _fill_missing_preserving_future_behavior(series: pd.Series, value: Any) -> pd.Series:
-    with pd.option_context("future.no_silent_downcasting", True):
-        filled = series.fillna(value)
-    return filled.infer_objects(copy=False)
 
 
 def _deduplicate(values: list[str]) -> list[str]:

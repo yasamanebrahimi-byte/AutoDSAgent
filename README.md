@@ -56,12 +56,13 @@ It is designed to show engineering judgment as well as data science ability.
 - Unique run folders with structured artifacts.
 - Metadata generation and dataset preview.
 - Schema inference and data quality profiling.
-- Conservative cleaning plans and safe cleaning execution.
+- Conservative structural cleaning plans and safe cleaning execution.
 - EDA summaries, findings, Markdown reports, and PNG plots.
 - Target-aware EDA for regression or classification demos.
-- Regression and classification task inference.
-- Baseline and candidate sklearn model training.
-- Task-specific evaluation metrics and plots.
+- Regression and classification task inference with saved reasons.
+- Baseline and candidate sklearn model training with training-only preprocessing.
+- Cross-validated model selection and one final holdout evaluation for the selected model.
+- Task-specific CV and holdout metrics, including richer classification metrics.
 - Saved baseline and best model artifacts.
 - Optional MLflow experiment tracking.
 - Deterministic workflow orchestration with approval gates.
@@ -88,6 +89,24 @@ profile -> cleaning_plan -> cleaning -> eda -> modeling -> report
 ```
 
 The workflow can run from start to finish, pause for human approval, retry failed steps, skip optional modeling when no target is provided, and persist state to `logs/workflow_state.json`. Trace events are saved to `logs/agent_trace.json`.
+
+## Modeling Methodology
+
+The supervised workflow is target-sensitive and keeps learned preprocessing inside sklearn pipelines:
+
+```text
+target selection
+  -> structural cleaning
+  -> train/test split
+  -> training-only preprocessing
+  -> cross-validated candidate selection on training data
+  -> fit selected model on the complete training partition
+  -> one final evaluation on the untouched test data
+```
+
+Cleaning removes or normalizes structural issues such as exact duplicates, constant columns, and deterministic datetime formats. It does not fill missing feature values with whole-dataset medians, modes, or category labels. Numeric/categorical/boolean imputers, scaling, and one-hot encoders are fit inside sklearn pipelines during CV and final training.
+
+Task inference is conservative: boolean targets, low-cardinality categorical strings, and low-cardinality discrete numeric targets are classification; continuous numeric or numeric-string targets are regression. High-cardinality text, identifier-like targets, constant targets, and rare classification classes fail with actionable errors. Classification selection uses macro F1 by default; final classification reporting includes weighted F1, macro F1, balanced accuracy, per-class precision/recall/F1, a confusion matrix, and binary ROC-AUC/average precision when probabilities are available.
 
 ## Architecture
 
@@ -181,6 +200,7 @@ Open:
 - MLflow UI: `http://localhost:5000`
 
 Docker Compose mounts `runs/` and `mlruns/` so local artifacts persist between restarts.
+The image install uses `constraints-dev.txt` so the local/demo Docker environment follows the same pinned dependency strategy as tests.
 
 ## Try The Example Datasets
 
@@ -242,10 +262,11 @@ runs/<run_id>/
     best_model.pkl
     model_results.json
   plots/
-    missing_values.png
-    numeric_distributions/
-    categorical_distributions/
-    target_relationships/
+    eda/
+      missing_values.png
+      numeric_distributions/
+      categorical_distributions/
+      target_relationships/
     evaluation/
   reports/
     eda_summary.md
@@ -378,15 +399,15 @@ autods-agent/
 
 - The current agent workflow is deterministic and does not use paid LLM reasoning.
 - Text, time-series, geospatial, deep learning, and causal inference workflows are out of scope.
-- Leakage detection is conservative and should be expanded before production use.
+- Temporal and domain-specific leakage checks should be expanded before production use.
 - Model training is intentionally lightweight for local demo speed.
 - Reports summarize saved artifacts and do not invent unavailable findings.
 - Docker Compose is intended for local demos, not hardened production deployment.
 
 ## Future Work
 
-- Stronger leakage and target-contamination checks.
-- Cross-validation and richer model comparison.
+- Stronger temporal leakage and target-contamination checks.
+- User-facing model selection controls and lightweight hyperparameter options.
 - Optional LLM-assisted narrative generation behind explicit configuration.
 - Background workers for long-running workflow steps.
 - Database-backed run metadata and object storage for artifacts.

@@ -1080,16 +1080,18 @@ def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
         return
 
     default_target = st.session_state.get("recommended_target_column")
+    target_options = ["Select a target"] + column_names
     ensure_widget_value(
         "modeling_target_column",
-        column_names,
-        default_target if default_target in column_names else column_names[0],
+        target_options,
+        default_target if default_target in column_names else "Select a target",
     )
-    target_column = st.selectbox(
+    selected_target = st.selectbox(
         "Target column",
-        options=column_names,
+        options=target_options,
         key="modeling_target_column",
     )
+    target_column = None if selected_target == "Select a target" else selected_target
     task_options = ["Auto-detect", "Regression", "Classification"]
     recommended_task = st.session_state.get("recommended_task_type", "Auto-detect")
     ensure_widget_value(
@@ -1111,7 +1113,15 @@ def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
         key="modeling_test_size",
     )
 
-    if st.button("Train and Evaluate Models", type="primary", key="train_models"):
+    if target_column is None:
+        st.info("Select a target before modeling.")
+
+    if st.button(
+        "Train and Evaluate Models",
+        type="primary",
+        key="train_models",
+        disabled=target_column is None,
+    ):
         payload = {
             "target_column": target_column,
             "task_type": None
