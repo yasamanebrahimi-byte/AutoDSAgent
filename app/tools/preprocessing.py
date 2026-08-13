@@ -300,10 +300,6 @@ def prepare_modeling_data(
             f"Target column '{target_column}' is constant after removing missing values."
         )
 
-    X, feature_metadata = _build_feature_frame(working, target_column)
-    if X.empty or not feature_metadata["features_used"]:
-        raise ValueError("No usable feature columns remain after preprocessing exclusions.")
-
     if inferred_task_type == "regression":
         y = pd.to_numeric(working[target_column], errors="coerce")
         split_test_size: float | int = float(test_size)
@@ -314,15 +310,9 @@ def prepare_modeling_data(
         split_test_size = int(split_plan["test_rows"])
         split_warnings = list(split_plan["warnings"])
 
-    preprocessor = build_preprocessor(
-        numeric_features=feature_metadata["numeric_features"],
-        categorical_features=feature_metadata["categorical_features"],
-        boolean_features=feature_metadata["boolean_features"],
-    )
-
     try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
+        train_frame, test_frame, y_train, y_test = train_test_split(
+            working,
             y,
             test_size=split_test_size,
             random_state=int(random_state),
@@ -335,6 +325,22 @@ def prepare_modeling_data(
                 f"partitions for the requested test_size: {exc}"
             ) from exc
         raise
+
+    # Feature metadata is inferred after splitting so holdout-only values cannot
+    # decide which preprocessing columns or levels are learned.
+    X_train, X_test, feature_metadata = _build_feature_frames_from_training_partition(
+        train_dataframe=train_frame,
+        test_dataframe=test_frame,
+        target_column=target_column,
+    )
+    if X_train.empty or not feature_metadata["features_used"]:
+        raise ValueError("No usable feature columns remain after preprocessing exclusions.")
+
+    preprocessor = build_preprocessor(
+        numeric_features=feature_metadata["numeric_features"],
+        categorical_features=feature_metadata["categorical_features"],
+        boolean_features=feature_metadata["boolean_features"],
+    )
 
     cv_folds, cv_strategy, cv_warnings = _cv_metadata(
         y_train=y_train,
@@ -432,11 +438,13 @@ def get_transformed_feature_names(preprocessor: ColumnTransformer) -> list[str]:
     return [str(name) for name in names]
 
 
-def _build_feature_frame(
-    dataframe: pd.DataFrame,
+def _build_feature_frames_from_training_partition(
+    train_dataframe: pd.DataFrame,
+    test_dataframe: pd.DataFrame,
     target_column: str,
-) -> tuple[pd.DataFrame, dict[str, object]]:
-    working = dataframe.copy()
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    train_working = train_dataframe.copy()
+    test_working = test_dataframe.copy()
     numeric_features: list[str] = []
     categorical_features: list[str] = []
     boolean_features: list[str] = []
@@ -450,14 +458,14 @@ def _build_feature_frame(
             features_excluded.append(column)
             excluded_feature_reasons[column] = reason
 
-    for column in list(dataframe.columns):
+    for column in list(train_dataframe.columns):
         column_name = str(column)
 
         if column_name == target_column:
             exclude(column_name, "target column")
             continue
 
-        series = working[column_name]
+        series = train_working[column_name]
         non_null_count = int(series.notna().sum())
         if non_null_count == 0:
             exclude(column_name, "all values are missing")
@@ -475,7 +483,11 @@ def _build_feature_frame(
         if semantic_type == "id" and _looks_like_free_text(series):
             semantic_type = "text"
         if semantic_type == "numeric":
-            working[column_name] = pd.to_numeric(series, errors="coerce")
+            train_working[column_name] = pd.to_numeric(series, errors="coerce")
+            test_working[column_name] = pd.to_numeric(
+                test_working[column_name],
+                errors="coerce",
+            )
             numeric_features.append(column_name)
         elif semantic_type == "boolean":
             boolean_features.append(column_name)
@@ -490,7 +502,11 @@ def _build_feature_frame(
             estimated_one_hot_levels += level_count
             categorical_features.append(column_name)
         elif semantic_type == "datetime":
-            created_columns = _expand_datetime_feature(working, column_name)
+            created_columns = _expand_datetime_feature(
+                train_working,
+                test_working,
+                column_name,
+            )
             if created_columns:
                 exclude(column_name, "expanded into simple datetime features")
                 numeric_features.extend(created_columns)
@@ -502,15 +518,16 @@ def _build_feature_frame(
             exclude(column_name, f"unsupported type: {semantic_type}")
 
     features_used = numeric_features + categorical_features + boolean_features
-    X = working[features_used].copy()
+    X_train = train_working[features_used].copy()
+    X_test = test_working[features_used].copy()
 
     for column in numeric_features:
-        X[column] = pd.to_numeric(X[column], errors="coerce")
+        X_train[column] = pd.to_numeric(X_train[column], errors="coerce")
+        X_test[column] = pd.to_numeric(X_test[column], errors="coerce")
 
     for column in categorical_features + boolean_features:
-        missing_mask = X[column].isna()
-        X[column] = X[column].astype("object")
-        X.loc[~missing_mask, column] = X.loc[~missing_mask, column].astype(str)
+        _stringify_non_missing_values(X_train, column)
+        _stringify_non_missing_values(X_test, column)
 
     excluded_reasons = set(excluded_feature_reasons.values())
     if "free-text modeling is future work" in excluded_reasons:
@@ -522,7 +539,7 @@ def _build_feature_frame(
             "High-cardinality categorical columns were excluded to avoid excessive one-hot expansion."
         )
 
-    return X, {
+    return X_train, X_test, {
         "features_used": features_used,
         "numeric_features": numeric_features,
         "categorical_features": categorical_features,
@@ -533,21 +550,33 @@ def _build_feature_frame(
     }
 
 
-def _expand_datetime_feature(dataframe: pd.DataFrame, column: str) -> list[str]:
-    parsed = pd.to_datetime(dataframe[column], errors="coerce", format="mixed")
-    if int(parsed.notna().sum()) < 2:
+def _stringify_non_missing_values(dataframe: pd.DataFrame, column: str) -> None:
+    missing_mask = dataframe[column].isna()
+    dataframe[column] = dataframe[column].astype("object")
+    dataframe.loc[~missing_mask, column] = dataframe.loc[~missing_mask, column].astype(str)
+
+
+def _expand_datetime_feature(
+    train_dataframe: pd.DataFrame,
+    test_dataframe: pd.DataFrame,
+    column: str,
+) -> list[str]:
+    parsed_train = pd.to_datetime(train_dataframe[column], errors="coerce", format="mixed")
+    if int(parsed_train.notna().sum()) < 2:
         return []
+    parsed_test = pd.to_datetime(test_dataframe[column], errors="coerce", format="mixed")
 
     components = {
-        "year": parsed.dt.year,
-        "month": parsed.dt.month,
-        "day": parsed.dt.day,
-        "dayofweek": parsed.dt.dayofweek,
+        "year": (parsed_train.dt.year, parsed_test.dt.year),
+        "month": (parsed_train.dt.month, parsed_test.dt.month),
+        "day": (parsed_train.dt.day, parsed_test.dt.day),
+        "dayofweek": (parsed_train.dt.dayofweek, parsed_test.dt.dayofweek),
     }
     created_columns: list[str] = []
-    for suffix, values in components.items():
-        feature_name = _unique_feature_name(dataframe, f"{column}__{suffix}")
-        dataframe[feature_name] = values.astype("float64")
+    for suffix, (train_values, test_values) in components.items():
+        feature_name = _unique_feature_name(train_dataframe, f"{column}__{suffix}")
+        train_dataframe[feature_name] = train_values.astype("float64")
+        test_dataframe[feature_name] = test_values.astype("float64")
         created_columns.append(feature_name)
 
     return created_columns

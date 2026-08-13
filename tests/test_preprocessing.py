@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from scipy import sparse
 
 from app.tools.preprocessing import prepare_modeling_data
@@ -128,3 +129,152 @@ def test_sparse_one_hot_output_is_preserved_for_compatible_pipelines():
     transformed = prepared.preprocessor.fit_transform(prepared.X_train, prepared.y_train)
 
     assert sparse.issparse(transformed)
+
+
+def test_numeric_imputer_statistic_is_learned_from_training_partition_only():
+    dataframe = pd.DataFrame(
+        {
+            "feature": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                1000,
+                1001,
+                1002,
+                1003,
+                1004,
+                1005,
+                1006,
+                1007,
+                1008,
+                1009,
+            ],
+            "target": [float(index) * 2.0 for index in range(20)],
+        }
+    )
+    dataframe.loc[[0, 5, 10], "feature"] = None
+
+    prepared = prepare_modeling_data(
+        dataframe,
+        target_column="target",
+        task_type="regression",
+        test_size=0.4,
+        random_state=42,
+    )
+    fitted = prepared.preprocessor.fit(prepared.X_train, prepared.y_train)
+
+    train_median = pd.to_numeric(prepared.X_train["feature"], errors="coerce").median()
+    full_median = pd.to_numeric(dataframe["feature"], errors="coerce").median()
+    learned_median = fitted.named_transformers_["numeric"].named_steps[
+        "imputer"
+    ].statistics_[0]
+
+    assert train_median != full_median
+    assert learned_median == pytest.approx(train_median)
+
+    mutated = dataframe.copy()
+    mutated.loc[prepared.X_test.index, "feature"] = -9999
+    mutated_prepared = prepare_modeling_data(
+        mutated,
+        target_column="target",
+        task_type="regression",
+        test_size=0.4,
+        random_state=42,
+    )
+    mutated_fitted = mutated_prepared.preprocessor.fit(
+        mutated_prepared.X_train,
+        mutated_prepared.y_train,
+    )
+    mutated_learned_median = mutated_fitted.named_transformers_[
+        "numeric"
+    ].named_steps["imputer"].statistics_[0]
+
+    assert mutated_prepared.X_train.index.tolist() == prepared.X_train.index.tolist()
+    assert mutated_learned_median == pytest.approx(learned_median)
+
+
+def test_category_like_preprocessing_is_learned_from_training_partition_only():
+    seed_dataframe = pd.DataFrame(
+        {
+            "flag": ["yes", "no"] * 10,
+            "segment": ["A", "B"] * 10,
+            "numeric_signal": [float(index) for index in range(20)],
+            "target": [float(index) * 1.5 for index in range(20)],
+        }
+    )
+    seed_prepared = prepare_modeling_data(
+        seed_dataframe,
+        target_column="target",
+        task_type="regression",
+        test_size=0.4,
+        random_state=42,
+    )
+
+    dataframe = seed_dataframe.copy()
+    train_indices = seed_prepared.X_train.index.tolist()
+    test_indices = seed_prepared.X_test.index.tolist()
+    dataframe["flag"] = None
+    dataframe.loc[train_indices[:8], "flag"] = "no"
+    dataframe.loc[train_indices[8:10], "flag"] = "yes"
+    dataframe.loc[test_indices, "flag"] = "yes"
+    dataframe.loc[train_indices, "segment"] = ["A", "B"] * 6
+    dataframe.loc[test_indices, "segment"] = "TEST_ONLY_LEVEL"
+
+    prepared = prepare_modeling_data(
+        dataframe,
+        target_column="target",
+        task_type="regression",
+        test_size=0.4,
+        random_state=42,
+    )
+    fitted = prepared.preprocessor.fit(prepared.X_train, prepared.y_train)
+
+    train_mode = prepared.X_train["flag"].mode(dropna=True).iloc[0]
+    full_mode = dataframe["flag"].mode(dropna=True).iloc[0]
+    learned_mode = fitted.named_transformers_["boolean"].named_steps[
+        "imputer"
+    ].statistics_[0]
+    learned_categories = fitted.named_transformers_["categorical"].named_steps[
+        "encoder"
+    ].categories_[0].tolist()
+
+    assert train_mode == "no"
+    assert full_mode == "yes"
+    assert learned_mode == train_mode
+    assert "TEST_ONLY_LEVEL" not in learned_categories
+
+    mutated = dataframe.copy()
+    mutated.loc[test_indices, "flag"] = "no"
+    mutated.loc[test_indices, "segment"] = "DIFFERENT_TEST_ONLY_LEVEL"
+    mutated_prepared = prepare_modeling_data(
+        mutated,
+        target_column="target",
+        task_type="regression",
+        test_size=0.4,
+        random_state=42,
+    )
+    mutated_fitted = mutated_prepared.preprocessor.fit(
+        mutated_prepared.X_train,
+        mutated_prepared.y_train,
+    )
+    mutated_learned_mode = mutated_fitted.named_transformers_[
+        "boolean"
+    ].named_steps["imputer"].statistics_[0]
+    mutated_categories = mutated_fitted.named_transformers_[
+        "categorical"
+    ].named_steps["encoder"].categories_[0].tolist()
+
+    assert mutated_prepared.X_train.index.tolist() == prepared.X_train.index.tolist()
+    assert mutated_prepared.features_used == prepared.features_used
+    assert mutated_prepared.categorical_features == prepared.categorical_features
+    assert mutated_prepared.boolean_features == prepared.boolean_features
+    assert mutated_learned_mode == learned_mode
+    assert mutated_categories == learned_categories
+    assert "DIFFERENT_TEST_ONLY_LEVEL" not in mutated_categories
