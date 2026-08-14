@@ -88,12 +88,17 @@ class WorkflowState(BaseModel):
 
     workflow_version: str = "week6"
     run_id: str
+    generation_id: str | None = None
+    source_fingerprint: str | None = None
     status: WorkflowStatus
     target_column: str | None = None
     task_type: Literal["regression", "classification"] | None = None
+    analysis_input: dict[str, Any] = Field(default_factory=dict)
     current_step: str | None = None
     steps: dict[str, WorkflowStepState]
     artifacts: dict[str, Any] = Field(default_factory=dict)
+    artifact_lineage: dict[str, Any] = Field(default_factory=dict)
+    config_fingerprints: dict[str, str] = Field(default_factory=dict)
     approval_settings: dict[str, bool] = Field(default_factory=dict)
     warnings: list[Any] = Field(default_factory=list)
     errors: list[Any] = Field(default_factory=list)

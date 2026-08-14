@@ -15,6 +15,11 @@ from app.backend.services.dataset_service import (
     validate_csv_filename,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    file_sha256,
+    fingerprint_payload,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 
 
@@ -51,6 +56,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> DatasetMetadata:
             max_size_mb=settings.max_upload_size_mb,
         )
         dataframe = load_csv(raw_path)
+        source_fingerprint = file_sha256(raw_path)
     except Exception as exc:
         run_manager.delete_run(run_id)
         if isinstance(exc, HTTPException):
@@ -63,8 +69,24 @@ async def upload_dataset(file: UploadFile = File(...)) -> DatasetMetadata:
         dataframe=dataframe,
         filename=file.filename,
         run_id=run_id,
+        source_fingerprint=source_fingerprint,
     )
-    run_manager.save_metadata(run_id, metadata.model_dump(mode="json"))
+    metadata_path = run_manager.save_metadata(run_id, metadata.model_dump(mode="json"))
+    write_artifact_lineage(
+        metadata_path,
+        run_root=paths.root,
+        run_id=run_id,
+        artifact_type="metadata",
+        source_fingerprint=source_fingerprint,
+        config_fingerprint=fingerprint_payload(
+            {
+                "artifact_type": "metadata",
+                "source_fingerprint": source_fingerprint,
+            }
+        ),
+        upstream_fingerprints={"source_data": source_fingerprint},
+        relevant_config={"source_fingerprint": source_fingerprint},
+    )
     log_event(
         logger,
         logging.INFO,

@@ -12,6 +12,14 @@ import pandas as pd
 
 from app.backend.schemas.eda import EDAFindings, EDAPlotInfo, EDARequest, EDAResponse, EDASummary
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    fingerprint_payload,
+    invalidate_downstream_artifacts,
+    lineage_context,
+    select_analysis_input,
+    validate_artifact_for_state,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 from app.tools.data_loader import load_csv
 from app.tools.eda_analysis import (
@@ -36,6 +44,7 @@ from app.tools.visualization import (
     create_numeric_target_scatter_plot,
     create_target_distribution_plot,
 )
+from app.workflows.workflow_steps import EDA_STEP
 
 
 RAW_DATASET_WARNING = (
@@ -80,7 +89,11 @@ class EDAService:
         if not paths.root.exists():
             raise FileNotFoundError(paths.root)
 
-        dataset_path, dataset_used, warnings = self._select_dataset(run_id)
+        invalidate_downstream_artifacts(self.run_manager, run_id, EDA_STEP)
+        dataset_selection = self._select_dataset(run_id, options.target_column)
+        dataset_path = dataset_selection.path
+        dataset_used = dataset_selection.dataset_used
+        warnings = list(dataset_selection.warnings)
         dataframe = load_csv(dataset_path)
         schema = infer_schema(dataframe)
 
@@ -132,6 +145,8 @@ class EDAService:
             "run_id": run_id,
             "dataset_used": dataset_used,
             "dataset_path": dataset_path.relative_to(paths.root).as_posix(),
+            "dataset_fingerprint": dataset_selection.fingerprint,
+            "source_fingerprint": dataset_selection.source_fingerprint,
             "target_column": target_column,
             "rows": int(dataframe.shape[0]),
             "columns": int(dataframe.shape[1]),
@@ -167,13 +182,47 @@ class EDAService:
         )
         findings = EDAFindings(**to_json_safe(findings_payload))
 
-        save_json(self.eda_summary_path(run_id), summary.model_dump(mode="json"))
-        save_json(self.eda_findings_path(run_id), findings.model_dump(mode="json"))
+        summary_path = save_json(self.eda_summary_path(run_id), summary.model_dump(mode="json"))
+        findings_path = save_json(self.eda_findings_path(run_id), findings.model_dump(mode="json"))
         self._save_markdown_report(
             path=self.eda_report_path(run_id),
             summary=summary,
             findings=findings,
         )
+        context = lineage_context(self.run_manager, run_id)
+        upstream_key = dataset_selection.dataset_used
+        config_payload = {
+            "artifact_family": "eda",
+            "source_fingerprint": dataset_selection.source_fingerprint,
+            "analysis_input": dataset_selection.dataset_used,
+            "analysis_input_fingerprint": dataset_selection.fingerprint,
+            "target_column": target_column,
+            "max_numeric_plots": options.max_numeric_plots,
+            "max_categorical_plots": options.max_categorical_plots,
+            "max_target_relationship_plots": options.max_target_relationship_plots,
+        }
+        config_fingerprint = fingerprint_payload(config_payload)
+        upstream_fingerprints = {
+            "source_data": dataset_selection.source_fingerprint,
+            upstream_key: dataset_selection.fingerprint,
+        }
+        for artifact_path, artifact_type in (
+            (summary_path, "eda_summary"),
+            (findings_path, "eda_findings"),
+            (self.eda_report_path(run_id), "eda_report"),
+        ):
+            write_artifact_lineage(
+                artifact_path,
+                run_root=paths.root,
+                run_id=run_id,
+                artifact_type=artifact_type,
+                generation_id=context["generation_id"],
+                source_fingerprint=dataset_selection.source_fingerprint,
+                target_column=target_column,
+                config_fingerprint=config_fingerprint,
+                upstream_fingerprints=upstream_fingerprints,
+                relevant_config=config_payload,
+            )
         log_event(
             self.logger,
             logging.INFO,
@@ -194,6 +243,18 @@ class EDAService:
         if not summary_path.exists() or not findings_path.exists():
             missing_path = summary_path if not summary_path.exists() else findings_path
             raise FileNotFoundError(missing_path)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        for artifact_path, artifact_type in (
+            (summary_path, "eda_summary"),
+            (findings_path, "eda_findings"),
+        ):
+            validation = validate_artifact_for_state(
+                artifact_path,
+                artifact_type=artifact_type,
+                state=state,
+            )
+            if not validation.is_current:
+                raise ValueError(f"EDA artifact is stale: {validation.reason}.")
 
         return EDAResponse(
             summary=EDASummary(**load_json(summary_path)),
@@ -238,18 +299,16 @@ class EDAService:
 
         return candidate
 
-    def _select_dataset(self, run_id: str) -> tuple[Path, str, list[str]]:
-        paths = self.run_manager.get_paths(run_id)
-        cleaned_path = paths.intermediate / "cleaned_data.csv"
-        raw_path = paths.input / "raw_data.csv"
-
-        if cleaned_path.exists():
-            return cleaned_path, "cleaned", []
-
-        if raw_path.exists():
-            return raw_path, "raw", [RAW_DATASET_WARNING]
-
-        raise FileNotFoundError(raw_path)
+    def _select_dataset(self, run_id: str, target_column: str | None):
+        selection = select_analysis_input(
+            self.run_manager,
+            run_id,
+            target_column=target_column,
+            require_cleaned=False,
+        )
+        if selection.dataset_used == "raw":
+            selection.warnings.insert(0, RAW_DATASET_WARNING)
+        return selection
 
     def _reset_plot_directory(self, plots_dir: Path, run_root: Path) -> None:
         plots_root = plots_dir.resolve()

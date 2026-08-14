@@ -21,6 +21,10 @@ from app.backend.services.modeling_service import ModelingService
 from app.backend.services.profiling_service import ProfilingService
 from app.backend.services.report_service import ReportService
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    invalidate_downstream_artifacts,
+    select_analysis_input,
+)
 from app.tools.approval import cleaning_approval_decision, modeling_approval_decision
 from app.tools.trace_logger import TraceLogger
 from app.workflows.workflow_state import (
@@ -167,6 +171,10 @@ class AnalysisGraph:
             return self.run_until_pause_or_complete(state)
 
         reason = f"Human reviewer rejected step '{step}'."
+        if step == CLEANING_STEP:
+            invalidate_downstream_artifacts(self.run_manager, run_id, CLEANING_STEP, state)
+        elif step == MODELING_STEP:
+            invalidate_downstream_artifacts(self.run_manager, run_id, MODELING_STEP, state)
         set_step_approval(state, step, "rejected", reason=reason)
         mark_step_skipped(state, step, reason)
         state.setdefault("warnings", []).append(reason)
@@ -202,13 +210,22 @@ class AnalysisGraph:
         agent_name = self._agent_name_for_step(step)
 
         mark_step_running(state, step)
+        invalidated = invalidate_downstream_artifacts(
+            self.run_manager,
+            run_id,
+            step,
+            state,
+        )
         self._trace(
             run_id,
             agent_name,
             step,
             "step_started",
             f"Started step '{step}'.",
-            {"attempt": get_step_state(state, step)["attempts"]},
+            {
+                "attempt": get_step_state(state, step)["attempts"],
+                "invalidated_artifacts": invalidated,
+            },
         )
         self._save_state(state)
 
@@ -351,6 +368,12 @@ class AnalysisGraph:
         if state.get("target_column"):
             return False
 
+        invalidate_downstream_artifacts(
+            self.run_manager,
+            str(state["run_id"]),
+            MODELING_STEP,
+            state,
+        )
         reason = "Modeling was skipped because no target column was provided."
         mark_step_skipped(state, MODELING_STEP, reason)
         self._trace(
@@ -365,11 +388,20 @@ class AnalysisGraph:
 
     def _skip_modeling_without_cleaned_data(self, state: dict[str, Any]) -> bool:
         run_id = str(state["run_id"])
-        cleaned_data_path = self.run_manager.get_paths(run_id).intermediate / "cleaned_data.csv"
-        if cleaned_data_path.exists():
+        try:
+            select_analysis_input(
+                self.run_manager,
+                run_id,
+                target_column=state.get("target_column"),
+                require_cleaned=True,
+                state=state,
+            )
             return False
+        except (FileNotFoundError, ValueError):
+            pass
 
-        reason = "Modeling was skipped because cleaned_data.csv is unavailable."
+        invalidate_downstream_artifacts(self.run_manager, run_id, MODELING_STEP, state)
+        reason = "Modeling was skipped because current cleaned data is unavailable."
         mark_step_skipped(state, MODELING_STEP, reason)
         state.setdefault("warnings", []).append(reason)
         self._trace(

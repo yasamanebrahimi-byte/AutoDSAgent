@@ -6,6 +6,8 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.backend.services.cleaning_service import CleaningService
+from app.tools.artifact_lineage import file_sha256
+from app.workflows.workflow_state import set_analysis_input
 
 
 class CleaningAgent(BaseAgent):
@@ -79,6 +81,16 @@ class CleaningAgent(BaseAgent):
             "cleaning_summary",
             self.cleaning_service.cleaning_summary_path(run_id),
             paths.root,
+        )
+        cleaned_path = self.cleaning_service.cleaned_data_path(run_id)
+        cleaned_fingerprint = file_sha256(cleaned_path)
+        set_analysis_input(
+            updated_state,
+            dataset_used="cleaned",
+            path=cleaned_path.relative_to(paths.root).as_posix(),
+            fingerprint=cleaned_fingerprint,
+            source_fingerprint=updated_state.get("source_fingerprint"),
+            selection_reason="cleaning_completed",
         )
         updated_state["steps"]["cleaning"]["outputs"].update(
             {

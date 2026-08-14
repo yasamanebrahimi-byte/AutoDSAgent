@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.tools.file_utils import ensure_directory, load_json, save_json
+from app.tools.artifact_lineage import new_generation_id
 from app.workflows.workflow_steps import (
     CANONICAL_WORKFLOW_STEPS,
     CLEANING_STEP,
@@ -51,16 +52,28 @@ def create_initial_workflow_state(
     task_type: str | None = None,
     require_cleaning_approval: bool = True,
     require_modeling_approval: bool = True,
+    generation_id: str | None = None,
+    source_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Create a JSON-serializable workflow state payload."""
 
     timestamp = utc_now_iso()
+    selected_generation_id = generation_id or new_generation_id()
     return {
         "workflow_version": "week6",
         "run_id": run_id,
+        "generation_id": selected_generation_id,
+        "source_fingerprint": source_fingerprint,
         "status": "pending",
         "target_column": target_column,
         "task_type": task_type,
+        "analysis_input": {
+            "dataset_used": "raw",
+            "path": "input/raw_data.csv",
+            "fingerprint": source_fingerprint,
+            "source_fingerprint": source_fingerprint,
+            "selection_reason": "workflow_started",
+        },
         "current_step": PROFILE_STEP,
         "steps": {
             step_name: _initial_step_state(
@@ -94,6 +107,8 @@ def create_initial_workflow_state(
             "report_metadata": None,
             "report_index": None,
         },
+        "artifact_lineage": {},
+        "config_fingerprints": {},
         "approval_settings": {
             "require_cleaning_approval": require_cleaning_approval,
             "require_modeling_approval": require_modeling_approval,
@@ -315,6 +330,44 @@ def set_artifact(state: dict[str, Any], key: str, value: Any) -> None:
     """Set a workflow artifact pointer."""
 
     state.setdefault("artifacts", {})[key] = value
+    touch_state(state)
+
+
+def set_artifact_lineage(
+    state: dict[str, Any],
+    key: str,
+    metadata: dict[str, Any] | None,
+) -> None:
+    """Record current lineage metadata for a workflow artifact."""
+
+    if not metadata:
+        return
+    state.setdefault("artifact_lineage", {})[key] = metadata
+    artifact_type = metadata.get("artifact_type") or key
+    config_fingerprint = metadata.get("config_fingerprint")
+    if config_fingerprint:
+        state.setdefault("config_fingerprints", {})[artifact_type] = config_fingerprint
+    touch_state(state)
+
+
+def set_analysis_input(
+    state: dict[str, Any],
+    *,
+    dataset_used: str,
+    path: str,
+    fingerprint: str,
+    source_fingerprint: str | None = None,
+    selection_reason: str,
+) -> None:
+    """Set the explicit dataset input for EDA/modeling/report descendants."""
+
+    state["analysis_input"] = {
+        "dataset_used": dataset_used,
+        "path": path,
+        "fingerprint": fingerprint,
+        "source_fingerprint": source_fingerprint or state.get("source_fingerprint"),
+        "selection_reason": selection_reason,
+    }
     touch_state(state)
 
 

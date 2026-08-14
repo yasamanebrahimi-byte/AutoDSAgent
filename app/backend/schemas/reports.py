@@ -37,6 +37,12 @@ class ReportMetadata(BaseModel):
     """Structured metadata saved after report generation."""
 
     run_id: str
+    generation_id: str | None = None
+    source_fingerprint: str | None = None
+    target_column: str | None = None
+    task_type: str | None = None
+    config_fingerprint: str | None = None
+    source_artifact_lineage: dict[str, dict] = Field(default_factory=dict)
     report_status: ReportStatus
     reports_generated: list[str] = Field(default_factory=list)
     source_artifacts_used: list[str] = Field(default_factory=list)

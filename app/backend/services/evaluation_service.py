@@ -9,6 +9,7 @@ from typing import Any
 
 from app.backend.schemas.modeling import EvaluationSummary
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import lineage_context, validate_artifact_for_state
 from app.tools.evaluation import (
     PRIMARY_METRIC_BY_TASK,
     SELECTION_DIRECTION_BY_TASK,
@@ -172,4 +173,12 @@ class EvaluationService:
         path = self.evaluation_summary_path(run_id)
         if not path.exists():
             raise FileNotFoundError(path)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        validation = validate_artifact_for_state(
+            path,
+            artifact_type="evaluation_summary",
+            state=state,
+        )
+        if not validation.is_current:
+            raise ValueError(f"Evaluation summary artifact is stale: {validation.reason}.")
         return EvaluationSummary(**load_json(path))

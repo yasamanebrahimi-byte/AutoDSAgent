@@ -6,7 +6,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from app.tools.artifact_lineage import load_artifact_lineage
 from app.workflows.workflow_state import relative_to_run, set_artifact
+from app.workflows.workflow_state import set_artifact_lineage
 
 
 class BaseAgent:
@@ -36,3 +38,4 @@ class BaseAgent:
         run_root: str | Path,
     ) -> None:
         set_artifact(state, key, relative_to_run(path, run_root))
+        set_artifact_lineage(state, key, load_artifact_lineage(path))

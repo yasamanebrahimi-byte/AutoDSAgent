@@ -1006,7 +1006,7 @@ def render_eda_workflow(run_id: str, column_names: list[str]) -> None:
 
     st.subheader("Exploratory Data Analysis")
     st.caption(
-        "EDA uses `cleaned_data.csv` when available and falls back to the raw upload with a warning."
+        "EDA uses the workflow's current analysis input and falls back to the raw upload with a warning."
     )
 
     target_options = ["No target column"] + list(column_names)
@@ -1071,7 +1071,7 @@ def render_modeling_workflow(run_id: str, column_names: list[str]) -> None:
 
     st.subheader("Modeling and Evaluation")
     st.caption(
-        "Modeling requires `cleaned_data.csv`, trains deterministic sklearn models, "
+        "Modeling requires current approved cleaned data, trains deterministic sklearn models, "
         "and does not use LLM API calls."
     )
 

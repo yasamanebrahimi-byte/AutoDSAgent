@@ -34,6 +34,7 @@ def generate_dataset_metadata(
     dataframe: pd.DataFrame,
     filename: str,
     run_id: str,
+    source_fingerprint: str | None = None,
     preview_rows: int = 5,
 ) -> DatasetMetadata:
     """Create JSON-safe metadata for a DataFrame."""
@@ -51,6 +52,7 @@ def generate_dataset_metadata(
         },
         duplicate_rows=int(dataframe.duplicated().sum()),
         preview=_json_safe(dataframe.head(preview_rows).to_dict(orient="records")),
+        source_fingerprint=source_fingerprint,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
 

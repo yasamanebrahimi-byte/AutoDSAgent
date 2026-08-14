@@ -13,6 +13,11 @@ from app.backend.schemas.workflow import (
     WorkflowStartRequest,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    fingerprint_payload,
+    source_fingerprint_for_run,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 from app.tools.trace_logger import TraceLogger
 from app.workflows.analysis_graph import build_analysis_graph
@@ -45,9 +50,16 @@ class WorkflowService:
         run_id: str,
         request: WorkflowStartRequest,
     ) -> dict[str, Any]:
-        """Initialize and run a workflow until completion, failure, or approval."""
+        """Start a new logical workflow generation for an existing run.
+
+        Raw uploaded data and source metadata are preserved, but derived
+        artifacts from earlier generations must be regenerated or pass lineage
+        validation before downstream stages may consume them.
+        """
 
         self._validate_run(run_id)
+        source_fingerprint = source_fingerprint_for_run(self.run_manager, run_id)
+        self._refresh_source_metadata_lineage(run_id, source_fingerprint)
         self.trace_logger.reset(run_id)
         state = create_initial_workflow_state(
             run_id=run_id,
@@ -55,6 +67,7 @@ class WorkflowService:
             task_type=request.task_type,
             require_cleaning_approval=request.require_cleaning_approval,
             require_modeling_approval=request.require_modeling_approval,
+            source_fingerprint=source_fingerprint,
         )
         save_workflow_state(self.workflow_state_path(run_id), state)
         self.trace_logger.append_event(
@@ -64,6 +77,8 @@ class WorkflowService:
             event_type="workflow_started",
             message="Automated workflow started.",
             details={
+                "generation_id": state["generation_id"],
+                "source_fingerprint": source_fingerprint,
                 "target_column": request.target_column,
                 "task_type": request.task_type,
                 "require_cleaning_approval": request.require_cleaning_approval,
@@ -147,7 +162,12 @@ class WorkflowService:
         return updated_state
 
     def reset_workflow(self, run_id: str) -> dict[str, str]:
-        """Safely reset workflow logs without touching raw or derived data artifacts."""
+        """Reset workflow state and trace logs without deleting artifacts.
+
+        This is a UI/state reset, not proof that preserved artifacts are current.
+        Later stages still validate artifact lineage before consuming any file
+        that remains on disk.
+        """
 
         self._validate_run(run_id)
         state_path = self.workflow_state_path(run_id)
@@ -174,3 +194,34 @@ class WorkflowService:
         raw_path = paths.input / "raw_data.csv"
         if not raw_path.exists():
             raise FileNotFoundError(raw_path)
+
+    def _refresh_source_metadata_lineage(
+        self,
+        run_id: str,
+        source_fingerprint: str,
+    ) -> None:
+        metadata_path = self.run_manager.metadata_path(run_id)
+        if not metadata_path.exists():
+            return
+
+        metadata = self.run_manager.load_metadata(run_id)
+        if metadata.get("source_fingerprint") != source_fingerprint:
+            metadata["source_fingerprint"] = source_fingerprint
+            self.run_manager.save_metadata(run_id, metadata)
+
+        paths = self.run_manager.get_paths(run_id)
+        write_artifact_lineage(
+            metadata_path,
+            run_root=paths.root,
+            run_id=run_id,
+            artifact_type="metadata",
+            source_fingerprint=source_fingerprint,
+            config_fingerprint=fingerprint_payload(
+                {
+                    "artifact_type": "metadata",
+                    "source_fingerprint": source_fingerprint,
+                }
+            ),
+            upstream_fingerprints={"source_data": source_fingerprint},
+            relevant_config={"source_fingerprint": source_fingerprint},
+        )

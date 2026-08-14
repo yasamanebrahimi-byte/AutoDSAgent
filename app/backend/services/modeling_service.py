@@ -15,6 +15,14 @@ from app.backend.schemas.modeling import (
 )
 from app.backend.services.evaluation_service import EvaluationService
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    fingerprint_payload,
+    invalidate_downstream_artifacts,
+    lineage_context,
+    select_analysis_input,
+    validate_artifact_for_state,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 from app.tools.data_loader import load_csv
 from app.tools.evaluation import PRIMARY_METRIC_BY_TASK
@@ -23,6 +31,7 @@ from app.tools.mlflow_logger import MLflowLogger
 from app.tools.model_persistence import list_model_artifacts, save_model_artifacts
 from app.tools.modeling import ModelTrainingResult, train_models
 from app.tools.preprocessing import prepare_modeling_data
+from app.workflows.workflow_steps import MODELING_STEP
 
 
 class ModelingService:
@@ -70,11 +79,14 @@ class ModelingService:
         if not paths.root.exists():
             raise FileNotFoundError(paths.root)
 
-        dataset_path = paths.intermediate / "cleaned_data.csv"
-        if not dataset_path.exists():
-            raise ValueError(
-                "Cleaned dataset was not found. Apply safe cleaning before modeling."
-            )
+        invalidate_downstream_artifacts(self.run_manager, run_id, MODELING_STEP)
+        dataset_selection = select_analysis_input(
+            self.run_manager,
+            run_id,
+            target_column=request.target_column,
+            require_cleaned=True,
+        )
+        dataset_path = dataset_selection.path
 
         log_event(
             self.logger,
@@ -111,7 +123,7 @@ class ModelingService:
         artifact_paths = self._artifact_paths_payload(paths.root)
         model_results_payload = dict(evaluation_result.model_results_payload)
         model_results_payload["artifact_paths"] = artifact_paths
-        save_model_artifacts(
+        saved_model_artifacts = save_model_artifacts(
             models_dir=paths.models,
             results=training_results,
             best_result=evaluation_result.best_result,
@@ -126,10 +138,51 @@ class ModelingService:
             best_model_name=evaluation_result.best_result.model_name,
             baseline_model_name=evaluation_result.baseline_result.model_name,
         )
-        save_json(
+        modeling_summary_path = save_json(
             self.modeling_summary_path(run_id),
             modeling_summary.model_dump(mode="json"),
         )
+        context = lineage_context(self.run_manager, run_id)
+        config_payload = {
+            "artifact_family": "modeling",
+            "source_fingerprint": dataset_selection.source_fingerprint,
+            "analysis_input": dataset_selection.dataset_used,
+            "analysis_input_fingerprint": dataset_selection.fingerprint,
+            "target_column": request.target_column,
+            "requested_task_type": request.task_type,
+            "effective_task_type": modeling_summary.task_type,
+            "test_size": request.test_size,
+            "random_state": request.random_state,
+        }
+        config_fingerprint = fingerprint_payload(config_payload)
+        upstream_key = dataset_selection.dataset_used
+        upstream_fingerprints = {
+            "source_data": dataset_selection.source_fingerprint,
+            upstream_key: dataset_selection.fingerprint,
+        }
+        for artifact_path, artifact_type in (
+            (modeling_summary_path, "modeling_summary"),
+            (
+                self.evaluation_service.evaluation_summary_path(run_id),
+                "evaluation_summary",
+            ),
+            (saved_model_artifacts["model_results_path"], "model_results"),
+            (saved_model_artifacts["baseline_model_path"], "baseline_model"),
+            (saved_model_artifacts["best_model_path"], "best_model"),
+        ):
+            write_artifact_lineage(
+                artifact_path,
+                run_root=paths.root,
+                run_id=run_id,
+                artifact_type=artifact_type,
+                generation_id=context["generation_id"],
+                source_fingerprint=dataset_selection.source_fingerprint,
+                target_column=modeling_summary.target_column,
+                task_type=modeling_summary.task_type,
+                config_fingerprint=config_fingerprint,
+                upstream_fingerprints=upstream_fingerprints,
+                relevant_config=config_payload,
+            )
 
         try:
             mlflow_warnings = self.mlflow_logger.log_modeling_run(
@@ -177,6 +230,14 @@ class ModelingService:
         path = self.modeling_summary_path(run_id)
         if not path.exists():
             raise FileNotFoundError(path)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        validation = validate_artifact_for_state(
+            path,
+            artifact_type="modeling_summary",
+            state=state,
+        )
+        if not validation.is_current:
+            raise ValueError(f"Modeling summary artifact is stale: {validation.reason}.")
         return ModelingSummary(**load_json(path))
 
     def load_model_results(self, run_id: str) -> dict[str, Any]:
@@ -185,6 +246,14 @@ class ModelingService:
         path = self.model_results_path(run_id)
         if not path.exists():
             raise FileNotFoundError(path)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        validation = validate_artifact_for_state(
+            path,
+            artifact_type="model_results",
+            state=state,
+        )
+        if not validation.is_current:
+            raise ValueError(f"Model results artifact is stale: {validation.reason}.")
         return load_json(path)
 
     def list_saved_models(self, run_id: str) -> list[SavedModelInfo]:
@@ -193,9 +262,23 @@ class ModelingService:
         paths = self.run_manager.get_paths(run_id)
         if not paths.root.exists():
             raise FileNotFoundError(paths.root)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        expected_artifacts = {
+            "baseline_model.pkl": "baseline_model",
+            "best_model.pkl": "best_model",
+            "model_results.json": "model_results",
+        }
         return [
             SavedModelInfo(**artifact)
             for artifact in list_model_artifacts(paths.models, paths.root)
+            if (
+                expected_artifacts.get(artifact["name"]) is None
+                or validate_artifact_for_state(
+                    paths.root / artifact["path"],
+                    artifact_type=expected_artifacts[artifact["name"]],
+                    state=state,
+                ).is_current
+            )
         ]
 
     def _build_modeling_summary(

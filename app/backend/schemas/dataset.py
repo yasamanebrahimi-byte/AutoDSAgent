@@ -19,4 +19,5 @@ class DatasetMetadata(BaseModel):
     missing_values: dict[str, int]
     duplicate_rows: int
     preview: list[dict[str, Any]]
+    source_fingerprint: str | None = None
     created_at: str

@@ -17,6 +17,12 @@ from app.backend.schemas.profile import (
     ValueCount,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    fingerprint_payload,
+    lineage_context,
+    validate_artifact_for_state,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 from app.tools.data_loader import load_csv
 from app.tools.data_quality import detect_data_quality_issues
@@ -50,7 +56,26 @@ class ProfilingService:
 
         dataframe = load_csv(raw_path)
         profile = self.profile_dataframe(dataframe, run_id=run_id)
-        save_json(self.profile_path(run_id), profile.model_dump(mode="json"))
+        profile_path = save_json(self.profile_path(run_id), profile.model_dump(mode="json"))
+        context = lineage_context(self.run_manager, run_id)
+        source_fingerprint = context["source_fingerprint"]
+        config_fingerprint = fingerprint_payload(
+            {
+                "artifact_type": "profile",
+                "source_fingerprint": source_fingerprint,
+            }
+        )
+        write_artifact_lineage(
+            profile_path,
+            run_root=self.run_manager.get_paths(run_id).root,
+            run_id=run_id,
+            artifact_type="profile",
+            generation_id=context["generation_id"],
+            source_fingerprint=source_fingerprint,
+            config_fingerprint=config_fingerprint,
+            upstream_fingerprints={"source_data": source_fingerprint},
+            relevant_config={"source_fingerprint": source_fingerprint},
+        )
         log_event(
             self.logger,
             logging.INFO,
@@ -68,6 +93,14 @@ class ProfilingService:
         path = self.profile_path(run_id)
         if not path.exists():
             raise FileNotFoundError(path)
+        state = lineage_context(self.run_manager, run_id)["state"]
+        validation = validate_artifact_for_state(
+            path,
+            artifact_type="profile",
+            state=state,
+        )
+        if not validation.is_current:
+            raise ValueError(f"Profile artifact is stale: {validation.reason}.")
         return DatasetProfile(**load_json(path))
 
     def profile_dataframe(self, dataframe: pd.DataFrame, run_id: str) -> DatasetProfile:

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    file_sha256,
+    fingerprint_payload,
+    write_artifact_lineage,
+)
 from app.tools.file_utils import save_json
 from app.workflows.workflow_state import create_initial_workflow_state
 
@@ -15,7 +20,8 @@ def create_report_run(
 ):
     manager = RunManager(runs_dir=tmp_path)
     paths = manager.create_run(run_id)
-    (paths.input / "raw_data.csv").write_text(
+    raw_path = paths.input / "raw_data.csv"
+    raw_path.write_text(
         "customer_id,age,income,segment,churn\n"
         "1,30,60000,A,yes\n"
         "2,,70000,B,no\n"
@@ -23,13 +29,64 @@ def create_report_run(
         "4,40,90000,C,no\n",
         encoding="utf-8",
     )
-    save_json(paths.intermediate / "metadata.json", metadata_payload(run_id))
-    save_json(paths.intermediate / "profile.json", profile_payload(run_id))
+    source_fingerprint = file_sha256(raw_path)
+    generation_id = f"{run_id}-generation"
+    target_column = "churn"
+
+    metadata_path = save_json(
+        paths.intermediate / "metadata.json",
+        metadata_payload(run_id, source_fingerprint),
+    )
+    _write_lineage(
+        metadata_path,
+        paths.root,
+        run_id,
+        "metadata",
+        None,
+        source_fingerprint,
+        None,
+        None,
+        {"source_data": source_fingerprint},
+    )
+    profile_path = save_json(paths.intermediate / "profile.json", profile_payload(run_id))
+    _write_lineage(
+        profile_path,
+        paths.root,
+        run_id,
+        "profile",
+        generation_id,
+        source_fingerprint,
+        None,
+        None,
+        {"source_data": source_fingerprint},
+    )
+    profile_fingerprint = file_sha256(profile_path)
+    analysis_input = {
+        "dataset_used": "raw",
+        "path": "input/raw_data.csv",
+        "fingerprint": source_fingerprint,
+        "source_fingerprint": source_fingerprint,
+        "selection_reason": "fixture_raw",
+    }
 
     if include_cleaning:
-        save_json(paths.intermediate / "cleaning_plan.json", cleaning_plan_payload(run_id))
-        save_json(paths.intermediate / "cleaning_summary.json", cleaning_summary_payload(run_id))
-        (paths.intermediate / "cleaned_data.csv").write_text(
+        cleaning_plan_path = save_json(
+            paths.intermediate / "cleaning_plan.json",
+            cleaning_plan_payload(run_id),
+        )
+        _write_lineage(
+            cleaning_plan_path,
+            paths.root,
+            run_id,
+            "cleaning_plan",
+            generation_id,
+            source_fingerprint,
+            target_column,
+            None,
+            {"source_data": source_fingerprint, "profile": profile_fingerprint},
+        )
+        cleaned_path = paths.intermediate / "cleaned_data.csv"
+        cleaned_path.write_text(
             "customer_id,age,income,segment,churn\n"
             "1,30,60000,A,yes\n"
             "2,35,70000,B,no\n"
@@ -37,23 +94,130 @@ def create_report_run(
             "4,40,90000,C,no\n",
             encoding="utf-8",
         )
+        cleaned_fingerprint = file_sha256(cleaned_path)
+        _write_lineage(
+            cleaned_path,
+            paths.root,
+            run_id,
+            "cleaned_data",
+            generation_id,
+            source_fingerprint,
+            target_column,
+            None,
+            {
+                "source_data": source_fingerprint,
+                "profile": profile_fingerprint,
+                "cleaning_plan": file_sha256(cleaning_plan_path),
+            },
+        )
+        cleaning_summary_path = save_json(
+            paths.intermediate / "cleaning_summary.json",
+            cleaning_summary_payload(run_id),
+        )
+        _write_lineage(
+            cleaning_summary_path,
+            paths.root,
+            run_id,
+            "cleaning_summary",
+            generation_id,
+            source_fingerprint,
+            target_column,
+            None,
+            {
+                "source_data": source_fingerprint,
+                "cleaning_plan": file_sha256(cleaning_plan_path),
+                "cleaned_data": cleaned_fingerprint,
+            },
+        )
+        analysis_input = {
+            "dataset_used": "cleaned",
+            "path": "intermediate/cleaned_data.csv",
+            "fingerprint": cleaned_fingerprint,
+            "source_fingerprint": source_fingerprint,
+            "selection_reason": "fixture_cleaned",
+        }
 
     if include_eda:
-        save_json(paths.intermediate / "eda_summary.json", eda_summary_payload(run_id))
-        save_json(paths.intermediate / "eda_findings.json", eda_findings_payload())
+        eda_summary_path = save_json(
+            paths.intermediate / "eda_summary.json",
+            eda_summary_payload(run_id),
+        )
+        eda_findings_path = save_json(
+            paths.intermediate / "eda_findings.json",
+            eda_findings_payload(),
+        )
+        upstream = {
+            "source_data": source_fingerprint,
+            analysis_input["dataset_used"]: analysis_input["fingerprint"],
+        }
+        _write_lineage(
+            eda_summary_path,
+            paths.root,
+            run_id,
+            "eda_summary",
+            generation_id,
+            source_fingerprint,
+            target_column,
+            None,
+            upstream,
+        )
+        _write_lineage(
+            eda_findings_path,
+            paths.root,
+            run_id,
+            "eda_findings",
+            generation_id,
+            source_fingerprint,
+            target_column,
+            None,
+            upstream,
+        )
 
     if include_modeling:
-        save_json(paths.intermediate / "modeling_summary.json", modeling_summary_payload(run_id))
-        save_json(paths.intermediate / "evaluation_summary.json", evaluation_summary_payload(run_id))
-        save_json(paths.models / "model_results.json", model_results_payload(run_id))
+        modeling_upstream = {
+            "source_data": source_fingerprint,
+            analysis_input["dataset_used"]: analysis_input["fingerprint"],
+        }
+        modeling_summary_path = save_json(
+            paths.intermediate / "modeling_summary.json",
+            modeling_summary_payload(run_id),
+        )
+        evaluation_summary_path = save_json(
+            paths.intermediate / "evaluation_summary.json",
+            evaluation_summary_payload(run_id),
+        )
+        model_results_path = save_json(
+            paths.models / "model_results.json",
+            model_results_payload(run_id),
+        )
+        for artifact_path, artifact_type in (
+            (modeling_summary_path, "modeling_summary"),
+            (evaluation_summary_path, "evaluation_summary"),
+            (model_results_path, "model_results"),
+        ):
+            _write_lineage(
+                artifact_path,
+                paths.root,
+                run_id,
+                artifact_type,
+                generation_id,
+                source_fingerprint,
+                target_column,
+                "classification",
+                modeling_upstream,
+            )
 
     if include_workflow:
         state = create_initial_workflow_state(
             run_id=run_id,
-            target_column="churn" if include_modeling else None,
+            target_column=target_column,
+            task_type="classification" if include_modeling else None,
             require_cleaning_approval=False,
             require_modeling_approval=False,
+            generation_id=generation_id,
+            source_fingerprint=source_fingerprint,
         )
+        state["analysis_input"] = analysis_input
         for step_name, step_state in state["steps"].items():
             step_state["status"] = "completed"
             step_state["attempts"] = 1
@@ -81,7 +245,40 @@ def create_report_run(
     return manager, paths, run_id
 
 
-def metadata_payload(run_id: str) -> dict:
+def _write_lineage(
+    artifact_path,
+    run_root,
+    run_id: str,
+    artifact_type: str,
+    generation_id: str | None,
+    source_fingerprint: str,
+    target_column: str | None,
+    task_type: str | None,
+    upstream_fingerprints: dict,
+) -> None:
+    config = {
+        "artifact_type": artifact_type,
+        "source_fingerprint": source_fingerprint,
+        "target_column": target_column,
+        "task_type": task_type,
+        "upstream_fingerprints": upstream_fingerprints,
+    }
+    write_artifact_lineage(
+        artifact_path,
+        run_root=run_root,
+        run_id=run_id,
+        artifact_type=artifact_type,
+        generation_id=generation_id,
+        source_fingerprint=source_fingerprint,
+        target_column=target_column,
+        task_type=task_type,
+        config_fingerprint=fingerprint_payload(config),
+        upstream_fingerprints=upstream_fingerprints,
+        relevant_config=config,
+    )
+
+
+def metadata_payload(run_id: str, source_fingerprint: str | None = None) -> dict:
     return {
         "run_id": run_id,
         "filename": "customers.csv",
@@ -98,6 +295,7 @@ def metadata_payload(run_id: str) -> dict:
         "missing_values": {"customer_id": 0, "age": 1, "income": 0, "segment": 0, "churn": 0},
         "duplicate_rows": 0,
         "preview": [],
+        "source_fingerprint": source_fingerprint,
         "created_at": "2026-08-12T00:00:00+00:00",
     }
 

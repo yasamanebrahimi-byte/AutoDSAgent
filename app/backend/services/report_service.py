@@ -15,6 +15,16 @@ from app.backend.schemas.reports import (
     ReportMetadata,
 )
 from app.backend.services.run_manager import RunManager
+from app.tools.artifact_lineage import (
+    REPORT_ARTIFACT_TYPES,
+    fingerprint_payload,
+    invalidate_downstream_artifacts,
+    lineage_context,
+    load_artifact_lineage,
+    state_allows_source_artifact,
+    validate_artifact_for_state,
+    write_artifact_lineage,
+)
 from app.tools.app_logging import get_logger, log_event
 from app.tools.file_utils import load_json
 from app.tools.report_builder import (
@@ -31,6 +41,7 @@ from app.tools.report_export import (
     save_json_report,
     save_markdown,
 )
+from app.workflows.workflow_steps import REPORT_STEP
 
 
 REPORT_METADATA_FILENAME = "report_metadata.json"
@@ -75,6 +86,7 @@ class SourceArtifactLoadResult:
     used: list[str]
     missing: list[str]
     warnings: list[str]
+    lineage: dict[str, dict[str, Any]]
 
 
 class ReportService:
@@ -120,6 +132,7 @@ class ReportService:
         if not options.force_regenerate and self._reports_exist(run_id):
             return self.load_reports(run_id)
 
+        invalidate_downstream_artifacts(self.run_manager, run_id, REPORT_STEP)
         source = self.load_source_artifacts(run_id)
         if not (MINIMUM_ARTIFACT_KEYS & set(source.artifacts)):
             raise ValueError(
@@ -161,6 +174,22 @@ class ReportService:
             ]
         )
 
+        context = lineage_context(self.run_manager, run_id)
+        source_artifact_fingerprints = {
+            key: metadata.get("artifact_fingerprint")
+            for key, metadata in source.lineage.items()
+            if metadata.get("artifact_fingerprint")
+        }
+        report_config = {
+            "artifact_family": "report",
+            "generation_id": context["generation_id"],
+            "source_fingerprint": context["source_fingerprint"],
+            "target_column": context["target_column"],
+            "task_type": context["task_type"],
+            "source_artifacts_used": source.used,
+            "source_artifact_fingerprints": source_artifact_fingerprints,
+        }
+        report_config_fingerprint = fingerprint_payload(report_config)
         metadata_payload = build_report_metadata(
             run_id=run_id,
             documents=list(documents.values()),
@@ -169,10 +198,29 @@ class ReportService:
             source_artifacts_missing=source.missing,
             warnings=source.warnings,
         )
+        metadata_payload.update(
+            {
+                "generation_id": context["generation_id"],
+                "source_fingerprint": context["source_fingerprint"],
+                "target_column": context["target_column"],
+                "task_type": context["task_type"],
+                "config_fingerprint": report_config_fingerprint,
+                "source_artifact_lineage": source.lineage,
+            }
+        )
         index_payload = build_report_index(run_id, saved_report_files)
 
-        save_json_report(self.report_metadata_path(run_id), metadata_payload)
-        save_json_report(self.report_index_path(run_id), index_payload)
+        metadata_path = save_json_report(self.report_metadata_path(run_id), metadata_payload)
+        index_path = save_json_report(self.report_index_path(run_id), index_payload)
+        self._write_report_lineage(
+            run_id=run_id,
+            report_files=saved_report_files,
+            metadata_path=metadata_path,
+            index_path=index_path,
+            config_fingerprint=report_config_fingerprint,
+            config=report_config,
+            source_lineage=source.lineage,
+        )
 
         log_event(
             self.logger,
@@ -199,6 +247,8 @@ class ReportService:
             raise FileNotFoundError(metadata_path)
         if not index_path.exists():
             raise FileNotFoundError(index_path)
+        self._ensure_report_current(run_id, metadata_path, "report_metadata")
+        self._ensure_report_current(run_id, index_path, "report_index")
 
         return ReportGenerateResponse(
             metadata=ReportMetadata(**load_json(metadata_path)),
@@ -212,6 +262,11 @@ class ReportService:
         path = self.report_path(run_id, report_name)
         if not path.exists():
             raise FileNotFoundError(path)
+        self._ensure_report_current(
+            run_id,
+            path,
+            self._report_artifact_type(report_name),
+        )
 
         return ReportContentResponse(
             run_id=run_id,
@@ -227,17 +282,24 @@ class ReportService:
         path = self.report_path(run_id, report_name)
         if not path.exists():
             raise FileNotFoundError(path)
+        self._ensure_report_current(
+            run_id,
+            path,
+            self._report_artifact_type(report_name),
+        )
         return path
 
     def load_source_artifacts(self, run_id: str) -> SourceArtifactLoadResult:
-        """Load any available source artifacts for report generation."""
+        """Load current source artifacts for report generation."""
 
         self._validate_run(run_id)
         paths = self.run_manager.get_paths(run_id)
+        state = lineage_context(self.run_manager, run_id)["state"]
         artifacts: dict[str, Any] = {}
         used: list[str] = []
         missing: list[str] = []
         warnings: list[str] = []
+        lineage: dict[str, dict[str, Any]] = {}
 
         for key, (directory_name, filename) in SOURCE_ARTIFACTS.items():
             artifact_path = getattr(paths, directory_name) / filename
@@ -245,9 +307,34 @@ class ReportService:
             if not artifact_path.exists():
                 missing.append(relative_path)
                 continue
+            step_validation = state_allows_source_artifact(key, state)
+            if not step_validation.is_current:
+                missing.append(relative_path)
+                warnings.append(
+                    f"Ignored `{relative_path}` because {step_validation.reason}."
+                )
+                continue
+            if key not in {"workflow_state", "agent_trace"}:
+                validation = validate_artifact_for_state(
+                    artifact_path,
+                    artifact_type=key,
+                    state=state,
+                )
+                if not validation.is_current:
+                    missing.append(relative_path)
+                    warnings.append(
+                        f"Ignored stale `{relative_path}`: {validation.reason}."
+                    )
+                    continue
+                if validation.metadata:
+                    lineage[key] = validation.metadata
             try:
                 artifacts[key] = load_json(artifact_path)
                 used.append(relative_path)
+                if key in {"workflow_state", "agent_trace"}:
+                    metadata = load_artifact_lineage(artifact_path)
+                    if metadata:
+                        lineage[key] = metadata
             except ValueError as exc:
                 missing.append(relative_path)
                 warnings.append(f"Could not load `{relative_path}`: {exc}")
@@ -257,6 +344,7 @@ class ReportService:
             used=used,
             missing=missing,
             warnings=warnings,
+            lineage=lineage,
         )
 
     def _build_documents(
@@ -364,7 +452,91 @@ class ReportService:
                 for report_name in SUPPORTED_REPORTS
             ],
         ]
-        return all(path.exists() for path in paths)
+        if not all(path.exists() for path in paths):
+            return False
+        for artifact_path, artifact_type in (
+            (self.report_metadata_path(run_id), "report_metadata"),
+            (self.report_index_path(run_id), "report_index"),
+        ):
+            try:
+                self._ensure_report_current(run_id, artifact_path, artifact_type)
+            except ValueError:
+                return False
+        return True
+
+    def _write_report_lineage(
+        self,
+        *,
+        run_id: str,
+        report_files: list[dict[str, Any]],
+        metadata_path: Path,
+        index_path: Path,
+        config_fingerprint: str,
+        config: dict[str, Any],
+        source_lineage: dict[str, dict[str, Any]],
+    ) -> None:
+        paths = self.run_manager.get_paths(run_id)
+        context = lineage_context(self.run_manager, run_id)
+        upstream_fingerprints = {
+            key: metadata.get("artifact_fingerprint")
+            for key, metadata in source_lineage.items()
+            if metadata.get("artifact_fingerprint")
+        }
+        for file_info in report_files:
+            artifact_path = paths.root / file_info["path"]
+            artifact_type = self._report_artifact_type(str(file_info["name"]))
+            write_artifact_lineage(
+                artifact_path,
+                run_root=paths.root,
+                run_id=run_id,
+                artifact_type=artifact_type,
+                generation_id=context["generation_id"],
+                source_fingerprint=context["source_fingerprint"],
+                target_column=context["target_column"],
+                task_type=context["task_type"],
+                config_fingerprint=config_fingerprint,
+                upstream_fingerprints=upstream_fingerprints,
+                relevant_config=config,
+            )
+
+        for artifact_path, artifact_type in (
+            (metadata_path, "report_metadata"),
+            (index_path, "report_index"),
+        ):
+            write_artifact_lineage(
+                artifact_path,
+                run_root=paths.root,
+                run_id=run_id,
+                artifact_type=artifact_type,
+                generation_id=context["generation_id"],
+                source_fingerprint=context["source_fingerprint"],
+                target_column=context["target_column"],
+                task_type=context["task_type"],
+                config_fingerprint=config_fingerprint,
+                upstream_fingerprints=upstream_fingerprints,
+                relevant_config=config,
+            )
+
+    def _ensure_report_current(
+        self,
+        run_id: str,
+        path: Path,
+        artifact_type: str,
+    ) -> None:
+        state = lineage_context(self.run_manager, run_id)["state"]
+        validation = validate_artifact_for_state(
+            path,
+            artifact_type=artifact_type,
+            state=state,
+            require_lineage_if_stateful=artifact_type in REPORT_ARTIFACT_TYPES,
+        )
+        if not validation.is_current:
+            raise ValueError(f"Report artifact is stale: {validation.reason}.")
+
+    def _report_artifact_type(self, report_name: str) -> str:
+        if report_name == "limitations":
+            return "limitations_report"
+        return report_name
 
     def _validate_run(self, run_id: str) -> None:
         paths = self.run_manager.get_paths(run_id)
