@@ -45,7 +45,8 @@ When MLflow is enabled, modeling also logs run parameters, metrics, tags, and ar
 
 ## Automated Workflow
 
-- `POST /runs/{run_id}/workflow/start`: start or restart the deterministic workflow.
+- `POST /runs/{run_id}/workflow/start`: queue a deterministic workflow and return `202 Accepted` with a pollable job URL.
+- `GET /runs/{run_id}/workflow/jobs/{job_id}`: poll background workflow execution status.
 - `GET /runs/{run_id}/workflow/state`: return `logs/workflow_state.json`.
 - `GET /runs/{run_id}/workflow/trace`: return `logs/agent_trace.json`.
 - `POST /runs/{run_id}/workflow/approve`: approve or reject a waiting cleaning or modeling gate.

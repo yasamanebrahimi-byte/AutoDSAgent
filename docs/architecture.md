@@ -56,6 +56,8 @@ Each step updates `logs/workflow_state.json`. Human approval gates can pause cle
 
 Manual endpoints let users run profiling, cleaning, EDA, modeling, and reports directly. The automated workflow calls the same deterministic services through agent wrappers, so manual and workflow behavior stay aligned.
 
+Workflow starts are submitted to a bounded background worker pool. The API returns a pollable job immediately, while the Streamlit frontend refreshes the persisted workflow state every two seconds until execution completes, fails, or pauses for approval.
+
 ## Supervised Modeling Flow
 
 Modeling uses one train/test split per run. The test partition is not used for candidate selection:

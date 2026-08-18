@@ -38,6 +38,7 @@ RUN_STATE_KEYS = [
     "cleaning_summary",
     "eda_response",
     "modeling_response",
+    "workflow_job",
     "workflow_state",
     "reports_response",
 ]
@@ -440,26 +441,22 @@ def render_automated_workflow(metadata: dict[str, Any]) -> None:
                 "require_cleaning_approval": require_cleaning_approval,
                 "require_modeling_approval": require_modeling_approval,
             }
-            state = post_json(
+            job = post_json(
                 f"/runs/{run_id}/workflow/start",
-                "Running automated workflow...",
+                "Submitting automated workflow...",
                 payload=payload,
+                timeout=15,
             )
-            if state:
-                st.session_state["workflow_state"] = state
+            if job:
+                st.session_state["workflow_job"] = job
+                refresh_workflow_job(run_id)
                 st.session_state.pop("reports_response", None)
 
     with action_cols[1]:
         if st.button("Refresh Workflow"):
-            state = get_json(f"/runs/{run_id}/workflow/state")
-            if state:
-                st.session_state["workflow_state"] = state
+            refresh_workflow_job(run_id)
 
-    state = st.session_state.get("workflow_state")
-    if state:
-        render_workflow_state(run_id, state)
-    else:
-        st.info("Start the automated workflow to profile, clean, analyze, and optionally model this run.")
+    render_workflow_progress(run_id)
 
 
 def render_final_reports(metadata: dict[str, Any]) -> None:
@@ -644,6 +641,65 @@ def get_report_content(run_id: str, report_name: str) -> str | None:
     if not isinstance(response, dict):
         return None
     return response.get("content")
+
+
+def render_workflow_progress(run_id: str) -> None:
+    """Render saved workflow state and automatically poll active background jobs."""
+
+    job = st.session_state.get("workflow_job")
+    if isinstance(job, dict) and job.get("status") in {"queued", "running"}:
+        render_active_workflow_job(run_id)
+        return
+
+    if isinstance(job, dict) and job.get("status") == "failed":
+        st.error(job.get("error") or "Background workflow execution failed.")
+
+    state = st.session_state.get("workflow_state")
+    if state:
+        render_workflow_state(run_id, state)
+    else:
+        st.info(
+            "Start the automated workflow to profile, clean, analyze, "
+            "and optionally model this run."
+        )
+
+
+@st.fragment(run_every="2s")
+def render_active_workflow_job(run_id: str) -> None:
+    """Poll one active workflow job without rerunning the full Streamlit app."""
+
+    job = refresh_workflow_job(run_id)
+    if not isinstance(job, dict):
+        st.warning("Workflow status is temporarily unavailable. Polling will retry.")
+        return
+
+    if job.get("status") in {"completed", "failed"}:
+        st.rerun()
+
+    st.info(
+        "Workflow is running in the backend. This page refreshes progress "
+        "automatically and can be safely reloaded."
+    )
+    state = st.session_state.get("workflow_state")
+    if state:
+        render_workflow_state(run_id, state)
+
+
+def refresh_workflow_job(run_id: str) -> dict[str, Any] | None:
+    """Refresh the active job and latest persisted workflow state."""
+
+    job = st.session_state.get("workflow_job")
+    refreshed_job: dict[str, Any] | None = job if isinstance(job, dict) else None
+    if refreshed_job and refreshed_job.get("status_url"):
+        response = get_json(str(refreshed_job["status_url"]), show_error=False)
+        if isinstance(response, dict):
+            refreshed_job = response
+            st.session_state["workflow_job"] = response
+
+    state = get_json(f"/runs/{run_id}/workflow/state", show_error=False)
+    if isinstance(state, dict):
+        st.session_state["workflow_state"] = state
+    return refreshed_job
 
 
 def render_workflow_state(run_id: str, state: dict[str, Any]) -> None:
@@ -1429,12 +1485,13 @@ def post_json(
     path: str,
     spinner_message: str,
     payload: dict[str, Any] | None = None,
+    timeout: int = 120,
 ) -> dict[str, Any] | None:
     """POST to the backend and return JSON."""
 
     try:
         with st.spinner(spinner_message):
-            request_kwargs: dict[str, Any] = {"timeout": 120}
+            request_kwargs: dict[str, Any] = {"timeout": timeout}
             if payload is not None:
                 request_kwargs["json"] = payload
             response = requests.post(f"{BACKEND_URL}{path}", **request_kwargs)
