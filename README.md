@@ -335,20 +335,34 @@ See [docs/api_reference.md](docs/api_reference.md) for more detail.
 
 ## Testing
 
-Run all tests:
+Install the pinned development toolchain:
 
 ```bash
-python -m pytest
+python -m pip install -e ".[dev]" -c constraints-dev.txt
 ```
 
-Run lightweight local checks:
+Run all tests with the same 75% coverage floor enforced by CI:
+
+```bash
+python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=75
+```
+
+Run linting, core-contract type checking, and the dependency audit:
+
+```bash
+python -m ruff check app tests scripts
+python -m mypy app/backend/schemas app/backend/config.py app/backend/services/run_manager.py app/workflows/workflow_state.py app/workflows/workflow_steps.py
+python -m pip_audit --progress-spinner off
+```
+
+Run the lightweight packaging and application checks:
 
 ```bash
 python scripts/smoke_test.py
 python scripts/validate_project.py
 ```
 
-GitHub Actions runs the smoke checks and full test suite on Python 3.11, 3.12, and 3.13.
+GitHub Actions runs smoke checks and the full test suite on Python 3.11, 3.12, and 3.13. It also enforces linting, typed core contracts, the coverage floor, a dependency vulnerability audit, MLflow installation and import checks, and a Docker build plus container smoke test.
 
 ## Project Structure
 

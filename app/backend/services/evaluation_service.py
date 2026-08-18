@@ -148,7 +148,6 @@ class EvaluationService:
             "candidate_beats_baseline": selection.candidate_beats_baseline,
             "selection_outcome": selection.selection_outcome,
             "best_model_name": selected_result.model_name,
-            "baseline_metrics": baseline_metrics,
             "best_model_metrics": selected_model_holdout_metrics,
             "all_model_metrics": all_model_metrics,
             "candidate_cv_results": candidate_cv_results,

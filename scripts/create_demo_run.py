@@ -6,7 +6,6 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -81,7 +80,7 @@ def main() -> None:
 
     profile = profiling_service.generate_profile(paths.root.name)
     cleaning_plan = cleaning_service.generate_cleaning_plan(paths.root.name)
-    cleaning_summary = cleaning_service.apply_cleaning(paths.root.name)
+    cleaning_service.apply_cleaning(paths.root.name)
     eda_response = eda_service.generate_eda(
         paths.root.name,
         EDARequest(target_column=target_column),
