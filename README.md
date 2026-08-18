@@ -347,14 +347,6 @@ python scripts/smoke_test.py
 python scripts/validate_project.py
 ```
 
-If Windows temp permissions cause issues:
-
-```powershell
-$env:TEMP=(Resolve-Path ".pytest_tmp").Path
-$env:TMP=$env:TEMP
-python -m pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
-```
-
 GitHub Actions runs the smoke checks and full test suite on Python 3.11, 3.12, and 3.13.
 
 ## Project Structure
