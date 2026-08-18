@@ -88,7 +88,7 @@ The canonical workflow is:
 profile -> cleaning_plan -> cleaning -> eda -> modeling -> report
 ```
 
-The workflow can run from start to finish, pause for human approval, retry failed steps, skip optional modeling when no target is provided, and persist state to `logs/workflow_state.json`. Trace events are saved to `logs/agent_trace.json`.
+The workflow can run from start to finish, pause for human approval, retry failed steps, skip optional modeling when no target is provided, and persist state to `logs/workflow_state.json`. Workflow starts run as background jobs so API clients receive a poll URL immediately instead of holding a long HTTP request open. Trace events are saved to `logs/agent_trace.json`.
 
 ## Modeling Methodology
 
@@ -325,6 +325,7 @@ Core endpoints:
 - `POST /runs/{run_id}/model`
 - `POST /runs/{run_id}/reports/generate`
 - `POST /runs/{run_id}/workflow/start`
+- `GET /runs/{run_id}/workflow/jobs/{job_id}`
 - `GET /runs/{run_id}/workflow/state`
 - `GET /runs/{run_id}/workflow/trace`
 - `POST /runs/{run_id}/workflow/approve`

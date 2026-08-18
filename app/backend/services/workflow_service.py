@@ -50,7 +50,17 @@ class WorkflowService:
         run_id: str,
         request: WorkflowStartRequest,
     ) -> dict[str, Any]:
-        """Start a new logical workflow generation for an existing run.
+        """Initialize and synchronously execute a logical workflow generation."""
+
+        state = self.initialize_workflow(run_id, request)
+        return self.run_initialized_workflow(state)
+
+    def initialize_workflow(
+        self,
+        run_id: str,
+        request: WorkflowStartRequest,
+    ) -> dict[str, Any]:
+        """Persist a new workflow generation before background execution.
 
         Raw uploaded data and source metadata are preserved, but derived
         artifacts from earlier generations must be regenerated or pass lineage
@@ -88,10 +98,16 @@ class WorkflowService:
         log_event(
             self.logger,
             logging.INFO,
-            "Workflow started.",
+            "Workflow queued.",
             run_id=run_id,
             target_column=request.target_column or "none",
         )
+        return state
+
+    def run_initialized_workflow(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Execute a workflow state that has already been persisted."""
+
+        run_id = str(state["run_id"])
         updated_state = self.orchestrator.run(state)
         log_event(
             self.logger,
@@ -186,6 +202,11 @@ class WorkflowService:
         """Return the workflow state path for one run."""
 
         return state_path_for_logs_dir(self.run_manager.get_paths(run_id).logs)
+
+    def validate_run(self, run_id: str) -> None:
+        """Validate that a run and its uploaded raw dataset exist."""
+
+        self._validate_run(run_id)
 
     def _validate_run(self, run_id: str) -> None:
         paths = self.run_manager.get_paths(run_id)

@@ -2,36 +2,65 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.backend.schemas.workflow import (
     WorkflowApprovalRequest,
+    WorkflowJob,
     WorkflowRetryRequest,
     WorkflowStartRequest,
     WorkflowState,
     WorkflowTraceEvent,
 )
+from app.backend.services.workflow_job_manager import WorkflowJobManager
 from app.backend.services.workflow_service import WorkflowService
 
 
 router = APIRouter(tags=["workflow"])
 workflow_service = WorkflowService()
+workflow_job_manager = WorkflowJobManager()
 
 
-@router.post("/runs/{run_id}/workflow/start", response_model=WorkflowState)
+@router.post(
+    "/runs/{run_id}/workflow/start",
+    response_model=WorkflowJob,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def start_workflow(
     run_id: str,
     request: WorkflowStartRequest,
-) -> WorkflowState:
-    """Start or restart an automated workflow for an existing run."""
+    response: Response,
+) -> WorkflowJob:
+    """Queue an automated workflow and return immediately with a poll URL."""
 
     try:
-        state = workflow_service.start_workflow(run_id, request)
+        workflow_service.validate_run(run_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return WorkflowState(**state)
+
+    selected_service = workflow_service
+    job = workflow_job_manager.submit(
+        run_id,
+        lambda: selected_service.start_workflow(run_id, request),
+    )
+    response.headers["Location"] = str(job["status_url"])
+    return WorkflowJob(**job)
+
+
+@router.get(
+    "/runs/{run_id}/workflow/jobs/{job_id}",
+    response_model=WorkflowJob,
+)
+def get_workflow_job(run_id: str, job_id: str) -> WorkflowJob:
+    """Return background workflow execution status for polling clients."""
+
+    try:
+        job = workflow_job_manager.get(run_id, job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow job was not found.") from exc
+    return WorkflowJob(**job)
 
 
 @router.get("/runs/{run_id}/workflow/state", response_model=WorkflowState)

@@ -18,6 +18,15 @@ class WorkflowStatus(str, Enum):
     waiting_for_approval = "waiting_for_approval"
 
 
+class WorkflowJobStatus(str, Enum):
+    """Lifecycle values for background workflow jobs."""
+
+    queued = "queued"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
 class StepStatus(str, Enum):
     """Step-level workflow status values."""
 
@@ -104,6 +113,20 @@ class WorkflowState(BaseModel):
     errors: list[Any] = Field(default_factory=list)
     created_at: str
     updated_at: str
+
+
+class WorkflowJob(BaseModel):
+    """Background execution metadata returned by workflow job endpoints."""
+
+    job_id: str
+    run_id: str
+    status: WorkflowJobStatus
+    submitted_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    error: str | None = None
+    status_url: str
+    state_url: str
 
 
 class WorkflowTraceEvent(BaseModel):
