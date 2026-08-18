@@ -34,3 +34,38 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  mlflow-install:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install MLflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,mlflow]" -c constraints-dev.txt
+
+      - name: Verify MLflow installation
+        run: |
+          python -m pip check
+          python -c "import mlflow; print(f'MLflow {mlflow.__version__}')"
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --tag autods-agent:ci .
+
+      - name: Verify MLflow import in Docker image
+        run: docker run --rm autods-agent:ci python -c "import mlflow; print(f'MLflow {mlflow.__version__}')"
