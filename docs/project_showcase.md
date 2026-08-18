@@ -51,8 +51,8 @@ CSV -> Run Folder -> Profile -> Cleaning Plan -> Cleaned Data -> EDA -> Modeling
 
 ## Example Workflow
 
-1. Load `classification_churn.csv`.
-2. Use target `churn`.
+1. Load `breast_cancer_wisconsin.csv`.
+2. Use target `diagnosis`.
 3. Run the automated workflow.
 4. Review approval gates and trace events.
 5. Inspect EDA plots and model metrics.

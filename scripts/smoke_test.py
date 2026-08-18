@@ -29,8 +29,8 @@ REQUIRED_DIRECTORIES = [
 ]
 
 REQUIRED_DATASETS = {
-    "examples/sample_data/regression_housing.csv": "sale_price",
-    "examples/sample_data/classification_churn.csv": "churn",
+    "examples/sample_data/diabetes_progression.csv": "disease_progression",
+    "examples/sample_data/breast_cancer_wisconsin.csv": "diagnosis",
 }
 
 REQUIRED_MODULES = [
@@ -93,8 +93,8 @@ def check_example_datasets() -> bool:
             ok = False
             continue
         dataframe = pd.read_csv(path)
-        if dataframe.empty:
-            print(f"[fail] empty dataset {relative_path}")
+        if not 400 <= len(dataframe) <= 2_000:
+            print(f"[fail] benchmark {relative_path} has {len(dataframe)} rows")
             ok = False
         elif target_column not in dataframe.columns:
             print(f"[fail] {relative_path} missing target {target_column}")

@@ -79,16 +79,16 @@ class DemoRunResult:
 
 DATASETS: dict[str, DemoDataset] = {
     "regression": DemoDataset(
-        filename="regression_housing.csv",
-        target="sale_price",
+        filename="diabetes_progression.csv",
+        target="disease_progression",
         task_type="regression",
-        description="Synthetic housing regression demo",
+        description="Diabetes disease-progression benchmark",
     ),
     "classification": DemoDataset(
-        filename="classification_churn.csv",
-        target="churn",
+        filename="breast_cancer_wisconsin.csv",
+        target="diagnosis",
         task_type="classification",
-        description="Synthetic customer churn classification demo",
+        description="Breast Cancer Wisconsin diagnostic benchmark",
     ),
 }
 

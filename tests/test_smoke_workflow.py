@@ -64,10 +64,10 @@ def test_readme_contains_week_8_sections():
 
 
 def test_example_dataset_targets_exist():
-    regression = PROJECT_ROOT / "examples" / "sample_data" / "regression_housing.csv"
-    classification = PROJECT_ROOT / "examples" / "sample_data" / "classification_churn.csv"
+    regression = PROJECT_ROOT / "examples" / "sample_data" / "diabetes_progression.csv"
+    classification = PROJECT_ROOT / "examples" / "sample_data" / "breast_cancer_wisconsin.csv"
 
     assert regression.exists()
     assert classification.exists()
-    assert "sale_price" in regression.read_text(encoding="utf-8").splitlines()[0]
-    assert "churn" in classification.read_text(encoding="utf-8").splitlines()[0]
+    assert "disease_progression" in regression.read_text(encoding="utf-8").splitlines()[0]
+    assert "diagnosis" in classification.read_text(encoding="utf-8").splitlines()[0]

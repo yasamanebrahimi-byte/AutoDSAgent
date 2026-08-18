@@ -1,0 +1,31 @@
+{
+  "datasets": [
+    {
+      "citation": "Wolberg, W., Mangasarian, O., Street, N., & Street, W. (1993). Breast Cancer Wisconsin (Diagnostic) [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5DW2B",
+      "features": 30,
+      "file": "examples/sample_data/breast_cancer_wisconsin.csv",
+      "license": "CC BY 4.0",
+      "loader": "sklearn.datasets.load_breast_cancer",
+      "name": "Breast Cancer Wisconsin (Diagnostic)",
+      "rows": 569,
+      "sha256": "fefd0594fe431ad9205a996d0fb446ec2f093a41fbee00c6df7fcc29518b15c6",
+      "source": "https://archive.ics.uci.edu/dataset/17/breast-cancer-wisconsin-diagnostic",
+      "target": "diagnosis",
+      "task": "classification"
+    },
+    {
+      "citation": "Efron, B., Hastie, T., Johnstone, I., & Tibshirani, R. (2004). Least angle regression. The Annals of Statistics, 32(2), 407-499.",
+      "features": 10,
+      "file": "examples/sample_data/diabetes_progression.csv",
+      "license": "Distributed with scikit-learn (BSD-3-Clause)",
+      "loader": "sklearn.datasets.load_diabetes(scaled=False)",
+      "name": "Diabetes disease progression",
+      "rows": 442,
+      "sha256": "28b0c99763613bcb68cf213dd8a2ad147c0f0265dd4e6b6e7399db20c66bf17d",
+      "source": "https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_diabetes.html",
+      "target": "disease_progression",
+      "task": "regression"
+    }
+  ],
+  "generated_by": "scripts/export_benchmark_datasets.py"
+}

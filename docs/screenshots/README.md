@@ -1,19 +1,28 @@
 # Verified Demo Gallery
 
-These figures are genuine artifacts from a completed local run of `classification_churn.csv` with target `churn`. The workflow profiled and cleaned the data, generated EDA, compared models with training-only cross-validation, evaluated the selected model, and persisted a completed final report. The selected model for this small synthetic demonstration was logistic regression.
+These figures are genuine artifacts from a completed local run of the 569-row
+[Breast Cancer Wisconsin (Diagnostic)](https://archive.ics.uci.edu/dataset/17/breast-cancer-wisconsin-diagnostic)
+benchmark with target `diagnosis`. The workflow profiled the data, generated
+EDA, compared models with training-only cross-validation, evaluated exactly one
+selected model on the held-out partition, and persisted a completed report.
 
-The gallery is intentionally kept outside `runs/` so reviewers can inspect representative product output on GitHub without committing an entire generated run folder.
+The images are presentation artifacts, not a clinical validation. Exact model,
+split, cross-validation, and holdout details are recorded in the accompanying
+workflow artifacts and can be regenerated with:
 
-## Target class distribution
+- Train/holdout rows: 455 / 114
+- Cross-validation: 5-fold stratified CV on the training partition
+- Selected model: logistic regression
+- CV macro F1: 0.9716 ± 0.0162
+- Holdout macro F1: 0.9619
+- Holdout accuracy: 0.9649
 
-![Churn target class distribution](target-distribution.png)
+```bash
+python scripts/run_full_demo.py --dataset classification
+```
 
-## Correlation analysis
+Files:
 
-![Numeric correlation heatmap](correlation-heatmap.png)
-
-## Cross-validation model comparison
-
-![Cross-validated model comparison](model-comparison.png)
-
-To refresh the gallery, repeat the documented classification flow in [the demo walkthrough](../demo_walkthrough.md) and replace all three figures from the same successful run.
+- `target-distribution.png`
+- `correlation-heatmap.png`
+- `model-comparison.png`

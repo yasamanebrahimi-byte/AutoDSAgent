@@ -2,8 +2,9 @@
 
 ## Dataset
 
-- File: `examples/sample_data/regression_housing.csv`
-- Target column: `sale_price`
+- File: `examples/sample_data/diabetes_progression.csv`
+- Rows: 442
+- Target column: `disease_progression`
 - Expected task type: regression
 
 ## Expected Workflow Stages
@@ -53,6 +54,7 @@ The script prints the exact run ID and paths after completion.
 
 ## What To Look For
 
-- The final report should summarize housing features, cleaning actions, EDA findings, selected regression model, and limitations.
+- The final report should summarize baseline feature relationships, cleaning actions, EDA findings, selected regression model, and limitations.
+- Metrics demonstrate the workflow only and are not appropriate for clinical decisions.
 - The evaluation summary should identify the selected model, best candidate, and baseline median regressor comparison.
 - If MLflow is enabled, look for run tags, regression metrics, evaluation plots, and model artifacts.

@@ -35,13 +35,13 @@ from app.workflows.workflow_steps import CANONICAL_WORKFLOW_STEPS
 
 DATASETS = {
     "regression": {
-        "path": PROJECT_ROOT / "examples" / "sample_data" / "regression_housing.csv",
-        "target": "sale_price",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "diabetes_progression.csv",
+        "target": "disease_progression",
         "task_type": "regression",
     },
     "classification": {
-        "path": PROJECT_ROOT / "examples" / "sample_data" / "classification_churn.csv",
-        "target": "churn",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "breast_cancer_wisconsin.csv",
+        "target": "diagnosis",
         "task_type": "classification",
     },
 }

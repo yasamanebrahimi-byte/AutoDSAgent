@@ -49,14 +49,14 @@ In the UI, use `Try A Sample Dataset`.
 
 For classification:
 
-- Select `Synthetic Customer Churn Classification`.
-- Target: `churn`.
+- Select `Breast Cancer Wisconsin Classification`.
+- Target: `diagnosis`.
 - Task type: `Classification`.
 
 For regression:
 
-- Select `Synthetic Housing Regression`.
-- Target: `sale_price`.
+- Select `Diabetes Progression Regression`.
+- Target: `disease_progression`.
 - Task type: `Regression`.
 
 Explain: "The sample is uploaded through the same backend path as a real CSV, so the raw input is preserved under the run folder."

@@ -16,19 +16,25 @@ BACKEND_URL = os.getenv("AUTODS_BACKEND_URL", "http://localhost:8000").rstrip("/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SAMPLE_DATASETS = {
-    "Synthetic Customer Churn Classification": {
-        "filename": "classification_churn.csv",
-        "path": PROJECT_ROOT / "examples" / "sample_data" / "classification_churn.csv",
-        "target": "churn",
+    "Breast Cancer Wisconsin Classification": {
+        "filename": "breast_cancer_wisconsin.csv",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "breast_cancer_wisconsin.csv",
+        "target": "diagnosis",
         "task_type": "Classification",
-        "description": "Binary churn prediction with numeric, categorical, boolean, missing-value, duplicate-row, and ID-like columns.",
+        "description": (
+            "Established 569-row UCI diagnostic benchmark with 30 numeric features. "
+            "For software demonstration only; not for clinical use."
+        ),
     },
-    "Synthetic Housing Regression": {
-        "filename": "regression_housing.csv",
-        "path": PROJECT_ROOT / "examples" / "sample_data" / "regression_housing.csv",
-        "target": "sale_price",
+    "Diabetes Progression Regression": {
+        "filename": "diabetes_progression.csv",
+        "path": PROJECT_ROOT / "examples" / "sample_data" / "diabetes_progression.csv",
+        "target": "disease_progression",
         "task_type": "Regression",
-        "description": "Home-price prediction with mixed feature types and conservative cleaning opportunities.",
+        "description": (
+            "Established 442-row scikit-learn regression benchmark with 10 baseline features. "
+            "For software demonstration only; not for clinical use."
+        ),
     },
 }
 
@@ -196,8 +202,11 @@ def render_runtime_status() -> None:
         else:
             st.write("Runtime status is unavailable until the backend is reachable.")
 
-        st.write("Bundled demo datasets are available under `examples/sample_data/`.")
-        st.write("Use `classification_churn.csv` with target `churn` or `regression_housing.csv` with target `sale_price`.")
+        st.write("Bundled public benchmarks are available under `examples/sample_data/`.")
+        st.write(
+            "Use `breast_cancer_wisconsin.csv` with target `diagnosis` or "
+            "`diabetes_progression.csv` with target `disease_progression`."
+        )
 
 
 def upload_csv(uploaded_file) -> dict | None:
