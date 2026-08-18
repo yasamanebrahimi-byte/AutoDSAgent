@@ -56,7 +56,7 @@ def create_report_run(
         "profile",
         generation_id,
         source_fingerprint,
-        None,
+        target_column,
         None,
         {"source_data": source_fingerprint},
     )

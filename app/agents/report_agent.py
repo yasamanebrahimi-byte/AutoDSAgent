@@ -7,6 +7,12 @@ from typing import Any
 from app.agents.base_agent import BaseAgent
 from app.backend.schemas.reports import ReportGenerateRequest
 from app.backend.services.report_service import ReportService
+from app.workflows.workflow_state import (
+    all_steps_terminal,
+    mark_step_completed,
+    mark_workflow_completed,
+)
+from app.workflows.workflow_steps import REPORT_STEP
 
 
 class ReportAgent(BaseAgent):
@@ -22,6 +28,10 @@ class ReportAgent(BaseAgent):
 
         run_id = self._require_run_id(state)
         paths = self.report_service.run_manager.get_paths(run_id)
+        report_state = self._copy_state(state)
+        mark_step_completed(report_state, REPORT_STEP)
+        if all_steps_terminal(report_state):
+            mark_workflow_completed(report_state)
 
         response = self.report_service.generate_reports(
             run_id,
@@ -29,6 +39,7 @@ class ReportAgent(BaseAgent):
                 include_html=bool(state.get("include_html_report", False)),
                 force_regenerate=True,
             ),
+            workflow_state=report_state,
         )
 
         updated_state = self._copy_state(state)

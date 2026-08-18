@@ -20,6 +20,7 @@ from app.backend.services.run_manager import RunManager
 from app.tools.artifact_lineage import (
     fingerprint_payload,
     lineage_context,
+    normalize_optional_text,
     validate_artifact_for_state,
     write_artifact_lineage,
 )
@@ -47,22 +48,32 @@ class ProfilingService:
 
         return self.run_manager.get_paths(run_id).intermediate / "profile.json"
 
-    def generate_profile(self, run_id: str) -> DatasetProfile:
+    def generate_profile(
+        self,
+        run_id: str,
+        target_column: str | None = None,
+    ) -> DatasetProfile:
         """Generate, save, and return a rich dataset profile."""
 
         raw_path = self.raw_data_path(run_id)
         if not raw_path.exists():
             raise FileNotFoundError(raw_path)
 
-        dataframe = load_csv(raw_path)
-        profile = self.profile_dataframe(dataframe, run_id=run_id)
-        profile_path = save_json(self.profile_path(run_id), profile.model_dump(mode="json"))
         context = lineage_context(self.run_manager, run_id)
+        selected_target = normalize_optional_text(target_column) or context["target_column"]
+        dataframe = load_csv(raw_path)
+        profile = self.profile_dataframe(
+            dataframe,
+            run_id=run_id,
+            target_column=selected_target,
+        )
+        profile_path = save_json(self.profile_path(run_id), profile.model_dump(mode="json"))
         source_fingerprint = context["source_fingerprint"]
         config_fingerprint = fingerprint_payload(
             {
                 "artifact_type": "profile",
                 "source_fingerprint": source_fingerprint,
+                "target_column": selected_target,
             }
         )
         write_artifact_lineage(
@@ -72,9 +83,13 @@ class ProfilingService:
             artifact_type="profile",
             generation_id=context["generation_id"],
             source_fingerprint=source_fingerprint,
+            target_column=selected_target,
             config_fingerprint=config_fingerprint,
             upstream_fingerprints={"source_data": source_fingerprint},
-            relevant_config={"source_fingerprint": source_fingerprint},
+            relevant_config={
+                "source_fingerprint": source_fingerprint,
+                "target_column": selected_target,
+            },
         )
         log_event(
             self.logger,
@@ -103,7 +118,12 @@ class ProfilingService:
             raise ValueError(f"Profile artifact is stale: {validation.reason}.")
         return DatasetProfile(**load_json(path))
 
-    def profile_dataframe(self, dataframe: pd.DataFrame, run_id: str) -> DatasetProfile:
+    def profile_dataframe(
+        self,
+        dataframe: pd.DataFrame,
+        run_id: str,
+        target_column: str | None = None,
+    ) -> DatasetProfile:
         """Create a profile object from an in-memory DataFrame."""
 
         rows, columns = dataframe.shape
@@ -119,6 +139,7 @@ class ProfilingService:
                 column_profile.model_dump(mode="json")
                 for column_profile in column_profiles
             ],
+            target_column=target_column,
         )
 
         return DatasetProfile(

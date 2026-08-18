@@ -21,7 +21,10 @@ class ProfilerAgent(BaseAgent):
 
         run_id = self._require_run_id(state)
         paths = self.profiling_service.run_manager.get_paths(run_id)
-        profile = self.profiling_service.generate_profile(run_id)
+        profile = self.profiling_service.generate_profile(
+            run_id,
+            target_column=state.get("target_column"),
+        )
 
         updated_state = self._copy_state(state)
         self._set_artifact(

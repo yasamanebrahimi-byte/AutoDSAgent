@@ -17,7 +17,7 @@ def test_profile_is_generated_and_saved(tmp_path):
     )
 
     service = ProfilingService(run_manager=manager)
-    profile = service.generate_profile(run_id)
+    profile = service.generate_profile(run_id, target_column="segment")
 
     assert profile.rows == 5
     assert profile.columns == 4
@@ -30,6 +30,7 @@ def test_profile_is_generated_and_saved(tmp_path):
     assert "duplicate_rows" in issue_types
     assert "constant_column" in issue_types
     assert "likely_id_column" in issue_types
+    assert "target_not_selected" not in issue_types
 
     profile_by_column = {
         column.column_name: column
