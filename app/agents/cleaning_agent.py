@@ -36,6 +36,7 @@ class CleaningAgent(BaseAgent):
         plan = self.cleaning_service.generate_cleaning_plan(
             run_id,
             target_column=state.get("target_column"),
+            workflow_state=state,
         )
 
         updated_state = self._copy_state(state)
