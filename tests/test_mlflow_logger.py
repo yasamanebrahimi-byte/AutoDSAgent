@@ -114,7 +114,8 @@ def test_mlflow_logging_failure_does_not_crash_modeling(tmp_path):
         ModelingRequest(target_column="churn", random_state=42),
     )
 
-    assert response.modeling_summary.best_model_name
+    assert response.modeling_summary.selected_model_name
+    assert response.modeling_summary.best_model_name == response.modeling_summary.selected_model_name
     assert any("MLflow logging failed" in warning for warning in response.evaluation_summary.warnings)
     saved_summary = load_json(service.evaluation_service.evaluation_summary_path(run_id))
     assert any("MLflow logging failed" in warning for warning in saved_summary["warnings"])

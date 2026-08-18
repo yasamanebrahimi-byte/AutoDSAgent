@@ -80,9 +80,9 @@ The workflow can pause before cleaning or modeling. The state file records the w
 
 The preprocessing layer uses deterministic target heuristics and saves the inference reason. Boolean targets, low-cardinality categorical strings, and low-cardinality discrete numeric targets are classification; continuous numeric and numeric-string targets are regression. Identifier-like, constant, high-cardinality text, and rare-class targets are rejected. Explicit classification requests are validated instead of blindly accepted.
 
-### How do you choose the best model?
+### How do you choose the selected model?
 
-Successful candidates are compared with cross-validation on the training partition only. Regression selects the lowest mean CV RMSE; classification selects the highest mean CV macro F1. After selection, the chosen model is fit on the complete training partition and evaluated once on the untouched holdout test set.
+The baseline and successful candidates are compared with cross-validation on the training partition only. Regression selects the lowest mean CV RMSE; classification selects the highest mean CV macro F1. The strongest non-baseline candidate is still reported separately. After selection, the chosen model is fit on the complete training partition and evaluated once on the untouched holdout test set.
 
 ### What makes this agentic?
 

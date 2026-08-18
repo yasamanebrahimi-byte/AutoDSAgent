@@ -32,7 +32,9 @@ class EvaluationAgent(BaseAgent):
         )
         updated_state["steps"]["modeling"]["outputs"].update(
             {
-                "evaluation_best_model_name": summary.best_model_name,
+                "evaluation_best_candidate_name": summary.best_candidate_name,
+                "evaluation_selected_model_name": summary.selected_model_name,
+                "evaluation_best_model_name": summary.selected_model_name,
                 "evaluation_primary_metric": summary.primary_metric,
             }
         )

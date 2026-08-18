@@ -32,7 +32,8 @@
 - `intermediate/modeling_summary.json`
 - `intermediate/evaluation_summary.json`
 - `models/baseline_model.pkl`
-- `models/best_model.pkl`
+- `models/selected_model.pkl`
+- `models/best_model.pkl` (legacy selected-model alias)
 - `models/model_results.json`
 - `plots/evaluation/model_comparison.png`
 - `plots/evaluation/confusion_matrix.png`
@@ -52,5 +53,5 @@ The script prints the exact run ID and paths after completion.
 ## What To Look For
 
 - The final report should summarize churn-related features, cleaning actions, EDA findings, selected classifier, and limitations.
-- The evaluation summary should identify the best model and compare it to the most-frequent baseline classifier.
+- The evaluation summary should identify the selected model, best candidate, and most-frequent baseline classifier comparison.
 - If MLflow is enabled, look for run tags, classification metrics, evaluation plots, and model artifacts.

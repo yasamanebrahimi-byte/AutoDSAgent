@@ -63,11 +63,18 @@ class DemoRunResult:
     target_column: str
     task_type: str | None
     workflow_status: str
-    best_model_name: str | None
+    selected_model_name: str | None
+    best_candidate_name: str | None
     primary_metric: str | None
     primary_metric_value: float | None
     final_report_path: Path
     artifacts: dict[str, Path]
+
+    @property
+    def best_model_name(self) -> str | None:
+        """Backward-compatible alias for the selected model name."""
+
+        return self.selected_model_name
 
 
 DATASETS: dict[str, DemoDataset] = {
@@ -100,6 +107,7 @@ ARTIFACTS: dict[str, tuple[str, str]] = {
     "report_metadata": ("intermediate", "report_metadata.json"),
     "model_results": ("models", "model_results.json"),
     "baseline_model": ("models", "baseline_model.pkl"),
+    "selected_model": ("models", "selected_model.pkl"),
     "best_model": ("models", "best_model.pkl"),
     "eda_report": ("reports", "eda_summary.md"),
     "final_report": ("reports", "final_report.md"),
@@ -173,6 +181,7 @@ def run_demo(
         final_test_metrics = (
             evaluation_summary.get("final_test_metrics")
             or evaluation_summary.get("holdout_metrics")
+            or evaluation_summary.get("selected_model_holdout_metrics")
             or evaluation_summary.get("best_model_metrics", {})
         )
         value = final_test_metrics.get(primary_metric)
@@ -186,7 +195,11 @@ def run_demo(
         target_column=selected_target,
         task_type=state.get("task_type") or selected_task_type,
         workflow_status=str(state.get("status")),
-        best_model_name=modeling_summary.get("best_model_name"),
+        selected_model_name=(
+            modeling_summary.get("selected_model_name")
+            or modeling_summary.get("best_model_name")
+        ),
+        best_candidate_name=modeling_summary.get("best_candidate_name"),
         primary_metric=primary_metric,
         primary_metric_value=primary_metric_value,
         final_report_path=artifacts["final_report"],
@@ -252,15 +265,17 @@ def print_summary(result: DemoRunResult) -> None:
     print(f"Workflow status: {result.workflow_status}")
     if result.task_type:
         print(f"Task type: {result.task_type}")
-    if result.best_model_name and result.primary_metric:
+    if result.selected_model_name and result.primary_metric:
         metric_text = result.primary_metric.upper()
         if result.primary_metric_value is None:
-            print(f"Best model: {result.best_model_name} ({metric_text})")
+            print(f"Selected model: {result.selected_model_name} ({metric_text})")
         else:
             print(
-                f"Best model: {result.best_model_name} "
+                f"Selected model: {result.selected_model_name} "
                 f"({metric_text}={result.primary_metric_value:.4f})"
             )
+    if result.best_candidate_name and result.best_candidate_name != result.selected_model_name:
+        print(f"Best candidate: {result.best_candidate_name}")
     print(f"Final report: {_display_path(result.final_report_path)}")
     print("Key artifacts:")
     for name, path in result.artifacts.items():

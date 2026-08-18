@@ -795,7 +795,11 @@ def render_workflow_artifacts(run_id: str, state: dict[str, Any]) -> None:
                 metric_cols = st.columns(4)
                 metric_cols[0].metric("Target", modeling_summary["target_column"])
                 metric_cols[1].metric("Task", modeling_summary["task_type"])
-                metric_cols[2].metric("Best model", modeling_summary["best_model_name"])
+                metric_cols[2].metric(
+                    "Selected model",
+                    _selected_model_name(modeling_summary, evaluation_summary)
+                    or "Unavailable",
+                )
                 metric_cols[3].metric(
                     "Primary metric",
                     modeling_summary["primary_metric"].upper(),
@@ -1153,16 +1157,44 @@ def render_modeling_response(run_id: str, response: dict[str, Any]) -> None:
 
     st.success("Modeling and evaluation artifacts were saved.")
 
+    selected_model = _selected_model_name(modeling_summary, evaluation_summary)
+    best_candidate = _best_candidate_name(modeling_summary, evaluation_summary)
+    baseline_model = (
+        modeling_summary.get("baseline_model_name")
+        or evaluation_summary.get("baseline_model_name")
+    )
+
     metric_cols = st.columns(4)
     metric_cols[0].metric("Target", modeling_summary["target_column"])
     metric_cols[1].metric("Task", modeling_summary["task_type"])
-    metric_cols[2].metric("Best model", modeling_summary["best_model_name"])
+    metric_cols[2].metric("Selected model", selected_model or "Unavailable")
     metric_cols[3].metric("Primary metric", modeling_summary["primary_metric"].upper())
 
     split_cols = st.columns(3)
     split_cols[0].metric("Rows used", modeling_summary["rows_used"])
     split_cols[1].metric("Train rows", modeling_summary["train_rows"])
     split_cols[2].metric("Test rows", modeling_summary["test_rows"])
+
+    st.subheader("Model Selection")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Field": "Best candidate model", "Value": best_candidate or "None"},
+                {"Field": "Baseline model", "Value": baseline_model or "Unavailable"},
+                {"Field": "Selected model", "Value": selected_model or "Unavailable"},
+                {
+                    "Field": "Candidate beat baseline",
+                    "Value": evaluation_summary.get("candidate_beats_baseline"),
+                },
+                {
+                    "Field": "Selection outcome",
+                    "Value": evaluation_summary.get("selection_outcome") or "Unavailable",
+                },
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.subheader("CV Model Selection Metrics")
     comparison_table = _model_comparison_dataframe(model_results, evaluation_summary)
@@ -1455,12 +1487,19 @@ def _model_comparison_dataframe(
     evaluation_summary: dict[str, Any],
 ) -> pd.DataFrame:
     records = model_results.get("results", [])
+    selected_model = _selected_model_name(None, evaluation_summary)
+    best_candidate = _best_candidate_name(None, evaluation_summary)
     if records:
         rows: list[dict[str, Any]] = []
         for record in records:
             row = {
                 "Model": record.get("model_name"),
                 "Role": record.get("role"),
+                "Selection": _selection_label(
+                    record.get("model_name"),
+                    selected_model,
+                    best_candidate,
+                ),
                 "Status": record.get("status"),
             }
             row.update(record.get("cv_metrics") or record.get("metrics", {}))
@@ -1482,7 +1521,10 @@ def _model_comparison_dataframe(
 
     rows = []
     for model_name, metrics in all_metrics.items():
-        row = {"Model": model_name}
+        row = {
+            "Model": model_name,
+            "Selection": _selection_label(model_name, selected_model, best_candidate),
+        }
         row.update(metrics)
         rows.append(row)
     return pd.DataFrame(rows)
@@ -1492,9 +1534,50 @@ def _final_test_metrics(evaluation_summary: dict[str, Any]) -> dict[str, Any]:
     return (
         evaluation_summary.get("final_test_metrics")
         or evaluation_summary.get("holdout_metrics")
+        or evaluation_summary.get("selected_model_holdout_metrics")
         or evaluation_summary.get("best_model_metrics")
         or {}
     )
+
+
+def _selected_model_name(
+    modeling_summary: dict[str, Any] | None,
+    evaluation_summary: dict[str, Any] | None,
+) -> str | None:
+    modeling_summary = modeling_summary or {}
+    evaluation_summary = evaluation_summary or {}
+    return (
+        modeling_summary.get("selected_model_name")
+        or evaluation_summary.get("selected_model_name")
+        or modeling_summary.get("best_model_name")
+        or evaluation_summary.get("best_model_name")
+    )
+
+
+def _best_candidate_name(
+    modeling_summary: dict[str, Any] | None,
+    evaluation_summary: dict[str, Any] | None,
+) -> str | None:
+    modeling_summary = modeling_summary or {}
+    evaluation_summary = evaluation_summary or {}
+    if "best_candidate_name" in modeling_summary:
+        return modeling_summary.get("best_candidate_name")
+    if "best_candidate_name" in evaluation_summary:
+        return evaluation_summary.get("best_candidate_name")
+    return modeling_summary.get("best_model_name") or evaluation_summary.get("best_model_name")
+
+
+def _selection_label(
+    model_name: Any,
+    selected_model: Any,
+    best_candidate: Any,
+) -> str:
+    labels = []
+    if model_name == selected_model:
+        labels.append("selected")
+    if model_name == best_candidate:
+        labels.append("best candidate")
+    return ", ".join(labels)
 
 
 def _metrics_dataframe(metrics: dict[str, Any]) -> pd.DataFrame:

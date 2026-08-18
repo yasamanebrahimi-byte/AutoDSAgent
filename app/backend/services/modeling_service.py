@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -64,9 +65,14 @@ class ModelingService:
         return self.run_manager.get_paths(run_id).models / "baseline_model.pkl"
 
     def best_model_path(self, run_id: str) -> Path:
-        """Return the best model artifact path."""
+        """Return the legacy selected-model alias artifact path."""
 
         return self.run_manager.get_paths(run_id).models / "best_model.pkl"
+
+    def selected_model_path(self, run_id: str) -> Path:
+        """Return the selected model artifact path."""
+
+        return self.run_manager.get_paths(run_id).models / "selected_model.pkl"
 
     def train_and_evaluate(
         self,
@@ -114,19 +120,13 @@ class ModelingService:
             warnings=prepared.warnings,
         )
 
-        if (
-            evaluation_result.baseline_result is None
-            or evaluation_result.baseline_result.status != "succeeded"
-        ):
-            raise RuntimeError("The baseline model did not train successfully.")
-
         artifact_paths = self._artifact_paths_payload(paths.root)
         model_results_payload = dict(evaluation_result.model_results_payload)
         model_results_payload["artifact_paths"] = artifact_paths
         saved_model_artifacts = save_model_artifacts(
             models_dir=paths.models,
             results=training_results,
-            best_result=evaluation_result.best_result,
+            selected_result=evaluation_result.selected_result,
             model_results_payload=model_results_payload,
         )
 
@@ -135,8 +135,13 @@ class ModelingService:
             dataset_path=dataset_path.relative_to(paths.root).as_posix(),
             prepared=prepared,
             training_results=training_results,
-            best_model_name=evaluation_result.best_result.model_name,
-            baseline_model_name=evaluation_result.baseline_result.model_name,
+            selected_result=evaluation_result.selected_result,
+            best_candidate_result=evaluation_result.best_candidate_result,
+            baseline_result=evaluation_result.baseline_result,
+            candidate_beats_baseline=(
+                evaluation_result.summary.candidate_beats_baseline
+            ),
+            selection_outcome=evaluation_result.summary.selection_outcome,
         )
         modeling_summary_path = save_json(
             self.modeling_summary_path(run_id),
@@ -160,16 +165,22 @@ class ModelingService:
             "source_data": dataset_selection.source_fingerprint,
             upstream_key: dataset_selection.fingerprint,
         }
-        for artifact_path, artifact_type in (
+        artifacts_for_lineage = [
             (modeling_summary_path, "modeling_summary"),
             (
                 self.evaluation_service.evaluation_summary_path(run_id),
                 "evaluation_summary",
             ),
             (saved_model_artifacts["model_results_path"], "model_results"),
-            (saved_model_artifacts["baseline_model_path"], "baseline_model"),
+            (saved_model_artifacts["selected_model_path"], "selected_model"),
             (saved_model_artifacts["best_model_path"], "best_model"),
-        ):
+        ]
+        if "baseline_model_path" in saved_model_artifacts:
+            artifacts_for_lineage.append(
+                (saved_model_artifacts["baseline_model_path"], "baseline_model")
+            )
+
+        for artifact_path, artifact_type in artifacts_for_lineage:
             write_artifact_lineage(
                 artifact_path,
                 run_root=paths.root,
@@ -215,7 +226,7 @@ class ModelingService:
             run_id=run_id,
             target_column=modeling_summary.target_column,
             task_type=modeling_summary.task_type,
-            best_model=modeling_summary.best_model_name,
+            selected_model=modeling_summary.selected_model_name,
         )
 
         return ModelingResponse(
@@ -265,6 +276,7 @@ class ModelingService:
         state = lineage_context(self.run_manager, run_id)["state"]
         expected_artifacts = {
             "baseline_model.pkl": "baseline_model",
+            "selected_model.pkl": "selected_model",
             "best_model.pkl": "best_model",
             "model_results.json": "model_results",
         }
@@ -287,8 +299,11 @@ class ModelingService:
         dataset_path: str,
         prepared,
         training_results: list[ModelTrainingResult],
-        best_model_name: str,
-        baseline_model_name: str,
+        selected_result: ModelTrainingResult,
+        best_candidate_result: ModelTrainingResult | None,
+        baseline_result: ModelTrainingResult | None,
+        candidate_beats_baseline: bool | None,
+        selection_outcome: str | None,
     ) -> ModelingSummary:
         models_attempted = [result.model_name for result in training_results]
         models_succeeded = [
@@ -318,8 +333,20 @@ class ModelingService:
             models_attempted=models_attempted,
             models_succeeded=models_succeeded,
             models_failed=models_failed,
-            best_model_name=best_model_name,
-            baseline_model_name=baseline_model_name,
+            best_candidate_name=(
+                best_candidate_result.model_name if best_candidate_result else None
+            ),
+            best_candidate_metrics=(
+                _finite_metric_mapping(best_candidate_result.cv_metrics)
+                if best_candidate_result
+                else {}
+            ),
+            selected_model_name=selected_result.model_name,
+            selected_model_role=selected_result.role,
+            baseline_model_name=baseline_result.model_name if baseline_result else None,
+            candidate_beats_baseline=candidate_beats_baseline,
+            selection_outcome=selection_outcome,
+            best_model_name=selected_result.model_name,
             primary_metric=PRIMARY_METRIC_BY_TASK[prepared.task_type],
             warnings=prepared.warnings,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -331,6 +358,9 @@ class ModelingService:
             "baseline_model_path": (models_dir / "baseline_model.pkl")
             .relative_to(run_root)
             .as_posix(),
+            "selected_model_path": (models_dir / "selected_model.pkl")
+            .relative_to(run_root)
+            .as_posix(),
             "best_model_path": (models_dir / "best_model.pkl")
             .relative_to(run_root)
             .as_posix(),
@@ -338,3 +368,18 @@ class ModelingService:
             .relative_to(run_root)
             .as_posix(),
         }
+
+
+def _finite_metric_mapping(metrics: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in metrics.items():
+        if value is None:
+            cleaned[key] = None
+            continue
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            cleaned[key] = value
+            continue
+        cleaned[key] = numeric_value if math.isfinite(numeric_value) else None
+    return cleaned

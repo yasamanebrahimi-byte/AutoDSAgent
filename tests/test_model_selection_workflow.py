@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from app.backend.services.evaluation_service import EvaluationService
 from app.backend.services.run_manager import RunManager
 from app.tools import modeling as modeling_module
+from app.tools.evaluation import select_best_model, select_model_results
 from app.tools.modeling import ModelTrainingResult
 from app.tools.preprocessing import prepare_modeling_data
 
@@ -37,6 +38,114 @@ class CountingEstimator:
     def predict(self, X):
         self.predict_calls += 1
         return self.predictions[: len(X)]
+
+
+def test_candidate_beats_baseline_for_classification_selection():
+    results = [
+        _selection_result("baseline_most_frequent", "baseline", 0.40),
+        _selection_result("logistic_regression", "candidate", 0.70),
+    ]
+
+    selection = select_model_results(results, "classification")
+
+    assert selection.selected_result.model_name == "logistic_regression"
+    assert selection.best_candidate_result.model_name == "logistic_regression"
+    assert selection.candidate_beats_baseline is True
+    assert selection.selection_outcome == "candidate_selected_candidate_outperformed_baseline"
+
+
+def test_baseline_beats_candidate_and_is_selected():
+    results = [
+        _selection_result("baseline_most_frequent", "baseline", 0.80),
+        _selection_result("random_forest", "candidate", 0.60),
+    ]
+
+    selection = select_model_results(results, "classification")
+
+    assert selection.selected_result.model_name == "baseline_most_frequent"
+    assert selection.best_candidate_result.model_name == "random_forest"
+    assert selection.candidate_beats_baseline is False
+    assert selection.selection_outcome == "baseline_selected_baseline_outperformed_candidates"
+    assert select_best_model(results, "classification").model_name == "baseline_most_frequent"
+
+
+def test_baseline_candidate_exact_tie_uses_original_order():
+    results = [
+        _selection_result("baseline_most_frequent", "baseline", 0.75),
+        _selection_result("logistic_regression", "candidate", 0.75),
+    ]
+
+    selection = select_model_results(results, "classification")
+
+    assert selection.selected_result.model_name == "baseline_most_frequent"
+    assert selection.best_candidate_result.model_name == "logistic_regression"
+    assert selection.candidate_beats_baseline is False
+    assert selection.selection_outcome == "baseline_selected_tie"
+
+
+def test_all_candidates_fail_baseline_is_selected_if_valid():
+    results = [
+        _selection_result("baseline_median", "baseline", 3.0),
+        ModelTrainingResult(
+            model_name="ridge",
+            role="candidate",
+            status="failed",
+            error="forced failure",
+        ),
+    ]
+
+    selection = select_model_results(results, "regression")
+
+    assert selection.selected_result.model_name == "baseline_median"
+    assert selection.best_candidate_result is None
+    assert selection.candidate_beats_baseline is None
+    assert selection.selection_outcome == "baseline_selected_no_successful_candidates"
+
+
+def test_baseline_failure_does_not_block_successful_candidate_selection():
+    results = [
+        ModelTrainingResult(
+            model_name="baseline_median",
+            role="baseline",
+            status="failed",
+            error="forced failure",
+        ),
+        _selection_result("ridge", "candidate", 2.0),
+    ]
+
+    selection = select_model_results(results, "regression")
+
+    assert selection.selected_result.model_name == "ridge"
+    assert selection.best_candidate_result.model_name == "ridge"
+    assert selection.baseline_result.model_name == "baseline_median"
+    assert selection.candidate_beats_baseline is None
+    assert selection.selection_outcome == "candidate_selected_baseline_unavailable"
+
+
+def test_regression_selection_uses_lower_metric_direction():
+    results = [
+        _selection_result("baseline_median", "baseline", 3.0),
+        _selection_result("ridge", "candidate", 1.5),
+    ]
+
+    selection = select_model_results(results, "regression")
+
+    assert selection.selected_result.model_name == "ridge"
+    assert selection.candidate_beats_baseline is True
+
+
+def test_non_finite_selection_metrics_are_excluded():
+    results = [
+        _selection_result("baseline_most_frequent", "baseline", 0.50),
+        _selection_result("nan_candidate", "candidate", np.nan),
+        _selection_result("weak_candidate", "candidate", 0.40),
+    ]
+
+    selection = select_model_results(results, "classification")
+
+    assert selection.selected_result.model_name == "baseline_most_frequent"
+    assert selection.best_candidate_result.model_name == "weak_candidate"
+    assert selection.candidate_beats_baseline is False
 
 
 def test_cv_metrics_select_model_before_holdout_is_evaluated(tmp_path):
@@ -91,7 +200,10 @@ def test_cv_metrics_select_model_before_holdout_is_evaluated(tmp_path):
     manager.create_run(run_id)
     evaluation = EvaluationService(manager).evaluate_and_save(run_id, prepared, results)
 
+    assert evaluation.selected_result.model_name == "cv_winner"
     assert evaluation.best_result.model_name == "cv_winner"
+    assert evaluation.summary.selected_model_name == "cv_winner"
+    assert evaluation.summary.best_candidate_name == "cv_winner"
     assert cv_winner.fit_calls == 1
     assert holdout_winner.fit_calls == 0
     assert cv_winner.predict_calls == 1
@@ -125,7 +237,8 @@ def test_training_only_cv_beats_candidate_that_would_win_holdout(
     manager.create_run(run_id)
     evaluation = EvaluationService(manager).evaluate_and_save(run_id, prepared, results)
 
-    assert evaluation.best_result.model_name == "cv_winner"
+    assert evaluation.selected_result.model_name == "cv_winner"
+    assert evaluation.summary.selected_model_name == "cv_winner"
     assert evaluation.summary.test_evaluated_model_names == ["cv_winner"]
     assert evaluation.summary.final_test_metrics["rmse"] == pytest.approx(100.0)
     assert evaluation.model_results_payload["results"][1]["holdout_metrics"][
@@ -142,6 +255,8 @@ def test_changing_only_holdout_targets_does_not_change_selected_model(
     original = _select_for_holdout_target(tmp_path, "original-holdout", 100.0)
     mutated = _select_for_holdout_target(tmp_path, "mutated-holdout", -250.0)
 
+    assert original.summary.selected_model_name == "cv_winner"
+    assert mutated.summary.selected_model_name == "cv_winner"
     assert original.summary.best_model_name == "cv_winner"
     assert mutated.summary.best_model_name == "cv_winner"
     assert (
@@ -274,6 +389,18 @@ def _select_for_holdout_target(tmp_path, run_id, holdout_target_value):
     return EvaluationService(manager).evaluate_and_save(run_id, prepared, results)
 
 
+def _selection_result(model_name, role, primary_metric_value):
+    metric_name = "cv_macro_f1_mean" if role == "candidate" else "cv_primary_mean"
+    return ModelTrainingResult(
+        model_name=model_name,
+        role=role,
+        status="succeeded",
+        cv_metrics={metric_name: primary_metric_value},
+        metrics={metric_name: primary_metric_value},
+        primary_metric_value=primary_metric_value,
+    )
+
+
 def _prepare_holdout_sensitive_regression(holdout_target_value):
     row_count = 40
     test_indices = train_test_split(
@@ -300,7 +427,7 @@ def _prepare_holdout_sensitive_regression(holdout_target_value):
 def _constant_regression_specs(task_type, random_state):
     assert task_type == "regression"
     return [
-        ("baseline_median", "baseline", ConstantRegressor(0.0)),
+        ("baseline_median", "baseline", ConstantRegressor(50.0)),
         ("cv_winner", "candidate", ConstantRegressor(0.0)),
         ("holdout_winner", "candidate", ConstantRegressor(100.0)),
     ]

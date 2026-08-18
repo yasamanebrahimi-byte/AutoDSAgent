@@ -36,7 +36,7 @@ def test_final_report_includes_sections_for_available_artifacts():
     assert "## Exploratory Data Analysis" in report.content
     assert "## Modeling Methodology" in report.content
     assert "## Evaluation Results" in report.content
-    assert "## Best Model Summary" in report.content
+    assert "## Selected Model Summary" in report.content
     assert "dataset_overview" in report.sections_generated
     assert "modeling_methodology" in report.sections_generated
     assert "Correlations, feature importance, and model signals do not prove causation" in report.content

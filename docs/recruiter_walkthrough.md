@@ -48,7 +48,7 @@ AutoDS Agent does not simply generate text. It executes a structured local workf
 - Cleaned CSV.
 - EDA summary, findings, Markdown report, and plots.
 - Modeling and evaluation summaries.
-- Saved baseline and best models.
+- Saved baseline, selected model, and legacy selected-model alias artifacts.
 - Final report, executive summary, technical summary, and limitations report.
 - Workflow state and agent trace logs.
 

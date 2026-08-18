@@ -34,10 +34,12 @@ This is a practical summary of the AutoDS Agent API. Full interactive docs are a
 
 ## Modeling And Evaluation
 
-- `POST /runs/{run_id}/model`: train baseline and candidate models against `intermediate/cleaned_data.csv`, select candidates with training-only CV, evaluate the selected model once on the holdout, and save model artifacts, evaluation summaries, and plots under `plots/evaluation/`.
+- `POST /runs/{run_id}/model`: train baseline and candidate models against `intermediate/cleaned_data.csv`, select the overall model with training-only CV including the baseline, evaluate the selected model once on the holdout, and save model artifacts, evaluation summaries, and plots under `plots/evaluation/`.
 - `GET /runs/{run_id}/modeling-summary`: return `intermediate/modeling_summary.json`.
 - `GET /runs/{run_id}/evaluation-summary`: return `intermediate/evaluation_summary.json`.
 - `GET /runs/{run_id}/models`: list saved model and result artifacts.
+
+Modeling and evaluation summaries expose `best_candidate_name`, `best_candidate_metrics`, `selected_model_name`, `selected_model_role`, `baseline_model_name`, `baseline_metrics`, `candidate_beats_baseline`, `selection_metric`, `selection_direction`, and `selection_outcome`. New runs save `models/selected_model.pkl`; `models/best_model.pkl` remains a legacy alias for the same selected estimator.
 
 When MLflow is enabled, modeling also logs run parameters, metrics, tags, and artifacts to the configured tracking server.
 

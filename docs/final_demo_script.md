@@ -104,7 +104,8 @@ Point out:
 - Inferred or selected task type.
 - Baseline model.
 - Candidate models.
-- Best model.
+- Best candidate model.
+- Selected model.
 - Primary metric.
 - Evaluation plots.
 

@@ -99,6 +99,7 @@ def create_initial_workflow_state(
             "evaluation_summary": None,
             "model_results": None,
             "baseline_model": None,
+            "selected_model": None,
             "best_model": None,
             "final_report": None,
             "executive_summary": None,

@@ -68,7 +68,8 @@ A successful run saves:
 - `intermediate/cleaned_data.csv`
 - `intermediate/eda_summary.json`
 - `intermediate/modeling_summary.json`
-- `models/best_model.pkl`
+- `models/selected_model.pkl`
+- `models/best_model.pkl` (legacy selected-model alias)
 - `plots/**/*.png`
 - `reports/final_report.md`
 - `logs/workflow_state.json`

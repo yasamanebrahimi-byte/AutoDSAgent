@@ -11,7 +11,7 @@ def test_full_regression_demo_runs_end_to_end(tmp_path):
     assert result.workflow_status == "completed"
     assert result.target_column == "sale_price"
     assert result.task_type == "regression"
-    assert result.best_model_name
+    assert result.selected_model_name
     assert result.primary_metric == "rmse"
     assert result.primary_metric_value is not None
     assert_expected_artifacts_exist(result.artifacts)
@@ -23,7 +23,7 @@ def test_full_classification_demo_runs_end_to_end(tmp_path):
     assert result.workflow_status == "completed"
     assert result.target_column == "churn"
     assert result.task_type == "classification"
-    assert result.best_model_name
+    assert result.selected_model_name
     assert result.primary_metric == "macro_f1"
     assert result.primary_metric_value is not None
     assert_expected_artifacts_exist(result.artifacts)
@@ -43,6 +43,7 @@ def assert_expected_artifacts_exist(artifacts: dict[str, Path]) -> None:
         "evaluation_summary",
         "model_results",
         "baseline_model",
+        "selected_model",
         "best_model",
         "final_report",
         "executive_summary",

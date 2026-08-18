@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.backend.config import settings
 
@@ -66,11 +66,33 @@ class ModelingSummary(BaseModel):
     models_attempted: list[str] = Field(default_factory=list)
     models_succeeded: list[str] = Field(default_factory=list)
     models_failed: list[str] = Field(default_factory=list)
-    best_model_name: str
-    baseline_model_name: str
+    best_candidate_name: str | None = None
+    best_candidate_metrics: dict[str, Any] = Field(default_factory=dict)
+    selected_model_name: str
+    selected_model_role: Literal["baseline", "candidate"] | None = None
+    baseline_model_name: str | None = None
+    candidate_beats_baseline: bool | None = None
+    selection_outcome: str | None = None
+    best_model_name: str | None = None
     primary_metric: str
     warnings: list[str] = Field(default_factory=list)
     created_at: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_best_model_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        legacy_best_model = payload.get("best_model_name")
+        selected_model = payload.get("selected_model_name")
+        if selected_model is None and legacy_best_model is not None:
+            payload["selected_model_name"] = legacy_best_model
+        if legacy_best_model is None and payload.get("selected_model_name") is not None:
+            payload["best_model_name"] = payload["selected_model_name"]
+        if "best_candidate_name" not in payload and legacy_best_model is not None:
+            payload["best_candidate_name"] = legacy_best_model
+        return payload
 
 
 class EvaluationSummary(BaseModel):
@@ -80,7 +102,16 @@ class EvaluationSummary(BaseModel):
     target_column: str
     task_type: TaskType
     primary_metric: str
-    best_model_name: str
+    baseline_model_name: str | None = None
+    best_candidate_name: str | None = None
+    best_candidate_metrics: dict[str, Any] = Field(default_factory=dict)
+    selected_model_name: str
+    selected_model_role: Literal["baseline", "candidate"] | None = None
+    selected_model_cv_metrics: dict[str, Any] = Field(default_factory=dict)
+    selected_model_holdout_metrics: dict[str, Any] = Field(default_factory=dict)
+    candidate_beats_baseline: bool | None = None
+    selection_outcome: str | None = None
+    best_model_name: str | None = None
     baseline_metrics: dict[str, Any] = Field(default_factory=dict)
     best_model_metrics: dict[str, Any] = Field(default_factory=dict)
     all_model_metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -98,6 +129,31 @@ class EvaluationSummary(BaseModel):
     generated_plots: list[EvaluationPlotInfo] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     created_at: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_best_model_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        legacy_best_model = payload.get("best_model_name")
+        selected_model = payload.get("selected_model_name")
+        if selected_model is None and legacy_best_model is not None:
+            payload["selected_model_name"] = legacy_best_model
+        if legacy_best_model is None and payload.get("selected_model_name") is not None:
+            payload["best_model_name"] = payload["selected_model_name"]
+        if "best_candidate_name" not in payload and legacy_best_model is not None:
+            payload["best_candidate_name"] = legacy_best_model
+        if not payload.get("selected_model_holdout_metrics"):
+            payload["selected_model_holdout_metrics"] = (
+                payload.get("final_test_metrics")
+                or payload.get("holdout_metrics")
+                or payload.get("best_model_metrics")
+                or {}
+            )
+        if not payload.get("best_model_metrics"):
+            payload["best_model_metrics"] = payload.get("selected_model_holdout_metrics") or {}
+        return payload
 
 
 class ModelingResponse(BaseModel):

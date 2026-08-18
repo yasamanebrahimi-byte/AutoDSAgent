@@ -63,7 +63,7 @@ It is designed to show engineering judgment as well as data science ability.
 - Baseline and candidate sklearn model training with training-only preprocessing.
 - Cross-validated model selection and one final holdout evaluation for the selected model.
 - Task-specific CV and holdout metrics, including richer classification metrics.
-- Saved baseline and best model artifacts.
+- Saved baseline, selected model, and legacy selected-model alias artifacts.
 - Optional MLflow experiment tracking.
 - Deterministic workflow orchestration with approval gates.
 - Workflow state, retries, trace logs, and final report generation.
@@ -236,7 +236,7 @@ python scripts/run_full_demo.py --dataset classification --include-html
 python scripts/run_full_demo.py --dataset regression --runs-dir .demo_runs
 ```
 
-The script prints the run ID, workflow status, target, inferred task type, best model, primary metric, final report path, and key artifact paths.
+The script prints the run ID, workflow status, target, inferred task type, selected model, primary metric, final report path, and key artifact paths.
 
 ## Generated Artifacts
 
@@ -259,7 +259,8 @@ runs/<run_id>/
     report_metadata.json
   models/
     baseline_model.pkl
-    best_model.pkl
+    selected_model.pkl
+    best_model.pkl        # legacy alias for the selected model
     model_results.json
   plots/
     eda/

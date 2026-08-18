@@ -56,11 +56,12 @@ class MLflowLogger:
             final_test_metrics = (
                 evaluation_summary.get("final_test_metrics")
                 or evaluation_summary.get("holdout_metrics")
+                or evaluation_summary.get("selected_model_holdout_metrics")
                 or evaluation_summary.get("best_model_metrics", {})
             )
             parent_metrics = prefix_metrics(
                 final_test_metrics,
-                prefix="best",
+                prefix="selected",
             )
 
             with mlflow.start_run(run_name=run_id, tags=tags):
@@ -141,8 +142,17 @@ def format_run_parameters(request: Any, modeling_summary: Mapping[str, Any]) -> 
         "columns_used": modeling_summary.get("columns_used"),
         "num_features_used": len(modeling_summary.get("features_used") or []),
         "num_features_excluded": len(modeling_summary.get("features_excluded") or []),
-        "best_model_name": modeling_summary.get("best_model_name"),
+        "best_candidate_name": modeling_summary.get("best_candidate_name"),
+        "selected_model_name": (
+            modeling_summary.get("selected_model_name")
+            or modeling_summary.get("best_model_name")
+        ),
+        "best_model_name": (
+            modeling_summary.get("selected_model_name")
+            or modeling_summary.get("best_model_name")
+        ),
         "baseline_model_name": modeling_summary.get("baseline_model_name"),
+        "candidate_beats_baseline": modeling_summary.get("candidate_beats_baseline"),
         "primary_metric": modeling_summary.get("primary_metric"),
     }
     return _drop_none(params)
@@ -181,6 +191,7 @@ def artifact_paths_for_mlflow(run_root: Path) -> list[Path]:
         run_root / "intermediate" / "modeling_summary.json",
         run_root / "intermediate" / "evaluation_summary.json",
         run_root / "models" / "model_results.json",
+        run_root / "models" / "selected_model.pkl",
         run_root / "models" / "best_model.pkl",
         run_root / "reports" / "final_report.md",
     ]

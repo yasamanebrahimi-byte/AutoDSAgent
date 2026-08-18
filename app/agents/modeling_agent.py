@@ -52,10 +52,18 @@ class ModelingAgent(BaseAgent):
             self.modeling_service.evaluation_service.evaluation_summary_path(run_id),
             paths.root,
         )
+        baseline_model_path = self.modeling_service.baseline_model_path(run_id)
+        if baseline_model_path.exists():
+            self._set_artifact(
+                updated_state,
+                "baseline_model",
+                baseline_model_path,
+                paths.root,
+            )
         self._set_artifact(
             updated_state,
-            "baseline_model",
-            self.modeling_service.baseline_model_path(run_id),
+            "selected_model",
+            self.modeling_service.selected_model_path(run_id),
             paths.root,
         )
         self._set_artifact(
@@ -74,7 +82,12 @@ class ModelingAgent(BaseAgent):
             {
                 "target_column": response.modeling_summary.target_column,
                 "task_type": response.modeling_summary.task_type,
-                "best_model_name": response.modeling_summary.best_model_name,
+                "best_candidate_name": response.modeling_summary.best_candidate_name,
+                "selected_model_name": response.modeling_summary.selected_model_name,
+                "best_model_name": response.modeling_summary.selected_model_name,
+                "candidate_beats_baseline": (
+                    response.modeling_summary.candidate_beats_baseline
+                ),
                 "primary_metric": response.modeling_summary.primary_metric,
                 "models_succeeded": list(response.modeling_summary.models_succeeded),
                 "models_failed": list(response.modeling_summary.models_failed),

@@ -137,8 +137,13 @@ def main() -> None:
             "report_metadata": report_service.report_metadata_path(paths.root.name),
             "report_index": report_service.report_index_path(paths.root.name),
         },
-        best_model_name=(
-            modeling_response.modeling_summary.best_model_name
+        selected_model_name=(
+            modeling_response.modeling_summary.selected_model_name
+            if modeling_response
+            else None
+        ),
+        best_candidate_name=(
+            modeling_response.modeling_summary.best_candidate_name
             if modeling_response
             else None
         ),
@@ -175,7 +180,8 @@ def parse_args() -> argparse.Namespace:
 def print_summary(
     run_id: str,
     artifacts: dict[str, Path],
-    best_model_name: str | None,
+    selected_model_name: str | None,
+    best_candidate_name: str | None,
     modeling_error: str | None,
     report_status: str,
     profile_warnings: int,
@@ -187,8 +193,10 @@ def print_summary(
     print(f"Cleaning strategies planned: {cleaning_actions}")
     print(f"EDA plots generated: {plots}")
     print(f"Report status: {report_status}")
-    if best_model_name:
-        print(f"Best model: {best_model_name}")
+    if selected_model_name:
+        print(f"Selected model: {selected_model_name}")
+    if best_candidate_name and best_candidate_name != selected_model_name:
+        print(f"Best candidate: {best_candidate_name}")
     if modeling_error:
         print(f"Modeling skipped or failed: {modeling_error}")
     print("Artifacts:")
@@ -235,6 +243,7 @@ def write_demo_workflow_logs(
         "evaluation_summary": paths.intermediate / "evaluation_summary.json",
         "model_results": paths.models / "model_results.json",
         "baseline_model": paths.models / "baseline_model.pkl",
+        "selected_model": paths.models / "selected_model.pkl",
         "best_model": paths.models / "best_model.pkl",
         "final_report": paths.reports / "final_report.md",
         "executive_summary": paths.reports / "executive_summary.md",

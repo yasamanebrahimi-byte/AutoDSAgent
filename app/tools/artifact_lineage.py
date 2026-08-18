@@ -42,6 +42,7 @@ TARGET_SENSITIVE_ARTIFACTS = {
     "evaluation_summary",
     "model_results",
     "baseline_model",
+    "selected_model",
     "best_model",
     "final_report",
     "executive_summary",
@@ -55,6 +56,7 @@ TASK_SENSITIVE_ARTIFACTS = {
     "evaluation_summary",
     "model_results",
     "baseline_model",
+    "selected_model",
     "best_model",
     "final_report",
     "executive_summary",
@@ -71,6 +73,7 @@ ANALYSIS_INPUT_ARTIFACTS = {
     "evaluation_summary",
     "model_results",
     "baseline_model",
+    "selected_model",
     "best_model",
 }
 REPORT_ARTIFACT_TYPES = {
@@ -103,6 +106,7 @@ ARTIFACT_RELATIVE_PATHS_BY_STEP: dict[str, dict[str, str]] = {
         "evaluation_summary": "intermediate/evaluation_summary.json",
         "model_results": "models/model_results.json",
         "baseline_model": "models/baseline_model.pkl",
+        "selected_model": "models/selected_model.pkl",
         "best_model": "models/best_model.pkl",
     },
     REPORT_STEP: {

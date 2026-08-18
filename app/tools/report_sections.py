@@ -98,7 +98,7 @@ def build_executive_summary_section(artifacts: Artifacts) -> ReportSection:
     if _artifact(artifacts, "eda_summary"):
         actions.append("generated exploratory analysis")
     if modeling_summary:
-        actions.append("trained and evaluated baseline candidate models")
+        actions.append("trained and evaluated baseline and candidate models")
 
     bullets = [
         f"AutoDS Agent analyzed `{filename}`"
@@ -121,10 +121,8 @@ def build_executive_summary_section(artifacts: Artifacts) -> ReportSection:
             evaluation_summary,
             "primary_metric",
         )
-        best_model = _value(modeling_summary, "best_model_name") or _value(
-            evaluation_summary,
-            "best_model_name",
-        )
+        selected_model = _selected_model_name(modeling_summary, evaluation_summary)
+        best_candidate = _best_candidate_name(modeling_summary, evaluation_summary)
         metric_value = _metric_value(
             _final_test_metrics(evaluation_summary),
             str(primary_metric) if primary_metric else None,
@@ -134,9 +132,15 @@ def build_executive_summary_section(artifacts: Artifacts) -> ReportSection:
             if metric_value is not None
             else ""
         )
-        bullets.append(
-            f"Modeling result: `{best_model}` was selected by training-only CV{suffix}."
-        )
+        if best_candidate and selected_model and best_candidate != selected_model:
+            bullets.append(
+                f"Modeling result: `{best_candidate}` was the strongest candidate, "
+                f"but `{selected_model}` was selected by training-only CV{suffix}."
+            )
+        else:
+            bullets.append(
+                f"Modeling result: `{selected_model}` was selected by training-only CV{suffix}."
+            )
     else:
         bullets.append("Modeling result: modeling artifacts were not available, so this report does not claim model performance.")
 
@@ -545,7 +549,11 @@ def build_modeling_methodology_section(artifacts: Artifacts) -> ReportSection:
                 ("CV strategy", summary.get("cv_strategy")),
                 ("Task inference reason", summary.get("task_inference_reason")),
                 ("Primary metric", summary.get("primary_metric")),
-                ("Best model selection", _selection_logic(summary.get("task_type"), summary.get("primary_metric"))),
+                ("Best candidate model", summary.get("best_candidate_name")),
+                ("Baseline model", summary.get("baseline_model_name")),
+                ("Selected model", _selected_model_name(summary, None)),
+                ("Selection outcome", summary.get("selection_outcome")),
+                ("Selection policy", _selection_logic(summary.get("task_type"), summary.get("primary_metric"))),
             ],
         ),
         "",
@@ -587,13 +595,29 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
     primary_metric = summary.get("primary_metric")
     best_metrics = _final_test_metrics(summary)
     baseline_metrics = summary.get("baseline_metrics") or {}
+    best_candidate_metrics = summary.get("best_candidate_metrics") or {}
     all_model_metrics = _cv_model_metrics(summary)
     comparison = summary.get("baseline_comparison") or {}
     parts = [
         _metric_definitions(str(summary.get("task_type"))),
         "",
+        "Selection summary:",
+        _markdown_table(
+            ["Field", "Value"],
+            [
+                ("Best candidate model", _best_candidate_name(None, summary)),
+                ("Baseline model", summary.get("baseline_model_name")),
+                ("Selected model", _selected_model_name(None, summary)),
+                ("Candidate beat baseline", summary.get("candidate_beats_baseline")),
+                ("Selection outcome", summary.get("selection_outcome")),
+            ],
+        ),
+        "",
         "Baseline CV metrics:",
         _markdown_table(["Metric", "Value"], sorted(baseline_metrics.items())),
+        "",
+        "Best candidate CV metrics:",
+        _markdown_table(["Metric", "Value"], sorted(best_candidate_metrics.items())),
         "",
         "Selected model final test metrics:",
         _markdown_table(["Metric", "Value"], sorted(best_metrics.items())),
@@ -668,22 +692,23 @@ def build_evaluation_results_section(artifacts: Artifacts) -> ReportSection:
 
 
 def build_best_model_section(artifacts: Artifacts) -> ReportSection:
-    """Build best-model summary when modeling artifacts are available."""
+    """Build selected-model summary when modeling artifacts are available."""
 
     modeling_summary = _artifact(artifacts, "modeling_summary")
     evaluation_summary = _artifact(artifacts, "evaluation_summary")
     if not modeling_summary and not evaluation_summary:
         return _skipped(
             "best_model",
-            "Best Model Summary",
+            "Selected Model Summary",
             "modeling and evaluation artifacts are unavailable.",
         )
 
-    best_model = _value(modeling_summary, "best_model_name") or _value(
+    selected_model = _selected_model_name(modeling_summary, evaluation_summary)
+    best_candidate = _best_candidate_name(modeling_summary, evaluation_summary)
+    baseline_model = _value(modeling_summary, "baseline_model_name") or _value(
         evaluation_summary,
-        "best_model_name",
+        "baseline_model_name",
     )
-    baseline_model = _value(modeling_summary, "baseline_model_name")
     primary_metric = _value(modeling_summary, "primary_metric") or _value(
         evaluation_summary,
         "primary_metric",
@@ -697,12 +722,15 @@ def build_best_model_section(artifacts: Artifacts) -> ReportSection:
         _markdown_table(
             ["Field", "Value"],
             [
-                ("Best model", best_model),
+                ("Selected model", selected_model),
+                ("Best candidate model", best_candidate),
                 ("Baseline model", baseline_model),
+                ("Candidate beat baseline", _candidate_beats_baseline(modeling_summary, evaluation_summary)),
+                ("Selection outcome", _selection_outcome(modeling_summary, evaluation_summary)),
                 ("Primary metric", primary_metric),
-                ("Best model final test metric value", best_value),
-                ("Baseline absolute improvement", (comparison or {}).get("absolute_improvement")),
-                ("Baseline percent improvement", _percent_text((comparison or {}).get("percent_improvement"))),
+                ("Selected model final test metric value", best_value),
+                ("Candidate vs baseline absolute improvement", (comparison or {}).get("absolute_improvement")),
+                ("Candidate vs baseline percent improvement", _percent_text((comparison or {}).get("percent_improvement"))),
             ],
         )
     ]
@@ -716,8 +744,8 @@ def build_best_model_section(artifacts: Artifacts) -> ReportSection:
     )
     return ReportSection(
         "best_model",
-        "Best Model Summary",
-        _section("Best Model Summary", parts),
+        "Selected Model Summary",
+        _section("Selected Model Summary", parts),
     )
 
 
@@ -1025,6 +1053,13 @@ def _first_nonempty(*groups: Sequence[Any]) -> Any:
     return None
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _metric_value(metrics: Mapping[str, Any], primary_metric: str | None) -> Any:
     if not primary_metric:
         return None
@@ -1037,6 +1072,7 @@ def _final_test_metrics(summary: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return (
         summary.get("final_test_metrics")
         or summary.get("holdout_metrics")
+        or summary.get("selected_model_holdout_metrics")
         or summary.get("best_model_metrics")
         or {}
     )
@@ -1050,6 +1086,53 @@ def _cv_model_metrics(summary: Mapping[str, Any] | None) -> Mapping[str, Mapping
         or summary.get("candidate_cv_results")
         or summary.get("all_model_metrics")
         or {}
+    )
+
+
+def _selected_model_name(
+    modeling_summary: Mapping[str, Any] | None,
+    evaluation_summary: Mapping[str, Any] | None,
+) -> Any:
+    return (
+        _value(modeling_summary, "selected_model_name")
+        or _value(evaluation_summary, "selected_model_name")
+        or _value(modeling_summary, "best_model_name")
+        or _value(evaluation_summary, "best_model_name")
+    )
+
+
+def _best_candidate_name(
+    modeling_summary: Mapping[str, Any] | None,
+    evaluation_summary: Mapping[str, Any] | None,
+) -> Any:
+    if isinstance(modeling_summary, Mapping) and "best_candidate_name" in modeling_summary:
+        return modeling_summary.get("best_candidate_name")
+    if isinstance(evaluation_summary, Mapping) and "best_candidate_name" in evaluation_summary:
+        return evaluation_summary.get("best_candidate_name")
+    return _value(modeling_summary, "best_model_name") or _value(
+        evaluation_summary,
+        "best_model_name",
+    )
+
+
+def _candidate_beats_baseline(
+    modeling_summary: Mapping[str, Any] | None,
+    evaluation_summary: Mapping[str, Any] | None,
+) -> Any:
+    return _first_present(
+        _value(evaluation_summary, "candidate_beats_baseline"),
+        _value(modeling_summary, "candidate_beats_baseline"),
+        _value(_value(evaluation_summary, "baseline_comparison"), "candidate_beats_baseline"),
+    )
+
+
+def _selection_outcome(
+    modeling_summary: Mapping[str, Any] | None,
+    evaluation_summary: Mapping[str, Any] | None,
+) -> Any:
+    return (
+        _value(evaluation_summary, "selection_outcome")
+        or _value(modeling_summary, "selection_outcome")
     )
 
 
@@ -1112,10 +1195,16 @@ def _percent_text(value: Any) -> str:
 
 def _selection_logic(task_type: Any, primary_metric: Any) -> str:
     if task_type == "regression":
-        return f"Lowest mean CV {primary_metric} among successful candidate models."
+        return (
+            f"Lowest mean CV {primary_metric} among successful baseline and candidate "
+            "models."
+        )
     if task_type == "classification":
-        return f"Highest mean CV {primary_metric} among successful candidate models."
-    return "Best successful candidate model by the saved CV primary metric."
+        return (
+            f"Highest mean CV {primary_metric} among successful baseline and candidate "
+            "models."
+        )
+    return "Best successful model by the saved CV primary metric, including the baseline."
 
 
 def _metric_definitions(task_type: str) -> str:

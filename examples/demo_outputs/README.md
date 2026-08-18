@@ -15,7 +15,7 @@ Each command prints:
 - Dataset.
 - Target column.
 - Workflow status.
-- Best model and primary metric, when modeling succeeds.
+- Selected model, best candidate, and primary metric, when modeling succeeds.
 - Final report path.
 - Key artifact paths.
 

@@ -32,7 +32,8 @@
 - `intermediate/modeling_summary.json`
 - `intermediate/evaluation_summary.json`
 - `models/baseline_model.pkl`
-- `models/best_model.pkl`
+- `models/selected_model.pkl`
+- `models/best_model.pkl` (legacy selected-model alias)
 - `models/model_results.json`
 - `plots/evaluation/model_comparison.png`
 - `plots/evaluation/predicted_vs_actual.png`
@@ -53,5 +54,5 @@ The script prints the exact run ID and paths after completion.
 ## What To Look For
 
 - The final report should summarize housing features, cleaning actions, EDA findings, selected regression model, and limitations.
-- The evaluation summary should identify the best model and compare it to the baseline median regressor.
+- The evaluation summary should identify the selected model, best candidate, and baseline median regressor comparison.
 - If MLflow is enabled, look for run tags, regression metrics, evaluation plots, and model artifacts.

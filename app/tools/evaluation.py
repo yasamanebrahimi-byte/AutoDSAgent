@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import matplotlib
 
@@ -42,11 +43,32 @@ PRIMARY_METRIC_BY_TASK: dict[TaskType, str] = {
     "regression": "rmse",
     "classification": "macro_f1",
 }
-SELECTION_DIRECTION_BY_TASK: dict[TaskType, str] = {
+SelectionDirection = Literal["lower", "higher"]
+SELECTION_DIRECTION_BY_TASK: dict[TaskType, SelectionDirection] = {
     "regression": "lower",
     "classification": "higher",
 }
 SELECTION_TIEBREAKER = "original_result_order"
+
+
+@dataclass(frozen=True)
+class ModelSelectionResult:
+    """Unambiguous CV-based model-selection result."""
+
+    selected_result: ModelTrainingResult
+    best_candidate_result: ModelTrainingResult | None
+    baseline_result: ModelTrainingResult | None
+    selection_metric: str
+    selection_direction: SelectionDirection
+    selection_tiebreaker: str
+    candidate_beats_baseline: bool | None
+    selection_outcome: str
+
+    @property
+    def best_result(self) -> ModelTrainingResult:
+        """Backward-compatible alias for the selected overall model."""
+
+        return self.selected_result
 
 
 def evaluate_holdout_model(
@@ -202,26 +224,93 @@ def select_best_model(
     results: list[ModelTrainingResult],
     task_type: TaskType,
 ) -> ModelTrainingResult:
-    """Select the best successful model using CV scores only.
+    """Select the best successful model overall using CV scores only.
 
     Ties are resolved by the original result order so final holdout metrics are
     never needed for model selection.
     """
 
-    successful_results = [
-        result
-        for result in results
-        if result.status == "succeeded" and result.primary_metric_value is not None
-    ]
+    return select_model_results(results, task_type).selected_result
+
+
+def select_best_candidate(
+    results: list[ModelTrainingResult],
+    task_type: TaskType,
+) -> ModelTrainingResult | None:
+    """Select the strongest non-baseline candidate using CV scores only."""
+
+    successful_results = _successful_selection_results(results)
+    candidate_results = [result for result in successful_results if result.role == "candidate"]
+    if not candidate_results:
+        return None
+
+    lower_is_better = SELECTION_DIRECTION_BY_TASK[task_type] == "lower"
+    return _select_by_ordered_score(candidate_results, lower_is_better=lower_is_better)
+
+
+def select_model_results(
+    results: list[ModelTrainingResult],
+    task_type: TaskType,
+) -> ModelSelectionResult:
+    """Select the overall model and retain the strongest trainable candidate."""
+
+    successful_results = _successful_selection_results(results)
     if not successful_results:
         raise RuntimeError("No models completed successfully.")
 
-    candidate_results = [result for result in successful_results if result.role == "candidate"]
-    selection_pool = candidate_results or successful_results
+    lower_is_better = SELECTION_DIRECTION_BY_TASK[task_type] == "lower"
+    baseline_result = next((result for result in results if result.role == "baseline"), None)
+    valid_baseline_result = (
+        baseline_result if baseline_result is not None and _is_selection_ready(baseline_result) else None
+    )
+    best_candidate_result = select_best_candidate(results, task_type)
+    selected_result = _select_by_ordered_score(
+        successful_results,
+        lower_is_better=lower_is_better,
+    )
 
-    if task_type == "regression":
-        return _select_by_ordered_score(selection_pool, lower_is_better=True)
-    return _select_by_ordered_score(selection_pool, lower_is_better=False)
+    candidate_beats_baseline = _candidate_beats_baseline(
+        best_candidate_result,
+        valid_baseline_result,
+        task_type,
+    )
+    return ModelSelectionResult(
+        selected_result=selected_result,
+        best_candidate_result=best_candidate_result,
+        baseline_result=baseline_result,
+        selection_metric=PRIMARY_METRIC_BY_TASK[task_type],
+        selection_direction=SELECTION_DIRECTION_BY_TASK[task_type],
+        selection_tiebreaker=SELECTION_TIEBREAKER,
+        candidate_beats_baseline=candidate_beats_baseline,
+        selection_outcome=_selection_outcome(
+            selected_result=selected_result,
+            best_candidate_result=best_candidate_result,
+            baseline_result=baseline_result,
+            valid_baseline_result=valid_baseline_result,
+            candidate_beats_baseline=candidate_beats_baseline,
+            task_type=task_type,
+        ),
+    )
+
+
+def _successful_selection_results(
+    results: list[ModelTrainingResult],
+) -> list[ModelTrainingResult]:
+    return [result for result in results if _is_selection_ready(result)]
+
+
+def _is_selection_ready(result: ModelTrainingResult) -> bool:
+    return result.status == "succeeded" and _metric_value(result) is not None
+
+
+def _metric_value(result: ModelTrainingResult | None) -> float | None:
+    if result is None or result.primary_metric_value is None:
+        return None
+    try:
+        value = float(result.primary_metric_value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _select_by_ordered_score(
@@ -229,9 +318,13 @@ def _select_by_ordered_score(
     lower_is_better: bool,
 ) -> ModelTrainingResult:
     best_result = results[0]
-    best_value = float(best_result.primary_metric_value)
+    best_value = _metric_value(best_result)
+    if best_value is None:
+        raise RuntimeError("No models completed successfully.")
     for result in results[1:]:
-        value = float(result.primary_metric_value)
+        value = _metric_value(result)
+        if value is None:
+            continue
         is_better = value < best_value if lower_is_better else value > best_value
         if is_better:
             best_result = result
@@ -239,54 +332,134 @@ def _select_by_ordered_score(
     return best_result
 
 
+def _candidate_beats_baseline(
+    best_candidate_result: ModelTrainingResult | None,
+    baseline_result: ModelTrainingResult | None,
+    task_type: TaskType,
+) -> bool | None:
+    candidate_value = _metric_value(best_candidate_result)
+    baseline_value = _metric_value(baseline_result)
+    if candidate_value is None or baseline_value is None:
+        return None
+    if task_type == "regression":
+        return candidate_value < baseline_value
+    return candidate_value > baseline_value
+
+
+def _metric_values_tie(
+    left: ModelTrainingResult | None,
+    right: ModelTrainingResult | None,
+) -> bool:
+    left_value = _metric_value(left)
+    right_value = _metric_value(right)
+    if left_value is None or right_value is None:
+        return False
+    return abs(left_value - right_value) < 1e-12
+
+
+def _selection_outcome(
+    *,
+    selected_result: ModelTrainingResult,
+    best_candidate_result: ModelTrainingResult | None,
+    baseline_result: ModelTrainingResult | None,
+    valid_baseline_result: ModelTrainingResult | None,
+    candidate_beats_baseline: bool | None,
+    task_type: TaskType,
+) -> str:
+    if selected_result.role == "baseline":
+        if best_candidate_result is None:
+            return "baseline_selected_no_successful_candidates"
+        if _metric_values_tie(best_candidate_result, valid_baseline_result):
+            return "baseline_selected_tie"
+        return "baseline_selected_baseline_outperformed_candidates"
+
+    if baseline_result is None:
+        return "candidate_selected_no_baseline_attempted"
+    if valid_baseline_result is None:
+        return "candidate_selected_baseline_unavailable"
+    if candidate_beats_baseline:
+        return "candidate_selected_candidate_outperformed_baseline"
+    if _metric_values_tie(best_candidate_result, valid_baseline_result):
+        return "candidate_selected_tie"
+    if task_type == "regression":
+        return "candidate_selected_lower_cv_score"
+    return "candidate_selected_higher_cv_score"
+
+
 def baseline_comparison(
     baseline_result: ModelTrainingResult | None,
-    best_result: ModelTrainingResult,
     task_type: TaskType,
+    best_candidate_result: ModelTrainingResult | None = None,
+    selected_result: ModelTrainingResult | None = None,
 ) -> dict[str, Any]:
-    """Compare the selected best model against the baseline model."""
+    """Compare the strongest candidate against the baseline using CV metrics."""
 
     primary_metric = PRIMARY_METRIC_BY_TASK[task_type]
-    baseline_value = (
-        baseline_result.primary_metric_value
-        if baseline_result is not None and baseline_result.primary_metric_value is not None
-        else None
-    )
-    best_value = best_result.primary_metric_value
+    selection_direction = SELECTION_DIRECTION_BY_TASK[task_type]
+    baseline_value = _metric_value(baseline_result)
+    candidate_value = _metric_value(best_candidate_result)
+    selected_value = _metric_value(selected_result or best_candidate_result)
 
-    if baseline_value is None or best_value is None:
+    if baseline_value is None:
         return {
+            "baseline_metric_value": None,
+            "best_candidate_metric_value": candidate_value,
+            "selected_metric_value": selected_value,
+            "candidate_beats_baseline": None,
+            "candidate_tied_baseline": None,
             "absolute_improvement": None,
             "percent_improvement": None,
             "interpretation": "Baseline comparison is unavailable because baseline metrics were not produced.",
         }
 
+    if candidate_value is None:
+        return {
+            "baseline_metric_value": _finite_or_none(baseline_value),
+            "best_candidate_metric_value": None,
+            "selected_metric_value": selected_value,
+            "candidate_beats_baseline": None,
+            "candidate_tied_baseline": None,
+            "absolute_improvement": None,
+            "percent_improvement": None,
+            "interpretation": "No successful candidate produced a valid CV metric; the baseline was selected.",
+        }
+
     if task_type == "regression":
-        absolute_improvement = float(baseline_value) - float(best_value)
+        absolute_improvement = baseline_value - candidate_value
     else:
-        absolute_improvement = float(best_value) - float(baseline_value)
+        absolute_improvement = candidate_value - baseline_value
 
     percent_improvement = None
-    if float(baseline_value) != 0:
-        percent_improvement = (absolute_improvement / abs(float(baseline_value))) * 100
+    if baseline_value != 0:
+        percent_improvement = (absolute_improvement / abs(baseline_value)) * 100
 
-    if best_result.role == "baseline" or abs(absolute_improvement) < 1e-12:
+    candidate_tied_baseline = abs(absolute_improvement) < 1e-12
+    candidate_beats_baseline = absolute_improvement > 0 and not candidate_tied_baseline
+    selected_name = (selected_result or best_candidate_result).model_name
+    candidate_name = best_candidate_result.model_name
+
+    if candidate_tied_baseline:
         interpretation = (
-            f"No candidate improved on the baseline for {primary_metric}; "
-            "the baseline remains the best model."
+            f"The best candidate `{candidate_name}` tied the baseline on mean CV "
+            f"{primary_metric}; {SELECTION_TIEBREAKER} selected `{selected_name}`."
         )
-    elif absolute_improvement > 0:
-        direction = "lower" if task_type == "regression" else "higher"
+    elif candidate_beats_baseline:
         interpretation = (
-            f"The best candidate improved on the baseline with a {direction} "
-            f"{primary_metric}."
+            f"The best candidate `{candidate_name}` improved on the baseline with a "
+            f"{selection_direction} mean CV {primary_metric} and was selected."
         )
     else:
         interpretation = (
-            f"The selected best model did not improve on the baseline for {primary_metric}."
+            "The baseline outperformed all candidate models during cross-validation "
+            "and was selected."
         )
 
     return {
+        "baseline_metric_value": _finite_or_none(baseline_value),
+        "best_candidate_metric_value": _finite_or_none(candidate_value),
+        "selected_metric_value": _finite_or_none(selected_value),
+        "candidate_beats_baseline": candidate_beats_baseline,
+        "candidate_tied_baseline": candidate_tied_baseline,
         "absolute_improvement": _finite_or_none(absolute_improvement),
         "percent_improvement": _finite_or_none(percent_improvement),
         "interpretation": interpretation,
@@ -296,7 +469,7 @@ def baseline_comparison(
 def create_evaluation_plots(
     results: list[ModelTrainingResult],
     prepared: PreprocessingResult,
-    best_result: ModelTrainingResult,
+    selected_result: ModelTrainingResult,
     run_root: Path,
     plots_dir: Path,
 ) -> list[dict[str, str]]:
@@ -309,7 +482,7 @@ def create_evaluation_plots(
         results=results,
         task_type=prepared.task_type,
         output_dir=output_dir,
-        best_model_name=best_result.model_name,
+        selected_model_name=selected_result.model_name,
     )
     _append_plot(
         generated,
@@ -319,13 +492,13 @@ def create_evaluation_plots(
         "evaluation_model_comparison",
     )
 
-    if best_result.estimator is None:
+    if selected_result.estimator is None:
         return generated
 
     predictions = (
-        best_result.holdout_predictions
-        if best_result.holdout_predictions is not None
-        else best_result.estimator.predict(prepared.X_test)
+        selected_result.holdout_predictions
+        if selected_result.holdout_predictions is not None
+        else selected_result.estimator.predict(prepared.X_test)
     )
 
     if prepared.task_type == "regression":
@@ -354,7 +527,7 @@ def create_evaluation_plots(
 
     _append_plot(
         generated,
-        create_feature_importance_plot(best_result, output_dir),
+        create_feature_importance_plot(selected_result, output_dir),
         run_root,
         "Feature Signal",
         "evaluation_feature_importance",
@@ -368,23 +541,21 @@ def create_model_comparison_plot(
     task_type: TaskType,
     output_dir: str | Path,
     best_model_name: str | None = None,
+    selected_model_name: str | None = None,
 ) -> Path | None:
     """Create a bar chart comparing the primary metric across models."""
 
     primary_metric = PRIMARY_METRIC_BY_TASK[task_type]
-    successful_results = [
-        result
-        for result in results
-        if result.status == "succeeded" and result.primary_metric_value is not None
-    ]
+    successful_results = _successful_selection_results(results)
     if not successful_results:
         return None
 
+    highlighted_model_name = selected_model_name or best_model_name
     output_path = ensure_directory(output_dir) / "model_comparison.png"
     labels = [result.model_name.replace("_", " ").title() for result in successful_results]
     values = [float(result.primary_metric_value) for result in successful_results]
     colors = [
-        "#59A14F" if result.model_name == best_model_name else "#9C9C9C"
+        "#59A14F" if result.model_name == highlighted_model_name else "#9C9C9C"
         if result.role == "baseline"
         else "#4C78A8"
         for result in successful_results
@@ -497,8 +668,9 @@ def create_feature_importance_plot(
     if result.estimator is None:
         return None
 
-    model = result.estimator.named_steps.get("model")
-    preprocessor = result.estimator.named_steps.get("preprocessor")
+    named_steps = getattr(result.estimator, "named_steps", {})
+    model = named_steps.get("model")
+    preprocessor = named_steps.get("preprocessor")
     if model is None or preprocessor is None:
         return None
 
@@ -515,7 +687,7 @@ def create_feature_importance_plot(
     output_path = ensure_directory(output_dir) / "feature_importance.png"
     fig, ax = plt.subplots(figsize=(8, max(5, len(importance) * 0.32)))
     ax.barh(importance["feature"][::-1], importance["value"][::-1], color="#F28E2B")
-    ax.set_title("Feature Signal for Best Model (Not Causal)")
+    ax.set_title("Feature Signal for Selected Model (Not Causal)")
     ax.set_xlabel("Absolute importance or coefficient")
     ax.set_ylabel("Feature")
     fig.tight_layout()

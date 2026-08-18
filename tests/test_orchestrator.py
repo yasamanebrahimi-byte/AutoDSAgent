@@ -67,8 +67,10 @@ def test_modeling_runs_after_modeling_approval_is_granted(tmp_path):
     assert state["steps"]["modeling"]["status"] == "completed"
     assert state["steps"]["report"]["status"] == "completed"
     assert state["steps"]["modeling"]["approval_status"] == "approved"
+    assert state["artifacts"]["selected_model"] == "models/selected_model.pkl"
     assert state["artifacts"]["best_model"] == "models/best_model.pkl"
     assert state["artifacts"]["final_report"] == "reports/final_report.md"
+    assert (paths.models / "selected_model.pkl").exists()
     assert (paths.models / "best_model.pkl").exists()
     assert (paths.intermediate / "evaluation_summary.json").exists()
     assert (paths.reports / "final_report.md").exists()

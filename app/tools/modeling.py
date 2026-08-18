@@ -109,10 +109,10 @@ def serialize_training_results(
                 "model_name": result.model_name,
                 "role": result.role,
                 "status": result.status,
-                "metrics": result.metrics,
-                "cv_metrics": result.cv_metrics,
+                "metrics": _finite_metric_dict(result.metrics),
+                "cv_metrics": _finite_metric_dict(result.cv_metrics),
                 "holdout_metrics": result.holdout_metrics,
-                "primary_metric_value": result.primary_metric_value,
+                "primary_metric_value": _finite_or_none(result.primary_metric_value),
                 "fold_count": result.fold_count,
                 "selection_metric": result.selection_metric,
                 "error": result.error,
@@ -305,3 +305,9 @@ def _finite_or_none(value: float | None) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric_value if np.isfinite(numeric_value) else None
+
+
+def _finite_metric_dict(
+    metrics: dict[str, float | None],
+) -> dict[str, float | None]:
+    return {key: _finite_or_none(value) for key, value in metrics.items()}
