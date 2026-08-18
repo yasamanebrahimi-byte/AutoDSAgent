@@ -12,7 +12,6 @@ from app.tools.artifact_lineage import new_generation_id
 from app.workflows.workflow_steps import (
     CANONICAL_WORKFLOW_STEPS,
     CLEANING_STEP,
-    EDA_STEP,
     MODELING_STEP,
     PROFILE_STEP,
     STEP_DEFINITIONS,

@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -33,17 +33,59 @@ jobs:
         run: python scripts/validate_project.py
 
       - name: Run tests
-        run: pytest
+        if: matrix.python-version != '3.12'
+        run: python -m pytest
+
+      - name: Run tests with coverage gate
+        if: matrix.python-version == '3.12'
+        run: >-
+          python -m pytest
+          --cov=app
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=75
+
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" -c constraints-dev.txt
+
+      - name: Lint Python sources
+        run: python -m ruff check app tests scripts
+
+      - name: Type-check core contracts
+        run: >-
+          python -m mypy
+          app/backend/schemas
+          app/backend/config.py
+          app/backend/services/run_manager.py
+          app/workflows/workflow_state.py
+          app/workflows/workflow_steps.py
+
+      - name: Audit installed dependencies
+        run: python -m pip_audit --progress-spinner off
 
   mlflow-install:
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -62,7 +104,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build Docker image
         run: docker build --tag autods-agent:ci .
