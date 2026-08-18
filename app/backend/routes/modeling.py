@@ -11,6 +11,7 @@ from app.backend.schemas.modeling import (
     ModelingSummary,
     SavedModelInfo,
 )
+from app.backend.routes.run_mutation import locked_run_mutation
 from app.backend.services.evaluation_service import EvaluationService
 from app.backend.services.modeling_service import ModelingService
 
@@ -27,14 +28,15 @@ def train_and_evaluate_models(
 ) -> ModelingResponse:
     """Train baseline and candidate models, evaluate them, and save artifacts."""
 
-    try:
-        return modeling_service.train_and_evaluate(run_id, request)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with locked_run_mutation(modeling_service.run_manager, run_id):
+        try:
+            return modeling_service.train_and_evaluate(run_id, request)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/modeling-summary", response_model=ModelingSummary)

@@ -19,6 +19,7 @@ from app.tools.artifact_lineage import (
     write_artifact_lineage,
 )
 from app.tools.app_logging import get_logger, log_event
+from app.tools.run_lock import acquire_run_mutation_lock
 from app.tools.trace_logger import TraceLogger
 from app.workflows.analysis_graph import build_analysis_graph
 from app.workflows.workflow_state import (
@@ -52,8 +53,9 @@ class WorkflowService:
     ) -> dict[str, Any]:
         """Initialize and synchronously execute a logical workflow generation."""
 
-        state = self.initialize_workflow(run_id, request)
-        return self.run_initialized_workflow(state)
+        with acquire_run_mutation_lock(self.run_manager, run_id):
+            state = self.initialize_workflow(run_id, request)
+            return self.run_initialized_workflow(state)
 
     def initialize_workflow(
         self,
@@ -141,22 +143,23 @@ class WorkflowService:
     ) -> dict[str, Any]:
         """Apply approval/rejection and continue if appropriate."""
 
-        state = self.get_state(run_id)
-        updated_state = self.orchestrator.apply_approval(
-            state,
-            request.step,
-            request.action.value,
-        )
-        log_event(
-            self.logger,
-            logging.INFO,
-            "Workflow approval applied.",
-            run_id=run_id,
-            step=request.step,
-            action=request.action.value,
-            status=updated_state.get("status"),
-        )
-        return updated_state
+        with acquire_run_mutation_lock(self.run_manager, run_id):
+            state = self.get_state(run_id)
+            updated_state = self.orchestrator.apply_approval(
+                state,
+                request.step,
+                request.action.value,
+            )
+            log_event(
+                self.logger,
+                logging.INFO,
+                "Workflow approval applied.",
+                run_id=run_id,
+                step=request.step,
+                action=request.action.value,
+                status=updated_state.get("status"),
+            )
+            return updated_state
 
     def retry_step(
         self,
@@ -165,17 +168,18 @@ class WorkflowService:
     ) -> dict[str, Any]:
         """Retry a failed workflow step."""
 
-        state = self.get_state(run_id)
-        updated_state = self.orchestrator.retry_step(state, request.step)
-        log_event(
-            self.logger,
-            logging.INFO,
-            "Workflow step retry requested.",
-            run_id=run_id,
-            step=request.step,
-            status=updated_state.get("status"),
-        )
-        return updated_state
+        with acquire_run_mutation_lock(self.run_manager, run_id):
+            state = self.get_state(run_id)
+            updated_state = self.orchestrator.retry_step(state, request.step)
+            log_event(
+                self.logger,
+                logging.INFO,
+                "Workflow step retry requested.",
+                run_id=run_id,
+                step=request.step,
+                status=updated_state.get("status"),
+            )
+            return updated_state
 
     def reset_workflow(self, run_id: str) -> dict[str, str]:
         """Reset workflow state and trace logs without deleting artifacts.
@@ -185,18 +189,19 @@ class WorkflowService:
         that remains on disk.
         """
 
-        self._validate_run(run_id)
-        state_path = self.workflow_state_path(run_id)
-        if state_path.exists():
-            state_path.unlink()
-        self.trace_logger.reset(run_id)
-        log_event(
-            self.logger,
-            logging.INFO,
-            "Workflow reset.",
-            run_id=run_id,
-        )
-        return {"status": "reset", "run_id": run_id}
+        with acquire_run_mutation_lock(self.run_manager, run_id):
+            self._validate_run(run_id)
+            state_path = self.workflow_state_path(run_id)
+            if state_path.exists():
+                state_path.unlink()
+            self.trace_logger.reset(run_id)
+            log_event(
+                self.logger,
+                logging.INFO,
+                "Workflow reset.",
+                run_id=run_id,
+            )
+            return {"status": "reset", "run_id": run_id}
 
     def workflow_state_path(self, run_id: str) -> Path:
         """Return the workflow state path for one run."""

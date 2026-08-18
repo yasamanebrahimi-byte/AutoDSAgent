@@ -67,6 +67,7 @@ It is designed to show engineering judgment as well as data science ability.
 - Optional MLflow experiment tracking.
 - Deterministic workflow orchestration with approval gates.
 - Workflow state, retries, trace logs, and final report generation.
+- Cross-process per-run locking for workflow and manual artifact mutations.
 - Streamlit demo UI with bundled sample datasets.
 - Docker Compose and GitHub Actions test workflow.
 
