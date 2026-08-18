@@ -58,6 +58,8 @@ Manual endpoints let users run profiling, cleaning, EDA, modeling, and reports d
 
 Workflow starts are submitted to a bounded background worker pool. The API returns a pollable job immediately, while the Streamlit frontend refreshes the persisted workflow state every two seconds until execution completes, fails, or pauses for approval.
 
+The frontend is exercised headlessly with Streamlit AppTest. Tests interact with the real widget tree and session state while a deterministic fake backend covers upload, background polling, manual controls, report downloads, and error recovery without network or browser flakiness.
+
 ## Supervised Modeling Flow
 
 Modeling uses one train/test split per run. The test partition is not used for candidate selection:

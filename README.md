@@ -341,6 +341,8 @@ Run all tests:
 python -m pytest
 ```
 
+The suite includes Streamlit AppTest coverage for uploads, automated workflow submission and polling, advanced manual controls, report downloads, and recovery from backend failures.
+
 Run lightweight local checks:
 
 ```bash
