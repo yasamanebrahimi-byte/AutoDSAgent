@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from copy import deepcopy
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.workflows.workflow_steps import (
     MODELING_STEP,
     PROFILE_STEP,
     REPORT_STEP,
+    STEP_DEFINITIONS,
 )
 
 
@@ -684,34 +686,61 @@ def invalidate_downstream_artifacts(
     root = paths.root.resolve()
     steps = DOWNSTREAM_STEPS_BY_CHANGED_STEP.get(changed_step, (changed_step,))
     invalidated: list[str] = []
+    if state is not None:
+        _clear_invalidated_state(state, steps, changed_step)
 
     for step in steps:
-        for artifact_key, relative_path in ARTIFACT_RELATIVE_PATHS_BY_STEP.get(step, {}).items():
+        for relative_path in ARTIFACT_RELATIVE_PATHS_BY_STEP.get(step, {}).values():
             path = _known_path(root, relative_path)
             invalidated.extend(_remove_artifact_file(path, root))
-            if state is not None:
-                state.setdefault("artifacts", {})[artifact_key] = None
-                state.setdefault("artifact_lineage", {}).pop(artifact_key, None)
         for relative_dir in PLOT_DIRECTORIES_BY_STEP.get(step, ()):
             directory = _known_path(root, relative_dir)
             if directory.exists():
                 shutil.rmtree(directory)
                 invalidated.append(directory.relative_to(root).as_posix())
-            if state is not None and step == EDA_STEP:
-                state.setdefault("artifacts", {})["plots"] = []
-
-    if state is not None and CLEANING_STEP in steps:
-        source_fingerprint = state.get("source_fingerprint")
-        if source_fingerprint:
-            state["analysis_input"] = {
-                "dataset_used": "raw",
-                "path": "input/raw_data.csv",
-                "fingerprint": source_fingerprint,
-                "source_fingerprint": source_fingerprint,
-                "selection_reason": f"{changed_step}_invalidated_cleaned_data",
-            }
 
     return invalidated
+
+
+def invalidate_downstream_for_manual_mutation(
+    run_manager: Any,
+    run_id: str,
+    changed_step: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Atomically reset state before deleting artifacts for a manual mutation.
+
+    The workflow-state file is replaced before any artifact is removed.  If the
+    state write fails, deletion never starts; if deletion later fails, the
+    persisted state has already stopped referencing every affected artifact.
+    """
+
+    state = load_active_workflow_state(run_manager, run_id)
+    if state is None:
+        return None, invalidate_downstream_artifacts(run_manager, run_id, changed_step)
+
+    paths = run_manager.get_paths(run_id)
+    updated_state = deepcopy(state)
+    affected_steps = DOWNSTREAM_STEPS_BY_CHANGED_STEP.get(changed_step, (changed_step,))
+    updated_state["generation_id"] = new_generation_id()
+    updated_state["status"] = "pending"
+    updated_state["current_step"] = changed_step
+    updated_state["errors"] = [
+        error
+        for error in updated_state.get("errors", [])
+        if error.get("step") not in affected_steps
+    ]
+
+    for step in affected_steps:
+        updated_state.setdefault("steps", {})[step] = _reset_step_state(
+            updated_state,
+            step,
+        )
+    _clear_invalidated_state(updated_state, affected_steps, changed_step)
+    updated_state["updated_at"] = utc_now_iso()
+    save_json(paths.logs / "workflow_state.json", updated_state)
+
+    invalidated = invalidate_downstream_artifacts(run_manager, run_id, changed_step)
+    return updated_state, invalidated
 
 
 def relative_path_for_artifact(artifact_key: str) -> str | None:
@@ -744,3 +773,55 @@ def _remove_artifact_file(path: Path, root: Path) -> list[str]:
         sidecar.unlink()
         removed.append(sidecar.relative_to(root).as_posix())
     return removed
+
+
+def _clear_invalidated_state(
+    state: dict[str, Any],
+    steps: tuple[str, ...],
+    changed_step: str,
+) -> None:
+    artifacts = state.setdefault("artifacts", {})
+    artifact_lineage = state.setdefault("artifact_lineage", {})
+    config_fingerprints = state.setdefault("config_fingerprints", {})
+    for step in steps:
+        for artifact_key in ARTIFACT_RELATIVE_PATHS_BY_STEP.get(step, {}):
+            artifacts[artifact_key] = None
+            artifact_lineage.pop(artifact_key, None)
+            config_fingerprints.pop(artifact_key, None)
+        if step == EDA_STEP:
+            artifacts["plots"] = []
+
+    if CLEANING_STEP in steps:
+        source_fingerprint = state.get("source_fingerprint")
+        state["analysis_input"] = {
+            "dataset_used": "raw",
+            "path": "input/raw_data.csv",
+            "fingerprint": source_fingerprint,
+            "source_fingerprint": source_fingerprint,
+            "selection_reason": f"{changed_step}_invalidated_cleaned_data",
+        }
+
+
+def _reset_step_state(state: Mapping[str, Any], step: str) -> dict[str, Any]:
+    approval_settings = state.get("approval_settings") or {}
+    requires_approval = (
+        step == CLEANING_STEP
+        and bool(approval_settings.get("require_cleaning_approval", True))
+    ) or (
+        step == MODELING_STEP
+        and bool(approval_settings.get("require_modeling_approval", True))
+    )
+    definition = STEP_DEFINITIONS[step]
+    return {
+        "status": "pending",
+        "started_at": None,
+        "completed_at": None,
+        "attempts": 0,
+        "max_attempts": definition.max_attempts,
+        "requires_approval": requires_approval,
+        "approval_status": "pending" if requires_approval else "not_required",
+        "approval_reason": None,
+        "approval_details": {},
+        "error": None,
+        "outputs": {},
+    }

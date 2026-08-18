@@ -4,6 +4,8 @@ import pytest
 
 from app.backend.schemas.eda import EDARequest
 from app.backend.schemas.modeling import ModelingRequest
+from app.backend.schemas.workflow import WorkflowStartRequest
+from app.backend.services.cleaning_service import CleaningService
 from app.backend.services.eda_service import EDAService
 from app.backend.services.modeling_service import ModelingService
 from app.backend.services.report_service import ReportService
@@ -17,6 +19,94 @@ from app.tools.file_utils import load_json, save_json
 from app.workflows.workflow_state import create_initial_workflow_state
 
 from tests.report_test_utils import create_report_run
+from tests.workflow_test_utils import create_workflow_service
+
+
+def test_regenerating_cleaning_plan_resets_completed_downstream_workflow(tmp_path):
+    workflow_service, manager, paths, run_id = create_workflow_service(
+        tmp_path,
+        run_id="manual-cleaning-plan-regeneration",
+    )
+    completed_state = workflow_service.start_workflow(
+        run_id,
+        WorkflowStartRequest(
+            target_column="target",
+            require_cleaning_approval=False,
+            require_modeling_approval=False,
+        ),
+    )
+    original_generation_id = completed_state["generation_id"]
+    model_relative_path = completed_state["artifacts"]["selected_model"]
+    report_relative_path = completed_state["artifacts"]["final_report"]
+
+    assert completed_state["status"] == "completed"
+    assert completed_state["steps"]["modeling"]["status"] == "completed"
+    assert completed_state["steps"]["report"]["status"] == "completed"
+    assert model_relative_path and (paths.root / model_relative_path).exists()
+    assert report_relative_path and (paths.root / report_relative_path).exists()
+
+    CleaningService(manager).generate_cleaning_plan(run_id, target_column="target")
+    reset_state = workflow_service.get_state(run_id)
+
+    assert reset_state["generation_id"] != original_generation_id
+    assert reset_state["status"] == "pending"
+    assert reset_state["current_step"] == "cleaning"
+    assert reset_state["steps"]["cleaning_plan"]["status"] == "completed"
+    for step in ("cleaning", "eda", "modeling", "report"):
+        assert reset_state["steps"][step]["status"] == "pending"
+    assert reset_state["analysis_input"]["dataset_used"] == "raw"
+    assert reset_state["artifacts"]["cleaning_plan"] == "intermediate/cleaning_plan.json"
+    for artifact in (
+        "cleaned_data",
+        "cleaning_summary",
+        "eda_summary",
+        "eda_findings",
+        "eda_report",
+        "modeling_summary",
+        "evaluation_summary",
+        "model_results",
+        "baseline_model",
+        "selected_model",
+        "best_model",
+        "final_report",
+        "executive_summary",
+        "technical_summary",
+        "limitations_report",
+        "report_metadata",
+        "report_index",
+    ):
+        assert reset_state["artifacts"][artifact] is None
+        assert artifact not in reset_state["artifact_lineage"]
+    assert not (paths.root / model_relative_path).exists()
+    assert not (paths.root / report_relative_path).exists()
+    assert CleaningService(manager).load_cleaning_plan(run_id).target_column == "target"
+
+
+def test_manual_mutation_preserves_artifacts_when_state_commit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    manager, paths, run_id = create_report_run(tmp_path, include_modeling=True)
+    state_path = paths.logs / "workflow_state.json"
+    original_generation_id = load_json(state_path)["generation_id"]
+    modeling_summary_path = paths.intermediate / "modeling_summary.json"
+
+    from app.tools import artifact_lineage as artifact_lineage_module
+
+    def fail_state_commit(path, payload):
+        raise OSError("forced atomic state commit failure")
+
+    monkeypatch.setattr(artifact_lineage_module, "save_json", fail_state_commit)
+
+    with pytest.raises(OSError, match="forced atomic state commit failure"):
+        artifact_lineage_module.invalidate_downstream_for_manual_mutation(
+            manager,
+            run_id,
+            "cleaning_plan",
+        )
+
+    assert modeling_summary_path.exists()
+    assert load_json(state_path)["generation_id"] == original_generation_id
 
 
 def test_target_change_makes_old_modeling_artifacts_not_current(tmp_path):

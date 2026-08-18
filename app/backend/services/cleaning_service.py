@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from app.backend.schemas.cleaning import CleaningPlan, CleaningSummary
 from app.backend.services.profiling_service import ProfilingService
@@ -13,6 +14,7 @@ from app.tools.artifact_lineage import (
     file_sha256,
     fingerprint_payload,
     invalidate_downstream_artifacts,
+    invalidate_downstream_for_manual_mutation,
     lineage_context,
     load_artifact_lineage,
     validate_artifact_for_state,
@@ -22,6 +24,14 @@ from app.tools.app_logging import get_logger, log_event
 from app.tools.cleaning import CleaningConfig, apply_safe_cleaning, generate_cleaning_plan_payload
 from app.tools.data_loader import load_csv
 from app.tools.file_utils import load_json, save_json
+from app.workflows.workflow_state import (
+    mark_step_completed,
+    mark_step_running,
+    relative_to_run,
+    save_workflow_state,
+    set_artifact,
+    set_artifact_lineage,
+)
 from app.workflows.workflow_steps import CLEANING_PLAN_STEP, CLEANING_STEP
 
 
@@ -58,10 +68,25 @@ class CleaningService:
         self,
         run_id: str,
         target_column: str | None = None,
+        *,
+        workflow_state: dict[str, Any] | None = None,
     ) -> CleaningPlan:
         """Generate, save, and return a cleaning plan."""
 
-        invalidate_downstream_artifacts(self.run_manager, run_id, CLEANING_PLAN_STEP)
+        manual_state: dict[str, Any] | None = None
+        if workflow_state is None:
+            manual_state, _ = invalidate_downstream_for_manual_mutation(
+                self.run_manager,
+                run_id,
+                CLEANING_PLAN_STEP,
+            )
+        else:
+            invalidate_downstream_artifacts(
+                self.run_manager,
+                run_id,
+                CLEANING_PLAN_STEP,
+                workflow_state,
+            )
         try:
             profile = self.profiling_service.load_profile(run_id)
         except (FileNotFoundError, ValueError):
@@ -87,7 +112,7 @@ class CleaningService:
             "cleaning_config": asdict(self.config),
         }
         config_fingerprint = fingerprint_payload(config_payload)
-        write_artifact_lineage(
+        plan_lineage = write_artifact_lineage(
             plan_path,
             run_root=self.run_manager.get_paths(run_id).root,
             run_id=run_id,
@@ -102,6 +127,15 @@ class CleaningService:
             },
             relevant_config=config_payload,
         )
+        if manual_state is not None:
+            self._complete_manual_plan_mutation(
+                run_id=run_id,
+                state=manual_state,
+                plan=plan,
+                plan_path=plan_path,
+                plan_lineage=plan_lineage,
+                target_column=_normalize_optional_target(target_column),
+            )
         log_event(
             self.logger,
             logging.INFO,
@@ -111,6 +145,48 @@ class CleaningService:
             review_warnings=len(plan.warnings_requiring_review),
         )
         return plan
+
+    def _complete_manual_plan_mutation(
+        self,
+        *,
+        run_id: str,
+        state: dict[str, Any],
+        plan: CleaningPlan,
+        plan_path: Path,
+        plan_lineage: dict[str, Any],
+        target_column: str | None,
+    ) -> None:
+        """Persist the regenerated plan into the reset workflow generation."""
+
+        paths = self.run_manager.get_paths(run_id)
+        previous_target = _normalize_optional_target(state.get("target_column"))
+        state["target_column"] = target_column
+        if previous_target != target_column:
+            state["task_type"] = None
+
+        profile_path = self.profiling_service.profile_path(run_id)
+        set_artifact(state, "profile", relative_to_run(profile_path, paths.root))
+        set_artifact_lineage(state, "profile", load_artifact_lineage(profile_path))
+        set_artifact(state, "cleaning_plan", relative_to_run(plan_path, paths.root))
+        set_artifact_lineage(state, "cleaning_plan", plan_lineage)
+        mark_step_running(state, CLEANING_PLAN_STEP)
+        mark_step_completed(
+            state,
+            CLEANING_PLAN_STEP,
+            {
+                "columns_recommended_for_dropping": list(
+                    plan.columns_recommended_for_dropping
+                ),
+                "duplicate_rows_would_be_removed": bool(
+                    plan.duplicate_row_handling.apply
+                ),
+                "missing_value_strategy_count": len(plan.missing_value_strategies),
+                "warnings_requiring_review": list(plan.warnings_requiring_review),
+            },
+        )
+        state["status"] = "pending"
+        state["current_step"] = CLEANING_STEP
+        save_workflow_state(paths.logs / "workflow_state.json", state)
 
     def load_cleaning_plan(self, run_id: str) -> CleaningPlan:
         """Load an existing cleaning plan."""
