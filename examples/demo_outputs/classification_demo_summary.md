@@ -2,8 +2,9 @@
 
 ## Dataset
 
-- File: `examples/sample_data/classification_churn.csv`
-- Target column: `churn`
+- File: `examples/sample_data/breast_cancer_wisconsin.csv`
+- Rows: 569
+- Target column: `diagnosis`
 - Expected task type: classification
 
 ## Expected Workflow Stages
@@ -40,6 +41,22 @@
 
 The primary metric is F1, where higher is better.
 
+## Checked-In Reference Run
+
+The gallery was regenerated from a deterministic reference run with random
+state 42:
+
+- 455 training rows and 114 held-out rows
+- 5-fold stratified cross-validation on the training partition
+- selected model: logistic regression
+- CV macro F1: 0.9716 ± 0.0162
+- holdout macro F1: 0.9619
+- holdout accuracy: 0.9649
+
+The exact values may change when dependencies, modeling candidates, or workflow
+configuration change; regenerate the gallery and record the new provenance when
+that happens.
+
 ## Where Artifacts Are Saved
 
 Artifacts are saved under:
@@ -52,6 +69,7 @@ The script prints the exact run ID and paths after completion.
 
 ## What To Look For
 
-- The final report should summarize churn-related features, cleaning actions, EDA findings, selected classifier, and limitations.
+- The final report should summarize diagnostic feature relationships, cleaning actions, EDA findings, selected classifier, and limitations.
+- Metrics should be interpreted with the documented split and uncertainty rather than as clinical performance.
 - The evaluation summary should identify the selected model, best candidate, and most-frequent baseline classifier comparison.
 - If MLflow is enabled, look for run tags, classification metrics, evaluation plots, and model artifacts.

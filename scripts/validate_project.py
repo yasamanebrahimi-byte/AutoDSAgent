@@ -27,6 +27,7 @@ EXPECTED_DIRECTORIES = [
     "docs",
     "docs/screenshots",
     "tests",
+    "tests/fixtures/sample_data",
 ]
 
 EXPECTED_FILES = [
@@ -44,6 +45,7 @@ EXPECTED_FILES = [
     "CONTRIBUTING.md",
     ".github/workflows/tests.yml",
     "scripts/create_demo_run.py",
+    "scripts/export_benchmark_datasets.py",
     "scripts/run_full_demo.py",
     "scripts/smoke_test.py",
     "scripts/validate_project.py",
@@ -62,11 +64,12 @@ EXPECTED_FILES = [
     "examples/demo_outputs/README.md",
     "examples/demo_outputs/regression_demo_summary.md",
     "examples/demo_outputs/classification_demo_summary.md",
+    "examples/sample_data/benchmark_manifest.json",
 ]
 
 EXPECTED_DATASETS = {
-    "examples/sample_data/regression_housing.csv": "sale_price",
-    "examples/sample_data/classification_churn.csv": "churn",
+    "examples/sample_data/diabetes_progression.csv": "disease_progression",
+    "examples/sample_data/breast_cancer_wisconsin.csv": "diagnosis",
 }
 
 EXPECTED_MODULES = [
@@ -188,7 +191,10 @@ def check_example_datasets() -> bool:
             ok = False
             continue
         dataframe = pd.read_csv(path)
-        if target_column not in dataframe.columns:
+        if not 400 <= len(dataframe) <= 2_000:
+            print(f"[fail] benchmark {relative_path} has {len(dataframe)} rows")
+            ok = False
+        elif target_column not in dataframe.columns:
             print(f"[fail] dataset {relative_path} missing target {target_column}")
             ok = False
         else:

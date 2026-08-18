@@ -9,7 +9,7 @@ def test_full_regression_demo_runs_end_to_end(tmp_path):
     result = run_demo("regression", runs_dir=tmp_path / "runs")
 
     assert result.workflow_status == "completed"
-    assert result.target_column == "sale_price"
+    assert result.target_column == "disease_progression"
     assert result.task_type == "regression"
     assert result.selected_model_name
     assert result.primary_metric == "rmse"
@@ -21,7 +21,7 @@ def test_full_classification_demo_runs_end_to_end(tmp_path):
     result = run_demo("classification", runs_dir=tmp_path / "runs")
 
     assert result.workflow_status == "completed"
-    assert result.target_column == "churn"
+    assert result.target_column == "diagnosis"
     assert result.task_type == "classification"
     assert result.selected_model_name
     assert result.primary_metric == "macro_f1"

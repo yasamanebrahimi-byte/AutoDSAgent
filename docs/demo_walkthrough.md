@@ -55,16 +55,16 @@ Open:
 
 Use the bundled sample CSV files:
 
-- `examples/sample_data/classification_churn.csv`, target `churn`
-- `examples/sample_data/regression_housing.csv`, target `sale_price`
+- `examples/sample_data/breast_cancer_wisconsin.csv`, target `diagnosis`
+- `examples/sample_data/diabetes_progression.csv`, target `disease_progression`
 
 ## Suggested Recruiter Demo Path
 
 1. Open the Streamlit app.
-2. Upload `classification_churn.csv`.
+2. Upload `breast_cancer_wisconsin.csv`.
 3. Create an analysis run.
 4. Start the automated workflow.
-5. Use target column `churn`.
+5. Use target column `diagnosis`.
 6. Leave approval gates off for the fastest demo.
 7. Review workflow state, artifacts, and trace events.
 8. Open `Final Reports`.
@@ -77,8 +77,8 @@ Use the bundled sample CSV files:
 You can create a full run without using the UI:
 
 ```bash
-python scripts/create_demo_run.py --dataset classification --target churn
-python scripts/create_demo_run.py --dataset regression --target sale_price
+python scripts/create_demo_run.py --dataset classification --target diagnosis
+python scripts/create_demo_run.py --dataset regression --target disease_progression
 ```
 
 The script uses internal services directly. It creates a run, preserves the raw CSV, profiles data, plans and applies cleaning, runs EDA, trains models, and generates final reports.
