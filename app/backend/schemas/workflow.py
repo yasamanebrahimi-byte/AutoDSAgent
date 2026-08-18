@@ -95,7 +95,7 @@ class WorkflowStepState(BaseModel):
 class WorkflowState(BaseModel):
     """Full workflow state returned by orchestration endpoints."""
 
-    workflow_version: str = "week6"
+    workflow_version: str = "1.0"
     run_id: str
     generation_id: str | None = None
     source_fingerprint: str | None = None

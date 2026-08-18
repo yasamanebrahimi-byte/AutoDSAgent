@@ -57,7 +57,7 @@ The automated workflow can run the end-to-end analysis sequence without manually
 
 ## Future Work
 
-- Add polished demo screenshots and a short walkthrough video
+- Record a short walkthrough video using the checked-in real-run screenshot flow
 - Add stronger leakage detection and validation strategies
 - Add optional LLM-assisted narrative generation behind explicit configuration
 - Add model registry and richer experiment comparison

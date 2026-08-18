@@ -67,6 +67,7 @@ def test_completed_targeted_workflow_report_uses_terminal_target_aware_state(tmp
     assert state["status"] == "completed"
     assert state["steps"]["report"]["status"] == "completed"
     assert "| Workflow status | completed |" in report
+    assert "| Workflow version | 1.0 |" in report
     assert "| Selected target | target |" in report
     assert "Target column: `target`" in report
     assert "No target column has been selected yet." not in report

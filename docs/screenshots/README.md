@@ -1,35 +1,19 @@
-# Screenshot Checklist
+# Verified Demo Gallery
 
-This folder is reserved for project screenshots. Do not invent screenshots. Capture them manually from a real local run when preparing the README, LinkedIn post, or portfolio page.
+These figures are genuine artifacts from a completed local run of `classification_churn.csv` with target `churn`. The workflow profiled and cleaned the data, generated EDA, compared models with training-only cross-validation, evaluated the selected model, and persisted a completed final report. The selected model for this small synthetic demonstration was logistic regression.
 
-Recommended screenshots:
+The gallery is intentionally kept outside `runs/` so reviewers can inspect representative product output on GitHub without committing an entire generated run folder.
 
-1. Streamlit project overview.
-2. CSV upload and sample dataset selection.
-3. Dataset profile summary.
-4. Cleaning plan.
-5. EDA plots.
-6. Modeling results.
-7. Evaluation plots.
-8. Automated workflow status.
-9. Agent trace log.
-10. Final report preview.
-11. MLflow experiment page, if MLflow is enabled.
-12. Run folder artifact structure.
+## Target class distribution
 
-Suggested naming:
+![Churn target class distribution](target-distribution.png)
 
-- `streamlit-overview.png`
-- `sample-dataset-selection.png`
-- `profile-summary.png`
-- `cleaning-plan.png`
-- `eda-plots.png`
-- `modeling-results.png`
-- `evaluation-plots.png`
-- `workflow-status.png`
-- `agent-trace.png`
-- `final-report-preview.png`
-- `mlflow-experiment.png`
-- `run-artifacts.png`
+## Correlation analysis
 
-Keep screenshots small enough for GitHub. Prefer compressed PNG or JPG files and avoid committing large generated artifacts from `runs/`.
+![Numeric correlation heatmap](correlation-heatmap.png)
+
+## Cross-validation model comparison
+
+![Cross-validated model comparison](model-comparison.png)
+
+To refresh the gallery, repeat the documented classification flow in [the demo walkthrough](../demo_walkthrough.md) and replace all three figures from the same successful run.

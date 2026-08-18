@@ -19,6 +19,7 @@ AutoDS Agent is portfolio-ready for local demos, GitHub review, interviews, resu
 - Persistent workflow state and agent trace logs.
 - Deterministic final reports.
 - Streamlit demo UI.
+- A checked-in gallery of figures from a completed classification workflow.
 - Docker Compose setup.
 - Demo scripts, smoke tests, validation checks, CI, and portfolio documentation.
 

@@ -59,7 +59,7 @@ def create_initial_workflow_state(
     timestamp = utc_now_iso()
     selected_generation_id = generation_id or new_generation_id()
     return {
-        "workflow_version": "week6",
+        "workflow_version": "1.0",
         "run_id": run_id,
         "generation_id": selected_generation_id,
         "source_fingerprint": source_fingerprint,

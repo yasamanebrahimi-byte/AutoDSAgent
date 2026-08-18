@@ -20,6 +20,7 @@ def test_initial_workflow_state_is_created_correctly():
     )
 
     assert state["run_id"] == "state-test"
+    assert state["workflow_version"] == "1.0"
     assert state["status"] == "pending"
     assert state["target_column"] == "target"
     assert state["task_type"] == "classification"
