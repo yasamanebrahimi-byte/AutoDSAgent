@@ -53,6 +53,8 @@ When MLflow is enabled, modeling also logs run parameters, metrics, tags, and ar
 - `POST /runs/{run_id}/workflow/retry`: retry a failed step when attempts remain.
 - `POST /runs/{run_id}/workflow/reset`: reset workflow logs without deleting data artifacts.
 
+Mutating endpoints are serialized per run. A concurrent mutation returns `409 Conflict` with `Retry-After: 1`; clients should poll the active workflow or retry after the current mutation finishes.
+
 Workflow order:
 
 ```text
