@@ -69,7 +69,7 @@ def main() -> None:
     if metadata:
         render_metadata(metadata)
         with st.expander("Advanced Manual Controls", expanded=False):
-            render_week2_workflow(metadata)
+            render_manual_workflow(metadata)
         render_automated_workflow(metadata)
         render_final_reports(metadata)
     else:
@@ -287,7 +287,7 @@ def render_metadata(metadata: dict) -> None:
     st.dataframe(pd.DataFrame(metadata["preview"]), use_container_width=True)
 
 
-def render_week2_workflow(metadata: dict[str, Any]) -> None:
+def render_manual_workflow(metadata: dict[str, Any]) -> None:
     """Render profiling and cleaning controls for one run."""
 
     run_id = metadata["run_id"]

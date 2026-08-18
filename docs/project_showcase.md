@@ -75,6 +75,14 @@ A successful run saves:
 - `logs/workflow_state.json`
 - `logs/agent_trace.json`
 
+## Verified Demo Gallery
+
+The repository includes representative figures from one completed classification run:
+
+- [Target class distribution](screenshots/target-distribution.png)
+- [Numeric correlation heatmap](screenshots/correlation-heatmap.png)
+- [Cross-validated model comparison](screenshots/model-comparison.png)
+
 ## What I Learned
 
 - How to turn a notebook-style workflow into a service-oriented application.
