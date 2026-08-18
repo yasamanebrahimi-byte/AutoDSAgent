@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.backend.schemas.cleaning import CleaningPlan, CleaningRequest, CleaningSummary
+from app.backend.routes.run_mutation import locked_run_mutation
 from app.backend.services.cleaning_service import CleaningService
 
 
@@ -19,18 +20,19 @@ def generate_cleaning_plan(
 ) -> CleaningPlan:
     """Generate and save a conservative cleaning plan."""
 
-    try:
-        return cleaning_service.generate_cleaning_plan(
-            run_id,
-            target_column=(request.target_column if request else None),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Raw dataset for run '{run_id}' was not found.",
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with locked_run_mutation(cleaning_service.run_manager, run_id):
+        try:
+            return cleaning_service.generate_cleaning_plan(
+                run_id,
+                target_column=(request.target_column if request else None),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Raw dataset for run '{run_id}' was not found.",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/cleaning-plan", response_model=CleaningPlan)
@@ -53,18 +55,19 @@ def apply_cleaning(
 ) -> CleaningSummary:
     """Apply safe cleaning and save cleaned artifacts."""
 
-    try:
-        return cleaning_service.apply_cleaning(
-            run_id,
-            target_column=(request.target_column if request else None),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Raw dataset for run '{run_id}' was not found.",
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with locked_run_mutation(cleaning_service.run_manager, run_id):
+        try:
+            return cleaning_service.apply_cleaning(
+                run_id,
+                target_column=(request.target_column if request else None),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Raw dataset for run '{run_id}' was not found.",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/cleaning-summary", response_model=CleaningSummary)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.backend.schemas.eda import EDAPlotInfo, EDARequest, EDAResponse
+from app.backend.routes.run_mutation import locked_run_mutation
 from app.backend.services.eda_service import EDAService
 
 
@@ -17,17 +18,19 @@ eda_service = EDAService()
 def generate_eda(run_id: str, request: EDARequest | None = None) -> EDAResponse:
     """Generate and save EDA summaries, findings, plots, and a Markdown report."""
 
-    try:
-        return eda_service.generate_eda(run_id, request or EDARequest())
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Dataset for run '{run_id}' was not found. Upload data before generating EDA."
-            ),
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with locked_run_mutation(eda_service.run_manager, run_id):
+        try:
+            return eda_service.generate_eda(run_id, request or EDARequest())
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Dataset for run '{run_id}' was not found. "
+                    "Upload data before generating EDA."
+                ),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/eda", response_model=EDAResponse)

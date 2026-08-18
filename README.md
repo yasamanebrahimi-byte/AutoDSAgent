@@ -67,6 +67,7 @@ It is designed to show engineering judgment as well as data science ability.
 - Optional MLflow experiment tracking.
 - Deterministic workflow orchestration with approval gates.
 - Workflow state, retries, trace logs, and final report generation.
+- Cross-process per-run locking for workflow and manual artifact mutations.
 - Streamlit demo UI with bundled sample datasets.
 - Docker Compose and GitHub Actions test workflow.
 
@@ -335,30 +336,38 @@ See [docs/api_reference.md](docs/api_reference.md) for more detail.
 
 ## Testing
 
-Run all tests:
+Install the pinned development toolchain:
 
 ```bash
-python -m pytest
+python -m pip install -e ".[dev]" -c constraints-dev.txt
 ```
 
 The suite includes Streamlit AppTest coverage for uploads, automated workflow submission and polling, advanced manual controls, report downloads, and recovery from backend failures.
 
 Run lightweight local checks:
 
+Run all tests with the same 75% coverage floor enforced by CI:
+
+```bash
+python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=75
+```
+
+Run linting, core-contract type checking, and the dependency audit:
+
+```bash
+python -m ruff check app tests scripts
+python -m mypy app/backend/schemas app/backend/config.py app/backend/services/run_manager.py app/workflows/workflow_state.py app/workflows/workflow_steps.py
+python -m pip_audit --progress-spinner off
+```
+
+Run the lightweight packaging and application checks:
+
 ```bash
 python scripts/smoke_test.py
 python scripts/validate_project.py
 ```
 
-If Windows temp permissions cause issues:
-
-```powershell
-$env:TEMP=(Resolve-Path ".pytest_tmp").Path
-$env:TMP=$env:TEMP
-python -m pytest --basetemp=.pytest_tmp/run -o cache_dir=.pytest_tmp_cache
-```
-
-GitHub Actions runs the smoke checks and full test suite on Python 3.11, 3.12, and 3.13.
+GitHub Actions runs smoke checks and the full test suite on Python 3.11, 3.12, and 3.13. It also enforces linting, typed core contracts, the coverage floor, a dependency vulnerability audit, MLflow installation and import checks, and a Docker build plus container smoke test.
 
 ## Project Structure
 
