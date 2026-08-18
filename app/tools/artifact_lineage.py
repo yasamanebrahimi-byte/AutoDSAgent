@@ -34,6 +34,7 @@ LINEAGE_SUFFIX = ".lineage.json"
 WORKFLOW_STATE_RELATIVE_PATH = "logs/workflow_state.json"
 
 TARGET_SENSITIVE_ARTIFACTS = {
+    "profile",
     "cleaning_plan",
     "cleaned_data",
     "cleaning_summary",

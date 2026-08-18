@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from app.backend.schemas.reports import (
     ReportContentResponse,
@@ -123,6 +123,8 @@ class ReportService:
         self,
         run_id: str,
         request: ReportGenerateRequest | None = None,
+        *,
+        workflow_state: Mapping[str, Any] | None = None,
     ) -> ReportGenerateResponse:
         """Generate all deterministic report artifacts for one run."""
 
@@ -133,7 +135,7 @@ class ReportService:
             return self.load_reports(run_id)
 
         invalidate_downstream_artifacts(self.run_manager, run_id, REPORT_STEP)
-        source = self.load_source_artifacts(run_id)
+        source = self.load_source_artifacts(run_id, workflow_state=workflow_state)
         if not (MINIMUM_ARTIFACT_KEYS & set(source.artifacts)):
             raise ValueError(
                 "At least one saved analysis artifact is required to generate a report."
@@ -289,12 +291,21 @@ class ReportService:
         )
         return path
 
-    def load_source_artifacts(self, run_id: str) -> SourceArtifactLoadResult:
+    def load_source_artifacts(
+        self,
+        run_id: str,
+        *,
+        workflow_state: Mapping[str, Any] | None = None,
+    ) -> SourceArtifactLoadResult:
         """Load current source artifacts for report generation."""
 
         self._validate_run(run_id)
         paths = self.run_manager.get_paths(run_id)
-        state = lineage_context(self.run_manager, run_id)["state"]
+        state = (
+            dict(workflow_state)
+            if workflow_state is not None
+            else lineage_context(self.run_manager, run_id)["state"]
+        )
         artifacts: dict[str, Any] = {}
         used: list[str] = []
         missing: list[str] = []
@@ -304,6 +315,10 @@ class ReportService:
         for key, (directory_name, filename) in SOURCE_ARTIFACTS.items():
             artifact_path = getattr(paths, directory_name) / filename
             relative_path = artifact_path.relative_to(paths.root).as_posix()
+            if key == "workflow_state" and workflow_state is not None:
+                artifacts[key] = dict(workflow_state)
+                used.append(relative_path)
+                continue
             if not artifact_path.exists():
                 missing.append(relative_path)
                 continue

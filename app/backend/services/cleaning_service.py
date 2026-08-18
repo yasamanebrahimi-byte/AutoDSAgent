@@ -90,7 +90,10 @@ class CleaningService:
         try:
             profile = self.profiling_service.load_profile(run_id)
         except (FileNotFoundError, ValueError):
-            profile = self.profiling_service.generate_profile(run_id)
+            profile = self.profiling_service.generate_profile(
+                run_id,
+                target_column=target_column,
+            )
 
         payload = generate_cleaning_plan_payload(
             profile=profile.model_dump(mode="json"),
@@ -224,7 +227,10 @@ class CleaningService:
         try:
             profile = self.profiling_service.load_profile(run_id)
         except (FileNotFoundError, ValueError):
-            profile = self.profiling_service.generate_profile(run_id)
+            profile = self.profiling_service.generate_profile(
+                run_id,
+                target_column=requested_target,
+            )
 
         raw_path = self.profiling_service.raw_data_path(run_id)
         if not raw_path.exists():

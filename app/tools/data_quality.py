@@ -10,6 +10,7 @@ import pandas as pd
 def detect_data_quality_issues(
     dataframe: pd.DataFrame,
     column_profiles: list[dict[str, Any]],
+    target_column: str | None = None,
 ) -> list[dict[str, Any]]:
     """Detect structured data quality issues from a DataFrame and column profiles."""
 
@@ -142,15 +143,16 @@ def detect_data_quality_issues(
                     )
                 )
 
-    issues.append(
-        _issue(
-            severity="info",
-            issue_type="target_not_selected",
-            column=None,
-            message="No target column has been selected yet.",
-            recommendation="Select a target later if the project moves into supervised modeling.",
+    if not str(target_column or "").strip():
+        issues.append(
+            _issue(
+                severity="info",
+                issue_type="target_not_selected",
+                column=None,
+                message="No target column has been selected yet.",
+                recommendation="Select a target later if the project moves into supervised modeling.",
+            )
         )
-    )
 
     return issues
 
