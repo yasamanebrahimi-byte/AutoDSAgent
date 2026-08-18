@@ -14,6 +14,7 @@ from app.backend.schemas.workflow import (
 )
 from app.backend.services.workflow_job_manager import WorkflowJobManager
 from app.backend.services.workflow_service import WorkflowService
+from app.tools.run_lock import RunMutationConflictError
 
 
 router = APIRouter(tags=["workflow"])
@@ -39,7 +40,6 @@ def start_workflow(
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
     selected_service = workflow_service
     job = workflow_job_manager.submit(
         run_id,
@@ -110,6 +110,12 @@ def apply_workflow_approval(
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RunMutationConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
     return WorkflowState(**state)
 
 
@@ -129,6 +135,12 @@ def retry_workflow_step(
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RunMutationConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
     return WorkflowState(**state)
 
 
@@ -142,3 +154,9 @@ def reset_workflow(run_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RunMutationConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc

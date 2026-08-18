@@ -11,6 +11,7 @@ from app.backend.schemas.reports import (
     ReportGenerateResponse,
     SupportedReportName,
 )
+from app.backend.routes.run_mutation import locked_run_mutation
 from app.backend.services.report_service import ReportService
 
 
@@ -25,15 +26,16 @@ def generate_reports(
 ) -> ReportGenerateResponse:
     """Generate final report artifacts for a run."""
 
-    try:
-        return report_service.generate_reports(
-            run_id,
-            request or ReportGenerateRequest(),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with locked_run_mutation(report_service.run_manager, run_id):
+        try:
+            return report_service.generate_reports(
+                run_id,
+                request or ReportGenerateRequest(),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/reports", response_model=ReportGenerateResponse)

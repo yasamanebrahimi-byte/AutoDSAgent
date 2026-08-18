@@ -12,6 +12,7 @@ pydantic==2.13.4
 python-multipart==0.0.32
 requests==2.34.2
 python-dotenv==1.2.2
+filelock==3.32.0
 mlflow==2.14.3
 setuptools==80.9.0
 pytest==9.1.1
