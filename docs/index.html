@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A read-only product tour of AutoDS Agent's deterministic, auditable tabular AutoML and MLOps workflow."
+    />
+    <title>AutoDS Agent — Read-only product tour</title>
+    <link rel="stylesheet" href="demo/assets/demo.css" />
+    <script src="demo/assets/demo.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#product" aria-label="AutoDS Agent product tour home">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span>
+          <strong>AutoDS Agent</strong>
+          <small>Auditable tabular ML</small>
+        </span>
+      </a>
+      <nav aria-label="Demo links">
+        <a href="product/architecture-overview.svg">Architecture</a>
+        <a href="api_reference.md">API reference</a>
+        <a href="https://github.com/yasamanebrahimi-byte/AutoDSAgent">GitHub</a>
+      </nav>
+      <span class="demo-badge"><span></span> Read-only demo</span>
+    </header>
+
+    <main id="product">
+      <section class="intro" aria-labelledby="intro-title">
+        <div>
+          <p class="eyebrow">Deterministic by design</p>
+          <h1 id="intro-title">From CSV to an auditable model run.</h1>
+          <p class="intro-copy">
+            A deterministic, auditable tabular AutoML and MLOps workflow with
+            explicit approval gates, reproducible artifacts, and no paid LLM dependency.
+          </p>
+        </div>
+        <div class="intro-actions">
+          <button class="primary-button" id="replay-tour" type="button">
+            <span aria-hidden="true">▶</span> Replay 40-second tour
+          </button>
+          <p>Recorded flow · public benchmark · no data is uploaded</p>
+        </div>
+      </section>
+
+      <section class="product-shell" aria-label="AutoDS Agent interface preview">
+        <aside class="run-sidebar">
+          <div class="run-heading">
+            <span class="run-icon" aria-hidden="true">BW</span>
+            <div>
+              <p class="overline">Active run</p>
+              <h2>Wisconsin diagnostic</h2>
+              <code>20260818 · a5cef848</code>
+            </div>
+          </div>
+
+          <div class="status-card">
+            <div>
+              <span class="status-dot"></span>
+              <strong id="run-status">Completed</strong>
+            </div>
+            <span id="run-progress-label">6 / 6 stages</span>
+            <div class="progress-track" aria-hidden="true">
+              <span id="run-progress" style="width: 100%"></span>
+            </div>
+          </div>
+
+          <p class="sidebar-label">Workflow</p>
+          <ol class="workflow-list" id="workflow-list">
+            <li data-workflow-step="profile" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>Profile</strong><small>569 rows · 31 columns</small></span>
+            </li>
+            <li data-workflow-step="cleaning" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>Cleaning</strong><small>0 destructive actions</small></span>
+            </li>
+            <li data-workflow-step="approval" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>Approval gate</strong><small>Policy acknowledged</small></span>
+            </li>
+            <li data-workflow-step="eda" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>EDA</strong><small>18 plots generated</small></span>
+            </li>
+            <li data-workflow-step="modeling" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>Modeling</strong><small>4 candidates compared</small></span>
+            </li>
+            <li data-workflow-step="report" class="complete">
+              <span class="step-state">✓</span>
+              <span><strong>Report</strong><small>5 files ready</small></span>
+            </li>
+          </ol>
+
+          <div class="integrity-card">
+            <span aria-hidden="true">◇</span>
+            <div><strong>Run integrity</strong><small>Raw input preserved · state v1.0</small></div>
+          </div>
+        </aside>
+
+        <section class="workspace">
+          <div class="workspace-header">
+            <div>
+              <p class="overline">Breast Cancer Wisconsin (Diagnostic)</p>
+              <h2 id="workspace-title">Run overview</h2>
+            </div>
+            <div class="header-actions">
+              <span class="sync-label"><span></span> State persisted</span>
+              <button class="icon-button" type="button" aria-label="Open run menu">•••</button>
+            </div>
+          </div>
+
+          <div class="view-tabs" role="tablist" aria-label="Product views">
+            <button role="tab" data-view-button="overview" aria-selected="true">Overview</button>
+            <button role="tab" data-view-button="workflow" aria-selected="false">Workflow</button>
+            <button role="tab" data-view-button="reports" aria-selected="false">Report preview</button>
+            <button role="tab" data-view-button="artifacts" aria-selected="false">Artifacts <span>24</span></button>
+          </div>
+
+          <div class="tour-banner" id="tour-banner" hidden>
+            <span id="tour-step-number">1</span>
+            <div>
+              <strong id="tour-step-title">Creating a reproducible run</strong>
+              <p id="tour-step-copy">The raw CSV is copied before any transformation.</p>
+            </div>
+            <button id="stop-tour" type="button">Stop</button>
+          </div>
+
+          <div class="view-panel active" data-view-panel="overview" role="tabpanel">
+            <div class="metric-grid">
+              <article><span>Rows</span><strong>569</strong><small>100% profiled</small></article>
+              <article><span>Features</span><strong>30</strong><small>All numeric</small></article>
+              <article><span>Selected model</span><strong>Logistic regression</strong><small>Candidate beat baseline</small></article>
+              <article class="accent-metric"><span>Holdout macro F1</span><strong>0.9619</strong><small>114 untouched rows</small></article>
+            </div>
+
+            <div class="overview-grid">
+              <article class="panel chart-panel">
+                <div class="panel-heading">
+                  <div><p class="overline">Model selection</p><h3>Training-only cross-validation</h3></div>
+                  <span class="verified-pill">Verified split</span>
+                </div>
+                <div class="bar-chart" aria-label="Cross-validation macro F1 comparison">
+                  <div class="bar-row"><span>Logistic regression</span><div><i style="width:97.16%"></i></div><strong>0.972</strong></div>
+                  <div class="bar-row"><span>Random forest</span><div><i style="width:95.98%"></i></div><strong>0.960</strong></div>
+                  <div class="bar-row"><span>Hist. gradient boost</span><div><i style="width:95.49%"></i></div><strong>0.955</strong></div>
+                  <div class="bar-row muted"><span>Most-frequent baseline</span><div><i style="width:38.51%"></i></div><strong>0.385</strong></div>
+                </div>
+                <footer><span>5-fold stratified CV</span><span>455 training rows</span><span>Random state 42</span></footer>
+              </article>
+
+              <article class="panel audit-panel">
+                <div class="panel-heading">
+                  <div><p class="overline">Audit trail</p><h3>Latest events</h3></div>
+                  <button type="button" data-view-link="workflow">View trace</button>
+                </div>
+                <ol>
+                  <li><span class="event-icon">✓</span><div><strong>Report finalized</strong><small>Terminal state projected · 08:42:46</small></div></li>
+                  <li><span class="event-icon">✓</span><div><strong>Model selected</strong><small>logistic_regression · 08:42:46</small></div></li>
+                  <li><span class="event-icon">✓</span><div><strong>EDA artifacts saved</strong><small>18 plots · 08:42:44</small></div></li>
+                  <li><span class="event-icon">✓</span><div><strong>Raw data preserved</strong><small>SHA-256 recorded · 08:42:42</small></div></li>
+                </ol>
+              </article>
+            </div>
+          </div>
+
+          <div class="view-panel" data-view-panel="workflow" role="tabpanel" hidden>
+            <div class="workflow-view-grid">
+              <article class="panel trace-panel">
+                <div class="panel-heading"><div><p class="overline">Persistent orchestration</p><h3>Workflow trace</h3></div><span class="live-pill">Completed</span></div>
+                <ol class="trace-list">
+                  <li><time>08:42:42</time><span></span><div><strong>Run created</strong><small>Raw source copied to input/raw_data.csv</small></div></li>
+                  <li><time>08:42:42</time><span></span><div><strong>Profile completed</strong><small>Schema and quality analysis persisted</small></div></li>
+                  <li><time>08:42:43</time><span></span><div><strong>Approval policy checked</strong><small>Human gate can pause before mutation or modeling</small></div></li>
+                  <li><time>08:42:44</time><span></span><div><strong>EDA completed</strong><small>Target-aware analysis and 18 figures</small></div></li>
+                  <li><time>08:42:46</time><span></span><div><strong>Model selected and evaluated</strong><small>One final test on the untouched holdout</small></div></li>
+                  <li><time>08:42:46</time><span></span><div><strong>Reports finalized</strong><small>Workflow status: completed</small></div></li>
+                </ol>
+              </article>
+              <aside class="panel approval-panel" id="approval-card">
+                <div class="approval-icon" aria-hidden="true">✓</div>
+                <p class="overline">Human-in-the-loop</p>
+                <h3 id="approval-title">Approval policy acknowledged</h3>
+                <p id="approval-copy">Risky cleaning and modeling can pause the workflow before execution. Every decision is recorded in the trace.</p>
+                <dl><div><dt>Requested by</dt><dd>ModelingAgent</dd></div><div><dt>Decision</dt><dd id="approval-decision">Approved</dd></div><div><dt>State write</dt><dd>Atomic</dd></div></dl>
+                <button class="approval-button" id="approve-demo" type="button" disabled>Approved</button>
+              </aside>
+            </div>
+          </div>
+
+          <div class="view-panel" data-view-panel="reports" role="tabpanel" hidden>
+            <div class="report-layout">
+              <aside class="report-nav">
+                <p class="sidebar-label">Generated reports</p>
+                <button class="active" type="button">Final report <span>MD</span></button>
+                <button type="button">Executive summary <span>MD</span></button>
+                <button type="button">Technical summary <span>MD</span></button>
+                <button type="button">Limitations <span>MD</span></button>
+                <button type="button">HTML report <span>HTML</span></button>
+              </aside>
+              <article class="report-document">
+                <div class="document-toolbar"><span>reports/final_report.md</span><button type="button">Download</button></div>
+                <div class="document-body">
+                  <p class="report-kicker">AutoDS Agent · completed run</p>
+                  <h3>Final Analysis Report</h3>
+                  <div class="report-meta"><span>Workflow status <strong>completed</strong></span><span>Target <strong>diagnosis</strong></span><span>Model <strong>logistic regression</strong></span></div>
+                  <h4>Executive summary</h4>
+                  <p>The run profiled 569 observations, preserved the raw input, generated 18 EDA figures, compared three candidate models against a most-frequent baseline, and evaluated the selected pipeline once on 114 held-out observations.</p>
+                  <blockquote>Holdout macro F1: <strong>0.9619</strong> · Accuracy: <strong>0.9649</strong></blockquote>
+                  <h4>Reproducibility</h4>
+                  <p>Selection used five-fold stratified cross-validation on the training partition. The report is rendered from the persisted terminal workflow state and links to every source artifact.</p>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="view-panel" data-view-panel="artifacts" role="tabpanel" hidden>
+            <article class="panel artifacts-panel">
+              <div class="panel-heading"><div><p class="overline">Run artifacts</p><h3>Inspectable, downloadable, reproducible</h3></div><label class="artifact-search">⌕ <input type="search" placeholder="Filter artifacts" aria-label="Filter artifacts" /></label></div>
+              <table>
+                <thead><tr><th>Artifact</th><th>Stage</th><th>Type</th><th>Integrity</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td><span class="file-icon raw">CSV</span><div><strong>raw_data.csv</strong><small>input/raw_data.csv</small></div></td><td>Upload</td><td>132 KB</td><td><span class="integrity">✓ Preserved</span></td><td><button type="button">Download</button></td></tr>
+                  <tr><td><span class="file-icon json">{ }</span><div><strong>workflow_state.json</strong><small>logs/workflow_state.json</small></div></td><td>Workflow</td><td>JSON</td><td><span class="integrity">✓ v1.0</span></td><td><button type="button">Download</button></td></tr>
+                  <tr><td><span class="file-icon model">ML</span><div><strong>selected_model.pkl</strong><small>models/selected_model.pkl</small></div></td><td>Modeling</td><td>Pipeline</td><td><span class="integrity">✓ Linked</span></td><td><button type="button">Download</button></td></tr>
+                  <tr><td><span class="file-icon image">PNG</span><div><strong>model_comparison.png</strong><small>plots/evaluation/model_comparison.png</small></div></td><td>Evaluation</td><td>Figure</td><td><span class="integrity">✓ Linked</span></td><td><button type="button">Download</button></td></tr>
+                  <tr><td><span class="file-icon report">MD</span><div><strong>final_report.md</strong><small>reports/final_report.md</small></div></td><td>Report</td><td>Markdown</td><td><span class="integrity">✓ Terminal</span></td><td><button type="button">Download</button></td></tr>
+                </tbody>
+              </table>
+              <footer class="artifact-footer"><span>Showing 5 of 24 artifacts</span><span>Every pointer validated against workflow state</span></footer>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <p class="demo-disclaimer">
+        This public tour replays a recorded, deterministic benchmark run. It does not upload
+        data or provide clinical guidance. Run the repository locally for the live Streamlit and FastAPI experience.
+      </p>
+    </main>
+  </body>
+</html>
