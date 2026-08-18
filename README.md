@@ -342,6 +342,10 @@ Install the pinned development toolchain:
 python -m pip install -e ".[dev]" -c constraints-dev.txt
 ```
 
+The suite includes Streamlit AppTest coverage for uploads, automated workflow submission and polling, advanced manual controls, report downloads, and recovery from backend failures.
+
+Run lightweight local checks:
+
 Run all tests with the same 75% coverage floor enforced by CI:
 
 ```bash

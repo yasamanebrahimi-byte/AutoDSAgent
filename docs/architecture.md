@@ -60,6 +60,8 @@ Workflow starts are submitted to a bounded background worker pool. The API retur
 
 Every workflow execution and manual artifact mutation acquires a per-run file lock under `logs/.mutation.lock`. The lock coordinates threads and backend processes; conflicting API mutations fail fast with `409 Conflict` and a `Retry-After` header instead of racing to overwrite state or artifacts. Read-only endpoints remain available while a run is active because JSON artifacts are saved atomically.
 
+The frontend is exercised headlessly with Streamlit AppTest. Tests interact with the real widget tree and session state while a deterministic fake backend covers upload, background polling, manual controls, report downloads, and error recovery without network or browser flakiness.
+
 ## Supervised Modeling Flow
 
 Modeling uses one train/test split per run. The test partition is not used for candidate selection:
