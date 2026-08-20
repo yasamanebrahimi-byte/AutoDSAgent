@@ -6,8 +6,8 @@ The central idea is simple:
 
 1. An independent planning agent reads the question and a dataset profile and proposes a target, task type, preprocessing, and model family.
 2. A deterministic recommender independently inspects the schema, missingness, cardinality, and dataset size and proposes its own plan.
-3. A validation gate compares both plans before any model is fit.
-4. Agreement lets the run continue. Disagreement triggers a second agent call that investigates the deterministic recommendation and records a justified final choice.
+3. A validation gate compares both plans before any model is fit, then applies the same deterministic feasibility and leakage contract even when the plans agree.
+4. Agreement records a provisional choice. Disagreement triggers a second agent call that investigates the deterministic recommendation and records a justified final choice; either path must pass deterministic validation.
 5. Specialist calls help plan cleaning, interpret computed EDA, and write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
@@ -41,6 +41,7 @@ The code is deliberately small:
 ```text
 app/
   deterministic.py  # profile, task inference, recommendation, cleaning, EDA, plots
+  validation.py     # fail-closed target, leakage, and split/CV invariants
   llm.py            # OpenAI Responses API specialist agents
   modeling.py       # training-only preprocessing and approved model evaluation
   pipeline.py       # orchestration and the pre-training gate
@@ -68,7 +69,24 @@ VALIDATION GATE
 clean -> EDA -> approved training -> report + artifacts
 ```
 
-The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable data characteristics. Once the gate approves a method, the workflow trains that method and evaluates it with a fixed protocol.
+The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable data characteristics. Once the gate approves a method, a separate deterministic contract still has to prove that training may safely proceed. Agreement between two recommenders is not proof of model quality or data validity.
+
+## Deterministic validation boundary
+
+`app/validation.py` is the hard boundary before fitting. It evaluates the approved target, task, method, feature matrix, holdout fraction, and cross-validation strategy against the actual dataframe. Every check has a stable code, pass/fail status, compact evidence, and an actionable message; the evidence is saved in `decision.json` and repeated in `modeling.json` for successful runs.
+
+The contract stops training when:
+
+- the target is missing, ambiguous, invalid for the approved task, has too few valid values/classes, or contains invalid/non-finite regression values;
+- missing target rows would otherwise become artificial string labels;
+- the target appears in the feature matrix, a feature is a proven target copy, or identical usable feature rows have conflicting targets;
+- schema safeguards leave no usable feature, or a requested method is unsupported;
+- `test_size`, stratification, holdout size, training-fold class coverage, or regression CV feasibility is invalid;
+- numeric infinities cannot be handled under the documented policy.
+
+Target rows are filtered deterministically before classification labels are converted to strings. Numeric feature infinities become missing values before training-only imputation. Imputation, scaling, encoding, and model fitting remain inside the scikit-learn pipeline; the holdout is reserved for the final evaluation and is not used for reconciliation, preprocessing fitting, or cross-validation. Boosted trees use bounded ordinal encoding for categorical features instead of a dense one-hot expansion.
+
+Name-based indicators such as a feature containing the target name are recorded as warnings for domain review. They do not block a run without stronger deterministic evidence. Semantic leakage, post-outcome variables, temporal leakage, proxy variables, and whether a feature was available at prediction time still require subject-matter review. These checks prove that a run meets the workflow's safety and feasibility preconditions; they do not prove that leakage is impossible, that the chosen family is empirically optimal, or that the model is fit for deployment.
 
 ## Setup
 
@@ -132,7 +150,7 @@ See [the demo notes and generated figures](docs/demo.md) for a compact walkthrou
 
 The most important files are:
 
-- `decision.json`: independent plan, deterministic plan, final gate status, and reconciliation evidence.
+- `decision.json`: independent plan, deterministic plan, final gate status, reconciliation evidence, and every deterministic invariant check.
 - `profile.json`: compact dataset facts supplied to the agents.
 - `cleaning.json`: requested and applied structural actions.
 - `eda.json`: deterministic EDA values plus agent findings and plot paths.
@@ -147,7 +165,7 @@ Generated run folders are ignored by Git so datasets, models, and reports do not
 
 Supported method families are `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree`. They map to logistic/linear regression, Ridge or regularized logistic regression, random forests, and histogram gradient boosting.
 
-The workflow excludes obvious identifiers, free text, datetime columns, and extremely high-cardinality features from the compact baseline. Numeric missing values are median-imputed inside the scikit-learn pipeline, and categories are imputed and one-hot encoded inside the pipeline. Cross-validation and preprocessing are fitted only on the training partition. The final holdout is not used to choose the method.
+The workflow excludes obvious identifiers, free text, datetime columns, constant features, and extremely high-cardinality features from the compact baseline, recording each exclusion reason. Numeric missing values are median-imputed inside the scikit-learn pipeline, and categories are imputed and encoded inside the pipeline. Cross-validation and preprocessing are fitted only on the training partition. The final holdout is not used to choose the method. These are hard preconditions for safe execution, not a claim that the approved family is the best empirical model.
 
 Metrics:
 
@@ -164,6 +182,6 @@ Rotate any key that has been pasted into chat, a terminal transcript, or a repos
 
 ## Limitations and expansion points
 
-This is a strong foundation for experimentation, not an autonomous production data scientist. It currently focuses on CSV tables, supervised classification/regression, a small allow-list of model families, and one holdout split. Natural next extensions are schema adapters for Parquet/SQL, richer target inference, leakage checks, uncertainty and calibration, experiment tracking, and formal evaluation of agent-vs-deterministic agreement rates.
+This is a strong foundation for experimentation, not an autonomous production data scientist. It currently focuses on CSV tables, supervised classification/regression, a small allow-list of model families, and one holdout split. Natural next extensions are schema adapters for Parquet/SQL, richer target inference, uncertainty and calibration, experiment tracking, formal evaluation of agent-vs-deterministic agreement rates, and domain-specific semantic leakage policies. The deterministic gate validates whether training may safely proceed; it does not replace domain review or empirical model comparison.
 
-The design keeps those extensions localized: new deterministic policies live in `app/deterministic.py`, new models in `app/modeling.py`, and new specialist outputs in `app/llm.py` and `app/schemas.py`.
+The design keeps those extensions localized: schema/recommendation policies live in `app/deterministic.py`, hard training invariants in `app/validation.py`, new models in `app/modeling.py`, and new specialist outputs in `app/llm.py` and `app/schemas.py`.

@@ -29,6 +29,7 @@ def render_code(
     method: str,
     task_type: str,
     seed: int,
+    test_size: float = 0.2,
 ) -> str:
     return f'''"""Reproduce the approved AutoDS Agent analysis.
 
@@ -42,6 +43,7 @@ from pathlib import Path
 import pandas as pd
 from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary, profile_dataframe
 from app.modeling import fit_selected_model
+from app.validation import prepare_validated_frame, validate_training_plan
 
 DATASET = Path(r"{dataset_path}")
 RUN_DIR = Path(__file__).resolve().parent
@@ -49,23 +51,48 @@ TARGET = {target_column!r}
 QUESTION = {question!r}
 METHOD = {method!r}
 TASK_TYPE = {task_type!r}
+TEST_SIZE = {test_size!r}
 
 raw = pd.read_csv(DATASET)
 decision = json.loads((RUN_DIR / "decision.json").read_text(encoding="utf-8"))
 approved = decision["validation"]
-assert approved["selected_target_column"] == TARGET
-assert approved["selected_task_type"] == TASK_TYPE
-assert approved["selected_method"] == METHOD
-assert decision["gate_completed_before_training"] is True
+if approved["selected_target_column"] != TARGET:
+    raise RuntimeError("Recorded target does not match the reproduction contract.")
+if approved["selected_task_type"] != TASK_TYPE:
+    raise RuntimeError("Recorded task does not match the reproduction contract.")
+if approved["selected_method"] != METHOD:
+    raise RuntimeError("Recorded method does not match the reproduction contract.")
+if decision.get("gate_completed_before_training") is not True:
+    raise RuntimeError("The original run did not complete its validation gate.")
 profile = profile_dataframe(raw)
 deterministic = deterministic_recommendation(raw, QUESTION, TARGET)
-assert deterministic.task_type == TASK_TYPE
+if deterministic.task_type != TASK_TYPE:
+    raise RuntimeError("The deterministic recommendation no longer matches the recorded task.")
+raw_validation = validate_training_plan(
+    raw,
+    TARGET,
+    TASK_TYPE,
+    METHOD,
+    test_size=TEST_SIZE,
+    random_state={seed},
+)
+raw_validation.raise_if_failed()
 cleaning = json.loads((RUN_DIR / "cleaning.json").read_text(encoding="utf-8"))
 cleaned, cleaning_log = apply_cleaning(
     raw,
     target_column=TARGET,
     actions=cleaning["plan"]["actions"],
 )
+cleaned_validation = validate_training_plan(
+    cleaned,
+    TARGET,
+    TASK_TYPE,
+    METHOD,
+    test_size=TEST_SIZE,
+    random_state={seed},
+)
+cleaned_validation.raise_if_failed()
+cleaned = prepare_validated_frame(cleaned, cleaned_validation)
 print(eda_summary(cleaned, TARGET))
 result = fit_selected_model(
     cleaned,
@@ -73,6 +100,7 @@ result = fit_selected_model(
     task_type=TASK_TYPE,
     method=METHOD,
     output_dir=RUN_DIR / "reproduced_model",
+    test_size=TEST_SIZE,
     random_state={seed},
 )
 print(result)
@@ -102,6 +130,10 @@ def render_report(
         else "Disagreement investigated"
     )
     chosen = validation["selected_method"]
+    deterministic_validation = validation.get("deterministic_validation") or {}
+    validation_checks = deterministic_validation.get("checks", [])
+    passed_checks = sum(1 for check in validation_checks if check.get("passed"))
+    excluded_features = deterministic_validation.get("excluded_features", [])
     cv_lines = "\n".join(
         f"- <code>{key}</code>: <code>{value:.4f}</code>"
         for key, value in modeling["cv_metrics"].items()
@@ -130,6 +162,10 @@ The workflow intentionally made a modeling decision before fitting any model.
 Deterministic reasoning: {deterministic.reasoning}
 
 Validation decision: {validation.get('justification', 'The recommendations matched on target, task, and method.')}
+
+Deterministic contract: <code>{deterministic_validation.get('status', 'not recorded')}</code> ({passed_checks}/{len(validation_checks)} checks passed); target rows removed: <code>{deterministic_validation.get('target_rows_removed', 0)}</code>; direct leakage detected: <code>{deterministic_validation.get('direct_leakage_detected', False)}</code>.
+
+Excluded features and reasons: <code>{', '.join(f"{item.get('column')} ({item.get('reason_code')})" for item in excluded_features) if excluded_features else 'none'}</code>.
 
 ## Data profile
 

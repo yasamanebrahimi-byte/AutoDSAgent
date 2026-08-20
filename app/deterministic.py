@@ -235,8 +235,6 @@ def apply_cleaning(
         removed_rows += before - len(frame)
         applied.append("drop_rows_missing_target")
 
-    if frame[target_column].nunique(dropna=True) < 2:
-        raise ValueError("Cleaning left fewer than two target values; choose a different target or plan.")
     return frame, {
         "original_shape": original_shape,
         "cleaned_shape": [int(frame.shape[0]), int(frame.shape[1])],
@@ -337,4 +335,3 @@ def to_json_value(value: Any) -> Any:
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
     return value
-

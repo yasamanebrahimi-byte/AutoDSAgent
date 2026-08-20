@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import joblib
 import numpy as np
@@ -27,10 +27,10 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import KFold, StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
-from app.deterministic import is_identifier, semantic_type
 from app.schemas import Method, TaskType
+from app.validation import modeling_arrays, validate_training_plan
 
 
 def fit_selected_model(
@@ -41,33 +41,20 @@ def fit_selected_model(
     output_dir: Path,
     test_size: float = 0.2,
     random_state: int = 42,
+    feature_columns: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    frame = dataframe.copy()
-    target = frame.pop(target_column)
-    if task_type == "regression":
-        target = pd.to_numeric(target, errors="coerce")
-    else:
-        target = target.astype(str)
-    valid = target.notna()
-    frame = frame.loc[valid].reset_index(drop=True)
-    target = target.loc[valid].reset_index(drop=True)
-    if task_type == "classification" and target.nunique() < 2:
-        raise ValueError("Classification requires at least two target classes.")
-
-    feature_names = list(frame.columns)
-    usable_features = [
-        column
-        for column in feature_names
-        if not is_identifier(str(column), frame[column])
-        and semantic_type(frame[column]) not in {"text", "datetime", "unknown"}
-        and not (
-            semantic_type(frame[column]) in {"categorical", "boolean"}
-            and frame[column].nunique(dropna=True) > 80
-        )
-    ]
-    if not usable_features:
-        raise ValueError("No usable feature columns remain after schema safeguards.")
-    frame = frame[usable_features]
+    validation = validate_training_plan(
+        dataframe,
+        target_column,
+        task_type,
+        method,
+        test_size=test_size,
+        random_state=random_state,
+        feature_columns=feature_columns,
+    )
+    validation.raise_if_failed()
+    frame, target = modeling_arrays(dataframe, validation)
+    usable_features = validation.features_used
     numeric_features = [
         column for column in usable_features if pd.api.types.is_numeric_dtype(frame[column])
     ]
@@ -89,27 +76,25 @@ def fit_selected_model(
             )
         )
     if categorical_features:
+        categorical_encoder: Any = (
+            OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+            if dense
+            else OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+        )
         transformers.append(
             (
                 "categorical",
                 Pipeline(
                     [
                         ("imputer", SimpleImputer(strategy="most_frequent")),
-                        (
-                            "onehot",
-                            OneHotEncoder(handle_unknown="ignore", sparse_output=not dense),
-                        ),
+                        ("encoder", categorical_encoder),
                     ]
                 ),
                 categorical_features,
             )
         )
     preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
-    stratify = (
-        target
-        if task_type == "classification" and target.value_counts().min() >= 2
-        else None
-    )
+    stratify = target if task_type == "classification" else None
     X_train, X_test, y_train, y_test = train_test_split(
         frame,
         target,
@@ -118,10 +103,7 @@ def fit_selected_model(
         stratify=stratify,
     )
     if task_type == "classification":
-        min_class_count = int(y_train.value_counts().min())
-        cv_folds = min(5, min_class_count)
-        if cv_folds < 2:
-            raise ValueError("Each training class needs at least two rows for validation.")
+        cv_folds = int(validation.split["cv_folds"])
         splitter: Any = StratifiedKFold(
             n_splits=cv_folds, shuffle=True, random_state=random_state
         )
@@ -131,9 +113,7 @@ def fit_selected_model(
             "accuracy": "accuracy",
         }
     else:
-        cv_folds = min(5, len(y_train))
-        if cv_folds < 2:
-            raise ValueError("At least two training rows are required for validation.")
+        cv_folds = int(validation.split["cv_folds"])
         splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
         scoring = {
             "rmse": "neg_root_mean_squared_error",
@@ -171,8 +151,10 @@ def fit_selected_model(
         "selected_method": method,
         "selected_model": _model_name(task_type, method),
         "features_used": usable_features,
+        "excluded_features": validation.excluded_features,
         "numeric_features": numeric_features,
         "categorical_features": categorical_features,
+        "target_rows_removed": validation.target_rows_removed,
         "train_rows": int(len(X_train)),
         "test_rows": int(len(X_test)),
         "cv_folds": cv_folds,
@@ -181,6 +163,14 @@ def fit_selected_model(
         "holdout_metrics": holdout,
         "baseline_metrics": baseline_metrics,
         "model_path": str(model_path),
+        "validation": validation.as_dict(),
+        "split_evidence": validation.split,
+        "preprocessing_policy": {
+            "fit_inside_pipeline": True,
+            "numeric_infinity_policy": "converted_to_missing_before_imputation",
+            "categorical_encoding": "ordinal_for_boosted_tree" if dense else "one_hot",
+            "holdout_used_for": "final_evaluation_only",
+        },
     }
 
 

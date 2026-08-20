@@ -19,6 +19,13 @@ from app.llm import OpenAIAgents
 from app.modeling import fit_selected_model
 from app.reporting import render_code, render_report, write_json
 from app.schemas import AgentPlan, CleaningPlan, DeterministicRecommendation, ReportDraft
+from app.validation import (
+    InvariantViolation,
+    ValidationResult,
+    prepare_validated_frame,
+    training_profile_frame,
+    validate_training_plan,
+)
 
 
 def run_analysis(
@@ -46,173 +53,250 @@ def run_analysis(
 
     profile = profile_dataframe(dataframe)
     write_json(run_dir / "profile.json", profile)
+    planning_frame = training_profile_frame(
+        dataframe,
+        target_column,
+        None,
+        test_size=test_size,
+        random_state=random_state,
+    )
+    planning_profile = profile_dataframe(planning_frame)
+    write_json(run_dir / "planning_profile.json", planning_profile)
 
     agents = OpenAIAgents(api_key=api_key, model=model)
     warnings: list[str] = []
     agent_sources: dict[str, str] = {}
-
-    agent_plan = _call_or_fallback(
-        "modeling",
-        lambda: agents.modeling_plan(profile, question, target_column),
-        lambda: _fallback_agent_plan(profile, question, target_column),
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    deterministic = deterministic_recommendation(dataframe, question, target_column)
-    validation = _validate_before_training(
-        agents,
-        profile,
-        question,
-        agent_plan,
-        deterministic,
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    write_json(
-        run_dir / "decision.json",
-        {
-            "agent_plan": agent_plan.model_dump(mode="json"),
-            "deterministic_recommendation": deterministic.model_dump(mode="json"),
-            "validation": validation,
-            "warnings": warnings,
-            "agent_sources": agent_sources,
-            "gate_completed_before_training": True,
-        },
-    )
-    selected_target = validation["selected_target_column"]
-    if selected_target not in dataframe.columns:
-        raise ValueError("The validation agent selected a target that is not in the input data.")
-
-    cleaning_plan = _call_or_fallback(
-        "cleaning",
-        lambda: agents.cleaning(profile, selected_target),
-        lambda: _fallback_cleaning_plan(profile),
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    cleaned, cleaning_log = apply_cleaning(
-        dataframe,
-        selected_target,
-        list(cleaning_plan.actions),
-    )
-    cleaned_path = run_dir / "data" / "cleaned.csv"
-    cleaned.to_csv(cleaned_path, index=False)
-    write_json(
-        run_dir / "cleaning.json",
-        {"plan": cleaning_plan.model_dump(mode="json"), "log": cleaning_log},
-    )
-
-    computed_eda = eda_summary(cleaned, selected_target)
-    plot_paths = make_plots(cleaned, selected_target, run_dir / "plots")
-    findings = _call_or_fallback(
-        "eda",
-        lambda: agents.eda(question, computed_eda),
-        lambda: _fallback_findings(computed_eda),
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    write_json(
-        run_dir / "eda.json",
-        {"computed": computed_eda, "agent_findings": findings, "plots": plot_paths},
-    )
-
-    modeling = fit_selected_model(
-        cleaned,
-        target_column=selected_target,
-        task_type=validation["selected_task_type"],
-        method=validation["selected_method"],
-        output_dir=run_dir / "model",
-        test_size=test_size,
-        random_state=random_state,
-    )
-    write_json(run_dir / "modeling.json", modeling)
-
-    report_context = {
-        "profile": profile,
-        "validation": validation,
-        "cleaning": cleaning_log,
-        "eda": computed_eda,
-        "findings": findings,
-        "modeling": modeling,
-    }
-    draft = _call_or_fallback(
-        "report",
-        lambda: agents.report(question, report_context),
-        lambda: _fallback_report(modeling, findings),
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    artifact_names = [
-        "profile.json",
-        "decision.json",
-        "cleaning.json",
-        "data/cleaned.csv",
-        "eda.json",
-        "modeling.json",
-        "model/selected_model.joblib",
-        "report.md",
-        "reproduce_analysis.py",
-    ]
-    report = render_report(
-        question,
-        profile,
-        agent_plan,
-        deterministic,
-        validation,
-        cleaning_plan,
-        cleaning_log,
-        computed_eda,
-        findings,
-        modeling,
-        draft,
-        artifact_names,
-    )
-    (run_dir / "report.md").write_text(report, encoding="utf-8")
-    code = render_code(
-        str(dataset_path),
-        selected_target,
-        question,
-        validation["selected_method"],
-        validation["selected_task_type"],
-        random_state,
-    )
-    (run_dir / "reproduce_analysis.py").write_text(code, encoding="utf-8")
-    write_json(
-        run_dir / "decision.json",
-        {
-            "agent_plan": agent_plan.model_dump(mode="json"),
-            "deterministic_recommendation": deterministic.model_dump(mode="json"),
-            "validation": validation,
-            "warnings": warnings,
-            "agent_sources": agent_sources,
-            "gate_completed_before_training": True,
-        },
-    )
-    manifest = {
-        "run_id": run_id,
-        "dataset": str(dataset_path),
-        "question": question,
-        "api_model": agents.model,
-        "api_used": any(source == "openai" for source in agent_sources.values()),
-        "agent_sources": agent_sources,
+    agent_plan: AgentPlan | None = None
+    deterministic: DeterministicRecommendation | None = None
+    validation: dict[str, Any] | None = None
+    decision_payload: dict[str, Any] = {
+        "agent_plan": None,
+        "deterministic_recommendation": None,
+        "validation": None,
         "warnings": warnings,
-        "validation_status": validation["status"],
-        "selected_method": validation["selected_method"],
-        "artifacts": artifact_names,
+        "agent_sources": agent_sources,
+        "gate_completed_before_training": False,
     }
-    write_json(run_dir / "run.json", manifest)
-    return {
-        "run_id": run_id,
-        "run_dir": str(run_dir),
-        "manifest": manifest,
-        "modeling": modeling,
-        "validation": validation,
-    }
+    try:
+        agent_plan = _call_or_fallback(
+            "modeling",
+            lambda: agents.modeling_plan(planning_profile, question, target_column),
+            lambda: _fallback_agent_plan(planning_profile, question, target_column),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        deterministic = _safe_deterministic_recommendation(
+            planning_frame,
+            question,
+            target_column,
+            agent_plan,
+            warnings,
+        )
+        validation = _validate_before_training(
+            agents,
+            planning_profile,
+            question,
+            agent_plan,
+            deterministic,
+            warnings,
+            agent_sources,
+            offline=offline,
+            dataframe=dataframe,
+            test_size=test_size,
+            random_state=random_state,
+            reconciliation_profile=planning_profile,
+        )
+        decision_payload.update(
+            {
+                "agent_plan": agent_plan.model_dump(mode="json"),
+                "deterministic_recommendation": deterministic.model_dump(mode="json"),
+                "validation": validation,
+            }
+        )
+        write_json(run_dir / "decision.json", decision_payload)
+
+        selected_target = validation["selected_target_column"]
+        cleaning_plan = _call_or_fallback(
+            "cleaning",
+            lambda: agents.cleaning(planning_profile, selected_target),
+            lambda: _fallback_cleaning_plan(planning_profile),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        cleaned, cleaning_log = apply_cleaning(
+            dataframe,
+            selected_target,
+            list(cleaning_plan.actions),
+        )
+        post_cleaning_result = validate_training_plan(
+            cleaned,
+            selected_target,
+            validation["selected_task_type"],
+            validation["selected_method"],
+            test_size=test_size,
+            random_state=random_state,
+        )
+        post_cleaning_result.raise_if_failed()
+        validation["pre_cleaning_deterministic_validation"] = validation[
+            "deterministic_validation"
+        ]
+        validation["deterministic_validation"] = post_cleaning_result.as_dict()
+        validation["validated_after_cleaning"] = True
+        cleaned = prepare_validated_frame(cleaned, post_cleaning_result)
+        cleaning_log["deterministic_target_rows_removed"] = post_cleaning_result.target_rows_removed
+        cleaning_log["removed_rows"] += post_cleaning_result.target_rows_removed
+        cleaning_log["cleaned_shape"] = [int(cleaned.shape[0]), int(cleaned.shape[1])]
+        cleaned_path = run_dir / "data" / "cleaned.csv"
+        cleaned.to_csv(cleaned_path, index=False)
+        write_json(
+            run_dir / "cleaning.json",
+            {"plan": cleaning_plan.model_dump(mode="json"), "log": cleaning_log},
+        )
+        decision_payload["validation"] = validation
+        write_json(run_dir / "decision.json", decision_payload)
+
+        computed_eda = eda_summary(cleaned, selected_target)
+        plot_paths = make_plots(cleaned, selected_target, run_dir / "plots")
+        findings = _call_or_fallback(
+            "eda",
+            lambda: agents.eda(question, computed_eda),
+            lambda: _fallback_findings(computed_eda),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        write_json(
+            run_dir / "eda.json",
+            {"computed": computed_eda, "agent_findings": findings, "plots": plot_paths},
+        )
+
+        decision_payload["gate_completed_before_training"] = True
+        decision_payload["warnings"] = warnings
+        decision_payload["agent_sources"] = agent_sources
+        write_json(run_dir / "decision.json", decision_payload)
+        modeling = fit_selected_model(
+            cleaned,
+            target_column=selected_target,
+            task_type=validation["selected_task_type"],
+            method=validation["selected_method"],
+            output_dir=run_dir / "model",
+            test_size=test_size,
+            random_state=random_state,
+        )
+        write_json(run_dir / "modeling.json", modeling)
+
+        report_context = {
+            "profile": profile,
+            "planning_profile": planning_profile,
+            "validation": validation,
+            "cleaning": cleaning_log,
+            "eda": computed_eda,
+            "findings": findings,
+            "modeling": modeling,
+        }
+        draft = _call_or_fallback(
+            "report",
+            lambda: agents.report(question, report_context),
+            lambda: _fallback_report(modeling, findings),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        artifact_names = [
+            "profile.json",
+            "planning_profile.json",
+            "decision.json",
+            "cleaning.json",
+            "data/cleaned.csv",
+            "eda.json",
+            "modeling.json",
+            "model/selected_model.joblib",
+            "report.md",
+            "reproduce_analysis.py",
+        ]
+        report = render_report(
+            question,
+            profile,
+            agent_plan,
+            deterministic,
+            validation,
+            cleaning_plan,
+            cleaning_log,
+            computed_eda,
+            findings,
+            modeling,
+            draft,
+            artifact_names,
+        )
+        (run_dir / "report.md").write_text(report, encoding="utf-8")
+        code = render_code(
+            str(dataset_path),
+            selected_target,
+            question,
+            validation["selected_method"],
+            validation["selected_task_type"],
+            random_state,
+            test_size,
+        )
+        (run_dir / "reproduce_analysis.py").write_text(code, encoding="utf-8")
+        decision_payload["warnings"] = warnings
+        decision_payload["agent_sources"] = agent_sources
+        write_json(run_dir / "decision.json", decision_payload)
+        manifest = {
+            "run_id": run_id,
+            "dataset": str(dataset_path),
+            "question": question,
+            "api_model": agents.model,
+            "api_used": any(source == "openai" for source in agent_sources.values()),
+            "agent_sources": agent_sources,
+            "warnings": warnings,
+            "validation_status": validation["status"],
+            "selected_method": validation["selected_method"],
+            "artifacts": artifact_names,
+        }
+        write_json(run_dir / "run.json", manifest)
+        return {
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "manifest": manifest,
+            "modeling": modeling,
+            "validation": validation,
+        }
+    except InvariantViolation as exc:
+        if exc.result is not None:
+            failed_validation = _failed_validation_payload(exc.result, validation)
+            decision_payload["validation"] = failed_validation
+        decision_payload["warnings"] = warnings
+        decision_payload["agent_sources"] = agent_sources
+        decision_payload["gate_completed_before_training"] = False
+        decision_payload["failure"] = {
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "check_codes": [check.code for check in exc.result.failed_checks]
+            if exc.result is not None
+            else [],
+        }
+        if agent_plan is not None:
+            decision_payload["agent_plan"] = agent_plan.model_dump(mode="json")
+        if deterministic is not None:
+            decision_payload["deterministic_recommendation"] = deterministic.model_dump(mode="json")
+        write_json(run_dir / "decision.json", decision_payload)
+        write_json(
+            run_dir / "run.json",
+            {
+                "run_id": run_id,
+                "dataset": str(dataset_path),
+                "validation_status": "failed",
+                "failure": decision_payload["failure"],
+                "api_used": any(source == "openai" for source in agent_sources.values()),
+            },
+        )
+        model_path = run_dir / "model" / "selected_model.joblib"
+        if model_path.exists():
+            model_path.unlink()
+        raise
 
 
 def _validate_before_training(
@@ -224,6 +308,10 @@ def _validate_before_training(
     warnings: list[str],
     agent_sources: dict[str, str],
     offline: bool,
+    dataframe: pd.DataFrame | None = None,
+    test_size: float = 0.2,
+    random_state: int = 42,
+    reconciliation_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     same = (
         agent_plan.target_column == deterministic.target_column
@@ -231,60 +319,114 @@ def _validate_before_training(
         and agent_plan.recommended_method == deterministic.recommended_method
     )
     if same:
-        return {
-            "status": "agreement",
-            "selected_target_column": deterministic.target_column,
-            "selected_task_type": deterministic.task_type,
-            "selected_method": deterministic.recommended_method,
-            "justification": "The independent agent and deterministic recommender agreed on target, task type, and method before training.",
-            "checks": ["target_match", "task_match", "method_match"],
-            "confidence": 1.0,
-        }
+        selected_target = deterministic.target_column
+        selected_task = deterministic.task_type
+        selected_method = deterministic.recommended_method
+        justification = "The independent agent and deterministic recommender agreed on target, task type, and method before training."
+        checks: Any = ["target_match", "task_match", "method_match"]
+        status = "agreement"
+    else:
+        resolution = _call_or_fallback(
+            "reconciliation",
+            lambda: agents.reconcile(
+                question,
+                reconciliation_profile or profile,
+                agent_plan,
+                deterministic.model_dump(mode="json"),
+            ),
+            lambda: _fallback_resolution(agent_plan, deterministic),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        selected_method = resolution.selected_method
+        selected_target = resolution.selected_target_column
+        selected_task = resolution.selected_task_type
+        justification = resolution.justification
+        checks = resolution.checks
+        status = "disagreement_resolved"
 
-    resolution = _call_or_fallback(
-        "reconciliation",
-        lambda: agents.reconcile(
-            question,
-            profile,
-            agent_plan,
-            deterministic.model_dump(mode="json"),
-        ),
-        lambda: _fallback_resolution(agent_plan, deterministic),
-        warnings,
-        agent_sources,
-        offline=offline,
-    )
-    proposed_methods = {
-        agent_plan.recommended_method,
-        deterministic.recommended_method,
-    }
-    selected_method = (
-        resolution.selected_method
-        if resolution.selected_method in proposed_methods
-        else deterministic.recommended_method
-    )
-    selected_target = (
-        resolution.selected_target_column
-        if resolution.selected_target_column
-        in {agent_plan.target_column, deterministic.target_column}
-        else deterministic.target_column
-    )
-    selected_task = (
-        resolution.selected_task_type
-        if resolution.selected_task_type in {agent_plan.task_type, deterministic.task_type}
-        else deterministic.task_type
-    )
+    if dataframe is not None:
+        deterministic_validation = validate_training_plan(
+            dataframe,
+            selected_target,
+            selected_task,
+            selected_method,
+            test_size=test_size,
+            random_state=random_state,
+        )
+        deterministic_validation.add_check(
+            "reconciliation_method_is_proposed",
+            same or selected_method in {
+                agent_plan.recommended_method,
+                deterministic.recommended_method,
+            },
+            {
+                "selected_method": selected_method,
+                "proposed_methods": sorted(
+                    {agent_plan.recommended_method, deterministic.recommended_method}
+                ),
+            },
+            "Reconciliation may select only one of the two proposed methods; do not invent or silently substitute a method.",
+        )
+        if not same:
+            deterministic_validation.add_check(
+                "reconciliation_target_is_proposed",
+                selected_target in {agent_plan.target_column, deterministic.target_column},
+                {
+                    "selected_target": selected_target,
+                    "proposed_targets": sorted({agent_plan.target_column, deterministic.target_column}),
+                },
+                "Reconciliation must select one of the proposed targets so the final target decision remains inspectable.",
+            )
+            deterministic_validation.add_check(
+                "reconciliation_task_is_proposed",
+                selected_task in {agent_plan.task_type, deterministic.task_type},
+                {
+                    "selected_task": selected_task,
+                    "proposed_tasks": sorted({agent_plan.task_type, deterministic.task_type}),
+                },
+                "Reconciliation must select one of the proposed task types; the selected target/task pair is then validated together.",
+            )
+        deterministic_validation.raise_if_failed()
+        checks = deterministic_validation.as_dict()["checks"]
     return {
-        "status": "disagreement_resolved",
+        "status": status,
+        "overall_status": "passed",
         "selected_target_column": selected_target,
         "selected_task_type": selected_task,
         "selected_method": selected_method,
-        "justification": resolution.justification,
-        "checks": resolution.checks,
-        "confidence": resolution.confidence,
+        "justification": justification,
+        "checks": checks,
+        "confidence": 1.0 if same else resolution.confidence,
+        "deterministic_validation": deterministic_validation.as_dict()
+        if dataframe is not None
+        else None,
         "agent_method": agent_plan.recommended_method,
         "deterministic_method": deterministic.recommended_method,
     }
+
+
+def _safe_deterministic_recommendation(
+    dataframe: pd.DataFrame,
+    question: str,
+    target_hint: str | None,
+    agent_plan: AgentPlan,
+    warnings: list[str],
+) -> DeterministicRecommendation:
+    try:
+        return deterministic_recommendation(dataframe, question, target_hint)
+    except Exception as exc:
+        warnings.append(f"Deterministic recommendation could not complete: {exc}")
+        target = target_hint or agent_plan.target_column
+        return DeterministicRecommendation(
+            target_column=target,
+            task_type=agent_plan.task_type,
+            recommended_method=agent_plan.recommended_method,
+            preprocessing=["training_only_imputation"],
+            reasoning="The deterministic recommendation was unavailable because the data requires deterministic validation before a recommendation can be completed.",
+            evidence=["recommendation_unavailable=true", f"error_type={type(exc).__name__}"],
+        )
 
 
 def _call_or_fallback(
@@ -318,10 +460,13 @@ def _fallback_agent_plan(
         (column for column in columns if column.lower() in question.lower()),
         columns[-1],
     )
-    target_record = next(record for record in profile["column_details"] if record["name"] == target)
+    target_record = next(
+        (record for record in profile["column_details"] if record["name"] == target),
+        {"semantic_type": "unknown"},
+    )
     task = (
         "classification"
-        if target_record["semantic_type"] in {"categorical", "boolean", "text"}
+        if target_record["semantic_type"] in {"categorical", "boolean", "text", "unknown"}
         else "regression"
     )
     features = [record for record in profile["column_details"] if record["name"] != target]
@@ -337,6 +482,29 @@ def _fallback_agent_plan(
         reasoning="Offline fallback uses an independent schema heuristic so the workflow remains runnable without an API key.",
         confidence=0.4,
     )
+
+
+def _failed_validation_payload(
+    result: ValidationResult,
+    existing: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep a stable gate-shaped record even when validation rejects a run."""
+
+    payload = dict(existing or {})
+    payload.update(
+        {
+            "status": "rejected",
+            "overall_status": "failed",
+            "selected_target_column": result.target_column,
+            "selected_task_type": result.task_type,
+            "selected_method": result.method,
+            "deterministic_validation": result.as_dict(),
+            "checks": result.as_dict()["checks"],
+            "justification": "Deterministic validation rejected the approved plan before model fitting.",
+            "confidence": 0.0,
+        }
+    )
+    return payload
 
 
 def _fallback_resolution(
