@@ -1,16 +1,12 @@
 # Public Benchmark Datasets
 
 The product demo uses two established tabular benchmarks distributed with
-scikit-learn. They are large enough for meaningful train/holdout evaluation,
-remain small enough for a local walkthrough, and can be regenerated without a
-network request:
-
-```bash
-python scripts/export_benchmark_datasets.py
-```
+scikit-learn. They are large enough for meaningful train/holdout evaluation
+and remain small enough for a local walkthrough. The CSVs are checked in so
+the tests and offline demos do not need a network request.
 
 `benchmark_manifest.json` records the exact row count, target, source, loader,
-license/attribution, citation, and SHA-256 digest for each generated CSV.
+license/attribution, citation, and SHA-256 digest for each CSV.
 
 ## Classification: Breast Cancer Wisconsin (Diagnostic)
 
@@ -40,9 +36,7 @@ These health-related datasets are included only to demonstrate the software
 pipeline. AutoDS Agent is not a medical device, and the outputs must not be used
 for diagnosis, treatment, or other clinical decisions.
 
-## Fast Test Fixtures
-
-The former 25-row synthetic churn and housing CSVs now live under
-`tests/fixtures/sample_data/`. They intentionally remain tiny and are used only
-where the test suite needs a fast smoke fixture; they are not product benchmarks
-or evidence of model quality.
+The test suite uses these bundled datasets for end-to-end coverage and creates
+small in-memory frames for focused modeling tests. The benchmarks demonstrate
+the software workflow; they are not evidence of model quality or clinical
+performance.

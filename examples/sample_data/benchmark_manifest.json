@@ -26,6 +26,5 @@
       "target": "disease_progression",
       "task": "regression"
     }
-  ],
-  "generated_by": "scripts/export_benchmark_datasets.py"
+  ]
 }

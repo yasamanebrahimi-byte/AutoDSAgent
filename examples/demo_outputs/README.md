@@ -1,25 +1,17 @@
 # Demo Outputs
 
-This folder documents what successful demo runs produce. It intentionally does not store large generated run artifacts. Run artifacts are created under `runs/<run_id>/` and are ignored by Git except for `.gitkeep`.
+This folder documents the artifacts produced by the current offline demos. It
+does not store generated run folders; those are created under
+`runs/<run_id>/` and ignored by Git except for `.gitkeep`.
 
-Run a demo with:
+Run both bundled datasets with:
 
 ```bash
-python scripts/run_full_demo.py --dataset classification
-python scripts/run_full_demo.py --dataset regression
+python scripts/run_demo.py --offline
 ```
 
-Each command prints:
-
-- Run ID.
-- Dataset.
-- Target column.
-- Workflow status.
-- Selected model, best candidate, and primary metric, when modeling succeeds.
-- Final report path.
-- Key artifact paths.
-
-See:
-
-- [Classification Demo Summary](classification_demo_summary.md)
-- [Regression Demo Summary](regression_demo_summary.md)
+Each run writes a profile, the validation decision, cleaning and EDA evidence,
+modeling metrics, plots, a fitted model, a Markdown report, and a reproduction
+script. See the [classification demo summary](classification_demo_summary.md)
+and [regression demo summary](regression_demo_summary.md) for the expected
+artifact layout.

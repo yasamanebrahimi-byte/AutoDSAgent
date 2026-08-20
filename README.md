@@ -1,6 +1,6 @@
 # AutoDS Agent
 
-AutoDS Agent is a compact, auditable data science workflow for tabular CSV data. It combines an LLM-based data scientist with deterministic checks so that model training never starts from an unexamined language-model suggestion.
+AutoDS Agent is a compact, auditable agent-vs-deterministic machine-learning workflow for supervised classification and regression on tabular CSV datasets. It combines an LLM-based data scientist with deterministic checks so that model training never starts from an unexamined language-model suggestion.
 
 The central idea is simple:
 

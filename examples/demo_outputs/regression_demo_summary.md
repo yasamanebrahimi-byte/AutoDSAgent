@@ -5,56 +5,31 @@
 - File: `examples/sample_data/diabetes_progression.csv`
 - Rows: 442
 - Target column: `disease_progression`
-- Expected task type: regression
+- Task type: regression
 
-## Expected Workflow Stages
+Run it with `python scripts/run_demo.py --offline`. The offline fallback keeps
+the run fully local while exercising the same validation gate, deterministic
+cleaning, EDA, modeling, and reporting stages used by an API-backed run.
 
-1. Create a run folder.
-2. Preserve raw CSV as `input/raw_data.csv`.
-3. Save metadata.
-4. Generate profile.
-5. Generate cleaning plan.
-6. Apply safe cleaning.
-7. Generate EDA summary, findings, and plots.
-8. Train baseline and candidate regression models.
-9. Evaluate models with MAE, RMSE, and R2.
-10. Generate final reports.
+## Workflow stages
 
-## Expected Report Outputs
+1. Profile the CSV and record the independent and deterministic plans.
+2. Complete the pre-training validation gate.
+3. Apply safe structural cleaning.
+4. Compute EDA summaries and plots.
+5. Fit the approved regression model with training-only preprocessing.
+6. Report cross-validation, untouched holdout, and baseline metrics.
+7. Persist the report and replay script.
 
-- `reports/final_report.md`
-- `reports/executive_summary.md`
-- `reports/technical_summary.md`
-- `reports/limitations.md`
-- `reports/report_index.json`
+## Run artifacts
 
-## Expected Model Outputs
+Each run is written to `runs/<run_id>/` and includes:
 
-- `intermediate/modeling_summary.json`
-- `intermediate/evaluation_summary.json`
-- `models/baseline_model.pkl`
-- `models/selected_model.pkl`
-- `models/best_model.pkl` (legacy selected-model alias)
-- `models/model_results.json`
-- `plots/evaluation/model_comparison.png`
-- `plots/evaluation/predicted_vs_actual.png`
-- `plots/evaluation/residuals.png`
+- `profile.json`, `decision.json`, `cleaning.json`, `eda.json`, and `modeling.json`
+- `data/cleaned.csv`
+- `plots/target_distribution.png` and, when applicable, `plots/correlation_heatmap.png`
+- `model/selected_model.joblib`
+- `report.md`, `reproduce_analysis.py`, and `run.json`
 
-The primary metric is RMSE, where lower is better.
-
-## Where Artifacts Are Saved
-
-Artifacts are saved under:
-
-```text
-runs/<run_id>/
-```
-
-The script prints the exact run ID and paths after completion.
-
-## What To Look For
-
-- The final report should summarize baseline feature relationships, cleaning actions, EDA findings, selected regression model, and limitations.
-- Metrics demonstrate the workflow only and are not appropriate for clinical decisions.
-- The evaluation summary should identify the selected model, best candidate, and baseline median regressor comparison.
-- If MLflow is enabled, look for run tags, regression metrics, evaluation plots, and model artifacts.
+Metrics can vary when dependency versions or the seed change; the run artifacts
+are the source of truth for a particular execution.

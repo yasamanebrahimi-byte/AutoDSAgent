@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autods-agent"
 version = "0.2.0"
-description = "An auditable agent-vs-deterministic data science workflow for tabular CSVs."
+description = "Auditable agent-vs-deterministic machine learning for tabular CSV classification and regression."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
