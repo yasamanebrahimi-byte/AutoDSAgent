@@ -4,39 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autods-agent"
-version = "0.1.0"
-description = "A deterministic automated data science workflow for tabular CSV datasets."
+version = "0.2.0"
+description = "An auditable agent-vs-deterministic data science workflow for tabular CSVs."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi>=0.111,<1.0",
-  "uvicorn[standard]>=0.30,<1.0",
-  "streamlit>=1.37,<2.0",
   "pandas>=2.2,<3.0",
-  "matplotlib>=3.8,<4.0",
+  "numpy>=1.26,<3.0",
   "scikit-learn>=1.5,<2.0",
+  "matplotlib>=3.8,<4.0",
   "joblib>=1.4,<2.0",
   "pydantic>=2.7,<3.0",
-  "python-multipart>=0.0.9,<1.0",
-  "requests>=2.32,<3.0",
-  "python-dotenv>=1.0,<2.0",
-  "filelock>=3.15,<4.0"
+  "openai>=1.68,<2.0"
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.1,<10.0",
-  "httpx>=0.27,<1.0",
-  "mypy>=2.3,<3.0",
-  "pip-audit>=2.10,<3.0",
-  "pytest-cov>=7.1,<8.0",
-  "ruff>=0.16,<0.17",
-  "types-requests>=2.33,<3.0"
+  "pytest>=8.0,<9.0",
+  "ruff>=0.6,<1.0"
 ]
-mlflow = [
-  "mlflow>=2.14,<3.0",
-  "setuptools>=68,<81"
-]
+
+[project.scripts]
+autods-agent = "app.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
@@ -44,8 +33,8 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--basetemp=.pytest_tmp"
-cache_dir = ".pytest_tmp_cache"
+addopts = "-q"
+cache_dir = ".pytest_local_cache"
 
 [tool.ruff]
 target-version = "py311"
@@ -53,15 +42,3 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
-
-[tool.ruff.lint.per-file-ignores]
-"scripts/create_demo_run.py" = ["E402"]
-"scripts/run_full_demo.py" = ["E402"]
-
-[tool.mypy]
-python_version = "3.11"
-follow_imports = "skip"
-ignore_missing_imports = true
-check_untyped_defs = true
-disallow_untyped_defs = true
-warn_unused_configs = true
