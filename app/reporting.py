@@ -30,30 +30,41 @@ def render_code(
     task_type: str,
     seed: int,
 ) -> str:
-    return f'''"""Reproduce the approved AutoDS Agent analysis."""
+    return f'''"""Reproduce the approved AutoDS Agent analysis.
 
+The semantic agent decisions are captured in decision.json. This script
+replays and verifies that approved decision before running the deterministic
+cleaning, EDA, and modeling stages.
+"""
+
+import json
 from pathlib import Path
 import pandas as pd
-from app.deterministic import apply_cleaning, eda_summary
+from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary, profile_dataframe
 from app.modeling import fit_selected_model
 
 DATASET = Path(r"{dataset_path}")
+RUN_DIR = Path(__file__).resolve().parent
 TARGET = {target_column!r}
 QUESTION = {question!r}
 METHOD = {method!r}
 TASK_TYPE = {task_type!r}
 
 raw = pd.read_csv(DATASET)
+decision = json.loads((RUN_DIR / "decision.json").read_text(encoding="utf-8"))
+approved = decision["validation"]
+assert approved["selected_target_column"] == TARGET
+assert approved["selected_task_type"] == TASK_TYPE
+assert approved["selected_method"] == METHOD
+assert decision["gate_completed_before_training"] is True
+profile = profile_dataframe(raw)
+deterministic = deterministic_recommendation(raw, QUESTION, TARGET)
+assert deterministic.task_type == TASK_TYPE
+cleaning = json.loads((RUN_DIR / "cleaning.json").read_text(encoding="utf-8"))
 cleaned, cleaning_log = apply_cleaning(
     raw,
     target_column=TARGET,
-    actions=[
-        "trim_strings",
-        "drop_exact_duplicates",
-        "drop_all_null_columns",
-        "drop_constant_features",
-        "drop_rows_missing_target",
-    ],
+    actions=cleaning["plan"]["actions"],
 )
 print(eda_summary(cleaned, TARGET))
 result = fit_selected_model(
@@ -61,7 +72,7 @@ result = fit_selected_model(
     target_column=TARGET,
     task_type=TASK_TYPE,
     method=METHOD,
-    output_dir=Path("reproduced_run") / "model",
+    output_dir=RUN_DIR / "reproduced_model",
     random_state={seed},
 )
 print(result)
@@ -172,6 +183,5 @@ Recommended next steps:
 
 {bullets([f'<code>{name}</code>' for name in artifact_names])}
 
-The full reproducible Python script is in <code>reproduce_analysis.py</code>.
+<code>reproduce_analysis.py</code> replays the approved deterministic stages and verifies the recorded gate decision. The agent decisions themselves are preserved in <code>decision.json</code> rather than regenerated during replay.
 """
-

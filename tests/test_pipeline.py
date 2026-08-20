@@ -21,7 +21,11 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
 
     assert decision["validation"]["selected_method"]
     assert decision["validation"]["status"] in {"agreement", "disagreement_resolved"}
+    assert decision["gate_completed_before_training"] is True
+    assert set(decision["agent_sources"]) >= {"modeling", "cleaning", "eda", "report"}
     assert manifest["api_used"] is False
     assert (run_dir / "report.md").exists()
     assert (run_dir / "reproduce_analysis.py").exists()
-
+    assert "deterministic_recommendation" in (run_dir / "reproduce_analysis.py").read_text(
+        encoding="utf-8"
+    )

@@ -12,6 +12,17 @@ The central idea is simple:
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
+### Agent roles
+
+- Modeling agent: independently proposes the target, classification/regression task, preprocessing, and model family.
+- Deterministic validator: independently checks the target/schema and recommends a fitting family before training.
+- Reconciliation agent: investigates only disagreements and records the final choice with evidence.
+- Cleaning agent: selects safe structural cleaning actions from an allow-list.
+- EDA agent: interprets deterministic summaries and plots without inventing measurements.
+- Report agent: turns the saved evidence into the final narrative and next steps.
+
+The actual fit is deliberately deterministic after the gate: scikit-learn trains the approved model with a reproducible preprocessing pipeline and evaluation protocol.
+
 ## What is included
 
 - OpenAI Responses API calls with strict JSON-schema outputs for planning, reconciliation, cleaning, EDA interpretation, and report drafting.
@@ -127,10 +138,10 @@ The most important files are:
 - `eda.json`: deterministic EDA values plus agent findings and plot paths.
 - `modeling.json`: selected model, CV metrics, holdout metrics, feature handling, and artifact path.
 - `report.md`: analyst-style narrative.
-- `reproduce_analysis.py`: executable code for the deterministic stages.
+- `reproduce_analysis.py`: executable replay of the approved decision plus the deterministic cleaning, EDA, and modeling stages.
 - `model/selected_model.joblib`: fitted scikit-learn pipeline.
 
-Generated run folders are ignored by Git so datasets, models, and reports do not accidentally become repository history.
+Generated run folders are ignored by Git so datasets, models, and reports do not accidentally become repository history. The agent decisions remain inspectable in `decision.json`; replay does not silently make a new semantic decision.
 
 ## Method and evaluation details
 

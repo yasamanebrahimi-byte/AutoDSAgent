@@ -52,8 +52,8 @@ def run_analysis(
     agent_sources: dict[str, str] = {}
 
     agent_plan = _call_or_fallback(
-        "planning",
-        lambda: agents.planning(profile, question, target_column),
+        "modeling",
+        lambda: agents.modeling_plan(profile, question, target_column),
         lambda: _fallback_agent_plan(profile, question, target_column),
         warnings,
         agent_sources,
@@ -78,6 +78,7 @@ def run_analysis(
             "validation": validation,
             "warnings": warnings,
             "agent_sources": agent_sources,
+            "gate_completed_before_training": True,
         },
     )
     selected_target = validation["selected_target_column"]
@@ -181,6 +182,17 @@ def run_analysis(
         random_state,
     )
     (run_dir / "reproduce_analysis.py").write_text(code, encoding="utf-8")
+    write_json(
+        run_dir / "decision.json",
+        {
+            "agent_plan": agent_plan.model_dump(mode="json"),
+            "deterministic_recommendation": deterministic.model_dump(mode="json"),
+            "validation": validation,
+            "warnings": warnings,
+            "agent_sources": agent_sources,
+            "gate_completed_before_training": True,
+        },
+    )
     manifest = {
         "run_id": run_id,
         "dataset": str(dataset_path),

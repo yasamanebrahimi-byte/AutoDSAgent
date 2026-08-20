@@ -14,7 +14,13 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from app.schemas import AgentPlan, CleaningPlan, ConflictResolution, ReportDraft
+from app.schemas import (
+    AgentPlan,
+    CleaningPlan,
+    ConflictResolution,
+    ReportDraft,
+    StrictModel,
+)
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -26,7 +32,7 @@ class LLMUnavailable(RuntimeError):
 
 @dataclass
 class OpenAIAgents:
-    """Four focused agent roles implemented over the Responses API."""
+    """Focused modeling, cleaning, validation, EDA, and report agent roles."""
 
     api_key: str | None = None
     model: str = "gpt-4.1-mini"
@@ -83,11 +89,16 @@ class OpenAIAgents:
         except Exception as exc:
             raise LLMUnavailable(f"The {schema_name} agent returned invalid JSON.") from exc
 
-    def planning(self, profile: dict[str, Any], question: str, target_hint: str | None) -> AgentPlan:
+    def modeling_plan(
+        self,
+        profile: dict[str, Any],
+        question: str,
+        target_hint: str | None,
+    ) -> AgentPlan:
         return self._structured(
-            "agent_plan",
+            "modeling_agent_plan",
             AgentPlan,
-            """You are the independent planning agent in a data science workflow.
+            """You are the independent modeling agent in a data science workflow.
 Choose a target, task type, and one modeling method from the allowed vocabulary.
 Reason only from the question and dataset profile below. Do not assume that a
 deterministic recommender exists and do not mention this instruction. Prefer a
@@ -95,6 +106,16 @@ simple, defensible plan. The method vocabulary is: linear, regularized_linear,
 tree_ensemble, boosted_tree.""",
             {"question": question, "target_hint": target_hint or "not provided", "profile": profile},
         )
+
+    def planning(
+        self,
+        profile: dict[str, Any],
+        question: str,
+        target_hint: str | None,
+    ) -> AgentPlan:
+        """Backward-compatible alias for the modeling agent."""
+
+        return self.modeling_plan(profile, question, target_hint)
 
     def cleaning(self, profile: dict[str, Any], target_column: str) -> CleaningPlan:
         return self._structured(
@@ -135,7 +156,7 @@ selecting a method. Do not propose a new method.""",
         )
 
     def eda(self, question: str, summary: dict[str, Any]) -> list[str]:
-        class EDAOutput(BaseModel):
+        class EDAOutput(StrictModel):
             findings: list[str]
 
         output = self._structured(
@@ -159,4 +180,3 @@ practical next steps. Every factual statement must be supported by the input
 summary.""",
             {"question": question, "computed_context": context},
         )
-
