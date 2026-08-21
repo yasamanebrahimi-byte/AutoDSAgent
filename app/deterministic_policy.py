@@ -19,6 +19,122 @@ MAX_CATEGORICAL_CARDINALITY = 80
 MAX_ONE_HOT_FEATURES = 4000
 
 
+def _freeze_points(
+    values: dict[str, dict[Method, int]],
+) -> tuple[tuple[str, tuple[tuple[Method, int], ...]], ...]:
+    return tuple(
+        (key, tuple(sorted(methods.items())))
+        for key, methods in sorted(values.items())
+    )
+
+
+# A point slot is the named branch plus its historical default point.  The
+# slot value is only a stable identifier for the branch; the value actually
+# used at runtime comes from this versioned table.  Keeping this table beside
+# the thresholds makes every compatibility contribution inspectable and
+# permits an offline calibration candidate to replace a small, named point
+# set without turning the recommender into a learned selector.
+DEFAULT_COMPATIBILITY_POINTS = _freeze_points(
+    {
+        "feature_composition:8": {"linear": 8},
+        "feature_composition:6": {"regularized_linear": 6},
+        "feature_composition:-3": {"linear": -3},
+        "feature_composition:2": {"regularized_linear": 2},
+        "feature_composition:7": {"tree_ensemble": 7},
+        "feature_composition:5": {"boosted_tree": 5, "tree_ensemble": 5},
+        "feature_composition:-2": {"linear": -2},
+        "feature_composition:4": {"boosted_tree": 4},
+        "categorical_structure:-3": {"linear": -3},
+        "categorical_structure:1": {"regularized_linear": 1},
+        "categorical_structure:5": {"tree_ensemble": 5},
+        "categorical_structure:4": {"boosted_tree": 4},
+        "categorical_cardinality:-4": {"linear": -4},
+        "categorical_cardinality:-2": {"regularized_linear": -2, "linear": -2},
+        "categorical_cardinality:-3": {"tree_ensemble": -3},
+        "categorical_cardinality:1": {"boosted_tree": 1},
+        "categorical_cardinality:2": {"regularized_linear": 2},
+        "categorical_cardinality:-1": {"tree_ensemble": -1},
+        "sample_to_feature_ratio:-8": {"linear": -8},
+        "sample_to_feature_ratio:-2": {"regularized_linear": -2, "linear": -2},
+        "sample_to_feature_ratio:-10": {"tree_ensemble": -10},
+        "sample_to_feature_ratio:-14": {"boosted_tree": -14},
+        "sample_to_feature_ratio:8": {"regularized_linear": 8},
+        "sample_to_feature_ratio:2": {"tree_ensemble": 2},
+        "sample_to_feature_ratio:4": {"linear": 4},
+        "sample_to_feature_ratio:6": {"regularized_linear": 6, "tree_ensemble": 6},
+        "sample_to_feature_ratio:7": {"boosted_tree": 7},
+        "sample_to_feature_ratio:5": {"regularized_linear": 5},
+        "sample_to_feature_ratio:10": {"boosted_tree": 10},
+        "dataset_scale:2": {"linear": 2},
+        "dataset_scale:4": {"regularized_linear": 4},
+        "dataset_scale:-8": {"tree_ensemble": -8},
+        "dataset_scale:-12": {"boosted_tree": -12},
+        "dataset_scale:3": {"tree_ensemble": 3},
+        "dataset_scale:-3": {"boosted_tree": -3},
+        "dataset_scale:7": {"tree_ensemble": 7},
+        "dataset_scale:5": {"boosted_tree": 5},
+        "dataset_scale:8": {"tree_ensemble": 8},
+        "dataset_scale:10": {"boosted_tree": 10},
+        "encoded_dimensionality:7": {"linear": 7},
+        "encoded_dimensionality:3": {"regularized_linear": 3},
+        "encoded_dimensionality:2": {"linear": 2, "tree_ensemble": 2, "boosted_tree": 2},
+        "encoded_dimensionality:4": {"tree_ensemble": 4, "boosted_tree": 4},
+        "encoded_dimensionality:6": {"regularized_linear": 6},
+        "encoded_dimensionality:-5": {"linear": -5},
+        "encoded_dimensionality:10": {"regularized_linear": 10},
+        "encoded_dimensionality:1": {"boosted_tree": 1},
+        "encoded_dimensionality:-12": {"linear": -12},
+        "encoded_dimensionality:8": {"regularized_linear": 8},
+        "encoded_dimensionality:-8": {"tree_ensemble": -8},
+        "encoded_dimensionality_boosted:3": {"boosted_tree": 3},
+        "multicollinearity:-14": {"linear": -14},
+        "multicollinearity:14": {"regularized_linear": 14},
+        "multicollinearity:2": {"tree_ensemble": 2},
+        "multicollinearity:1": {"boosted_tree": 1, "tree_ensemble": 1},
+        "multicollinearity:-6": {"linear": -6},
+        "multicollinearity:8": {"regularized_linear": 8},
+        "multicollinearity:7": {"linear": 7},
+        "multicollinearity:4": {"regularized_linear": 4},
+        "nonlinearity:-10": {"linear": -10},
+        "nonlinearity:-8": {"regularized_linear": -8},
+        "nonlinearity:15": {"tree_ensemble": 15},
+        "nonlinearity:17": {"boosted_tree": 17},
+        "nonlinearity:-3": {"linear": -3},
+        "nonlinearity:10": {"tree_ensemble": 10},
+        "nonlinearity:8": {"boosted_tree": 8, "linear": 8},
+        "nonlinearity:5": {"regularized_linear": 5},
+        "nonlinearity:1": {"tree_ensemble": 1},
+        "nonlinearity:-2": {"boosted_tree": -2},
+        "structural_complexity:-5": {"linear": -5},
+        "structural_complexity:-2": {"regularized_linear": -2, "linear": -2},
+        "structural_complexity:8": {"tree_ensemble": 8, "boosted_tree": 8},
+        "structural_complexity:4": {"tree_ensemble": 4, "boosted_tree": 4},
+        "structural_complexity:2": {"linear": 2, "regularized_linear": 2},
+        "missingness:-3": {"linear": -3},
+        "missingness:-1": {"regularized_linear": -1, "linear": -1},
+        "missingness:2": {"tree_ensemble": 2},
+        "missingness:1": {"boosted_tree": 1, "tree_ensemble": 1},
+        "feature_outliers:-4": {"linear": -4},
+        "feature_outliers:2": {"regularized_linear": 2, "boosted_tree": 2},
+        "feature_outliers:4": {"tree_ensemble": 4},
+        "class_balance:-5": {"linear": -5},
+        "class_balance:1": {"regularized_linear": 1},
+        "class_balance:-2": {"tree_ensemble": -2},
+        "class_balance:-3": {"boosted_tree": -3},
+        "class_support:1": {"regularized_linear": 1},
+        "class_support:-5": {"tree_ensemble": -5},
+        "class_support:-7": {"boosted_tree": -7},
+        "target_robustness:-3": {"linear": -3},
+        "target_robustness:1": {"regularized_linear": 1, "boosted_tree": 1},
+        "target_robustness:3": {"tree_ensemble": 3},
+        "target_shape:-2": {"linear": -2},
+        "target_shape:1": {"tree_ensemble": 1, "boosted_tree": 1},
+        "boosted_tree_scale_signal:8": {"boosted_tree": 8},
+        "boosted_tree_scale_signal:3": {"tree_ensemble": 3},
+    }
+)
+
+
 @dataclass(frozen=True)
 class DeterministicPolicy:
     """Named thresholds and score bands for policy version 4.
@@ -36,11 +152,14 @@ class DeterministicPolicy:
     healthy_sample_feature_ratio: float = 20.0
     high_effective_features: int = 100
     very_high_effective_features: int = 300
+    low_effective_features: int = 20
     moderate_missing_fraction: float = 0.10
     high_missing_fraction: float = 0.25
     widespread_missing_feature_fraction: float = 0.40
     nonlinear_moderate_threshold: float = 0.15
     nonlinear_high_threshold: float = 0.35
+    severe_correlation_pair_fraction: float = 0.25
+    concentrated_missing_feature_fraction: float = 0.25
     # These thresholds are explicit by task because eta-squared/Cramer's V
     # and regression correlation evidence are bounded but not interchangeable.
     regression_weak_association_threshold: float = 0.20
@@ -65,11 +184,22 @@ class DeterministicPolicy:
     tiny_dataset_max_samples: int = 80
     minimum_boosted_effective_features: int = 1000
     high_cardinality_fraction: float = 0.50
+    elevated_categorical_cardinality: int = 40
     high_class_imbalance_fraction: float = 0.10
     severe_class_imbalance_ratio: float = 9.0
     unstable_class_size: int = 15
     low_confidence_margin: int = 7
     high_confidence_margin: int = 15
+    high_target_skewness: float = 2.0
+    target_outlier_high_fraction: float = 0.10
+    compatibility_points: tuple[tuple[str, tuple[tuple[Method, int], ...]], ...] = DEFAULT_COMPATIBILITY_POINTS
+
+    def compatibility_point(self, factor: str, legacy_point_slot: int, method: Method) -> int:
+        """Resolve a named compatibility contribution from the frozen table."""
+
+        point_table = dict(self.compatibility_points)
+        method_points = dict(point_table.get(f"{factor}:{legacy_point_slot}", ()))
+        return int(method_points.get(method, 0))
 
 
 SUPPORTED_METHOD_ORDER: tuple[Method, ...] = (
@@ -109,8 +239,9 @@ def score_model_families(
     }
 
     def add(method: Method, factor: str, points: int, observation: str) -> None:
-        scores[method] += points
-        contributions[method].append(_contribution(method, factor, points, observation))
+        configured_points = policy.compatibility_point(factor, points, method)
+        scores[method] += configured_points
+        contributions[method].append(_contribution(method, factor, configured_points, observation))
 
     numeric_dominant = diagnostics.numeric_feature_count > diagnostics.categorical_feature_count
     mixed = diagnostics.numeric_feature_count > 0 and diagnostics.categorical_feature_count > 0
@@ -137,7 +268,7 @@ def score_model_families(
         add("regularized_linear", "categorical_cardinality", -2, "at least half of categorical predictors exceed the canonical cardinality band")
         add("tree_ensemble", "categorical_cardinality", -3, "at least half of categorical predictors exceed the canonical cardinality band")
         add("boosted_tree", "categorical_cardinality", 1, "ordinal encoding limits expansion from high-cardinality predictors")
-    elif diagnostics.max_categorical_cardinality >= 40:
+    elif diagnostics.max_categorical_cardinality >= policy.elevated_categorical_cardinality:
         add("linear", "categorical_cardinality", -2, f"maximum categorical cardinality {diagnostics.max_categorical_cardinality} increases one-hot burden")
         add("regularized_linear", "categorical_cardinality", 2, f"maximum categorical cardinality {diagnostics.max_categorical_cardinality} favors shrinkage")
         add("tree_ensemble", "categorical_cardinality", -1, f"maximum categorical cardinality {diagnostics.max_categorical_cardinality} burdens one-hot trees")
@@ -181,7 +312,7 @@ def score_model_families(
         add("boosted_tree", "dataset_scale", 10, f"{diagnostics.rows} rows support a larger boosted-tree fit")
 
     effective = diagnostics.effective_features_estimate
-    if effective <= 20:
+    if effective <= policy.low_effective_features:
         add("linear", "encoded_dimensionality", 7, f"estimated encoded dimension {effective} is low")
         add("regularized_linear", "encoded_dimensionality", 3, f"estimated encoded dimension {effective} is low")
         add("tree_ensemble", "encoded_dimensionality", 2, f"estimated encoded dimension {effective} is low")
@@ -200,10 +331,10 @@ def score_model_families(
         add("linear", "encoded_dimensionality", -12, f"estimated encoded dimension {effective} is very large")
         add("regularized_linear", "encoded_dimensionality", 8, f"estimated encoded dimension {effective} favors regularization")
         add("tree_ensemble", "encoded_dimensionality", -8, f"estimated encoded dimension {effective} burdens one-hot trees")
-        add("boosted_tree", "encoded_dimensionality", 3, f"ordinal dimension remains {diagnostics.boosted_effective_features_estimate}")
+        add("boosted_tree", "encoded_dimensionality_boosted", 3, f"ordinal dimension remains {diagnostics.boosted_effective_features_estimate}")
 
     corr = diagnostics.max_abs_numeric_correlation
-    if corr >= policy.severe_correlation_threshold or diagnostics.high_correlation_pair_fraction >= 0.25:
+    if corr >= policy.severe_correlation_threshold or diagnostics.high_correlation_pair_fraction >= policy.severe_correlation_pair_fraction:
         add("linear", "multicollinearity", -14, f"max absolute correlation {corr:.2f} is severe")
         add("regularized_linear", "multicollinearity", 14, f"max absolute correlation {corr:.2f} favors shrinkage")
         add("tree_ensemble", "multicollinearity", 2, f"max absolute correlation {corr:.2f} is tolerated by split-based models")
@@ -290,7 +421,7 @@ def score_model_families(
         if regression.outlier_fraction >= policy.outlier_moderate_fraction:
             for method, points_for_method in {"linear": -3, "regularized_linear": 1, "tree_ensemble": 3, "boosted_tree": 1}.items():
                 add(method, "target_robustness", points_for_method, f"target IQR-outlier fraction {regression.outlier_fraction:.2f}")
-        if abs(regression.skewness) >= 2:
+        if abs(regression.skewness) >= policy.high_target_skewness:
             for method, points_for_method in {"linear": -2, "regularized_linear": 0, "tree_ensemble": 1, "boosted_tree": 1}.items():
                 add(method, "target_shape", points_for_method, f"target skewness {regression.skewness:.2f} is large")
 

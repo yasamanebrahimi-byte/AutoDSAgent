@@ -207,7 +207,44 @@ The structural-complexity score combines mixed feature structure, categorical st
 Relationship diagnostics are task-aware. Regression diagnostics may use numeric Pearson/Spearman correlation and binned-target nonlinearity statistics. Classification diagnostics use label-order-invariant class-association measures: eta-squared for numeric predictors and Cramér's V for categorical predictors. Nominal multiclass labels are never treated as an ordered numeric target, and no multiclass classification nonlinearity claim is inferred from arbitrary target codes. Renaming or permuting classification labels without changing class membership does not affect deterministic recommendation evidence.
 
 Policy version 4 records this classification-association correction because it can change persisted compatibility scores and recommendations relative to version 3.
-The weak-association policy band is now task-specific rather than implicitly reusing a correlation interpretation; the current regression and classification cutoffs are both 0.20 pending empirical calibration.
+The weak-association policy band is now task-specific rather than implicitly reusing a correlation interpretation; the current regression and classification cutoffs are both 0.20. All policy thresholds and score contributions are explicit fields on the typed `DeterministicPolicy` configuration, so they can be inspected, versioned, and compared offline.
+
+#### Policy development, calibration, and final evaluation
+
+The repository separates three methodological stages:
+
+```text
+policy-development benchmarks
+    → training-only empirical CV calibration
+    → human-reviewed frozen runtime policy version
+    → untouched final-evaluation benchmarks
+```
+
+The checked-in benchmark registry is versioned (`BENCHMARK_SUITE_VERSION = "2"`) and every case has a permanent `policy_development` or `final_evaluation` role. The current suite is materially broader than the original four-case smoke set and includes real sklearn data plus deterministic synthetic linear, nonlinear, high-dimensional, imbalanced, multiclass, missingness, outlier, interaction, and mixed-type cases. Roles are not reshuffled after results are observed.
+
+Runtime deterministic recommendation uses only the frozen training partition, structural diagnostics, and fixed policy constants. It performs no candidate-model fitting, cross-validation, holdout inspection, LLM call, or calibration-artifact lookup. Compatibility points remain a safety/compatibility prior, not a probability that a family is empirically optimal.
+
+Offline policy calibration is run with:
+
+```powershell
+python -m evaluation.policy_calibration --smoke
+python -m evaluation.policy_calibration
+```
+
+It accepts only `policy_development` cases, freezes the same train/holdout split protocol, computes diagnostics from training rows, and obtains the empirical reference from canonical training-only CV across the supported families. The final holdout is never used for policy selection. The default candidate set is deliberately small: `current`, `nonlinear_sensitive`, `high_dimensional_sensitive`, and `missingness_sensitive`. This is a bounded sensitivity comparison, not Bayesian optimization, AutoML, or learned policy selection.
+
+Calibration ranks candidates using a predefined lexicographic objective: lowest mean normalized regret after averaging repeated seeds within each unique dataset, lowest catastrophic-regret rate, highest top-two empirical-reference inclusion, then lowest policy complexity. It also reports exact-reference match, policy stability under fixed resampling seeds, family-selection distribution, family-collapse warnings, sensitivity bands, and auditable largest-regret cases. The current version is always included and the workflow can conclude `retain_current`; calibration does not automatically rewrite runtime constants.
+
+Frozen final evaluation is a separate command:
+
+```powershell
+python -m evaluation.policy_evaluation --smoke
+python -m evaluation.policy_evaluation
+```
+
+It accepts only `final_evaluation` cases, evaluates the already frozen policy, and reports training-only CV-reference metrics plus final holdout metrics after the decision. Final benchmark results are not used to modify the policy version being evaluated. If final evidence reveals a genuine design flaw, the documented process is to create a new policy version and a new future final benchmark set rather than edit thresholds against the observed final cases.
+
+Calibration artifacts include the policy version, benchmark-suite version, repository commit, random seeds, metric definitions, candidate configurations, aggregate and per-dataset metrics, sensitivity analysis, family distributions, diagnostics, score contributions, and failure cases. The machine-readable files are `policy_calibration.json` and `policy_evaluation.json`; human-readable reports are written alongside them. Infrastructure alone is not an empirical validation claim: such a claim requires actually running calibration and separate final evaluation and recording their results.
 
 ## Evaluation harness
 
@@ -246,8 +283,8 @@ The default local suite needs no network download:
 
 | Task | Cases |
 |---|---|
-| Classification | `breast_cancer`, `wine` |
-| Regression | `diabetes`, `synthetic_regression` |
+| Policy development | `breast_cancer`, `diabetes`, `synthetic_regression`, `synthetic_linear_regression`, `synthetic_nonlinear_regression`, `synthetic_high_dim_regression`, `synthetic_binary_linear`, `synthetic_binary_nonlinear`, `synthetic_imbalanced_classification`, `synthetic_multiclass`, `synthetic_missingness`, `synthetic_outlier_regression` |
+| Final evaluation | `wine`, `digits_subset`, `final_interaction_regression`, `final_low_n_high_p_classification`, `final_mixed_type_classification`, `final_shifted_nonlinear_regression` |
 
 ```powershell
 # Small offline smoke test

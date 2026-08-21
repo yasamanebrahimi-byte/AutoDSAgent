@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from app.schemas import DeterministicRecommendation, Method, TaskType
+from app.deterministic_policy import DeterministicPolicy
 
 
 def semantic_type(series: pd.Series) -> str:
@@ -140,6 +141,8 @@ def deterministic_recommendation(
     question: str,
     target_hint: str | None = None,
     task_type: TaskType | None = None,
+    *,
+    policy: DeterministicPolicy | None = None,
 ) -> DeterministicRecommendation:
     """Recommend a model family from the supplied training-only dataframe.
 
@@ -158,7 +161,7 @@ def deterministic_recommendation(
     )
     from app.preprocessing import requirements_from_records
 
-    policy = DeterministicPolicy()
+    policy = policy or DeterministicPolicy()
     diagnostics = compute_deterministic_diagnostics(
         dataframe,
         target_column,

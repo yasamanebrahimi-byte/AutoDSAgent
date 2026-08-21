@@ -283,7 +283,12 @@ def _relationship_signals(
     return _regression_relationship_signals(dataframe, target_column, numeric_names)
 
 
-def _target_diagnostics(dataframe: pd.DataFrame, target_column: str, task_type: TaskType) -> TargetDiagnostics:
+def _target_diagnostics(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    task_type: TaskType,
+    policy: DeterministicPolicy,
+) -> TargetDiagnostics:
     target = dataframe[target_column].dropna()
     if task_type == "classification":
         # Keep this aggregate distribution label-free.  The deterministic
@@ -313,7 +318,13 @@ def _target_diagnostics(dataframe: pd.DataFrame, target_column: str, task_type: 
     if not np.isfinite(skewness):
         skewness = 0.0
     outliers = _iqr_outlier_fraction(values)
-    heavy_tail = "high" if outliers >= 0.10 else "moderate" if outliers >= 0.05 or abs(skewness) >= 2 else "low"
+    heavy_tail = (
+        "high"
+        if outliers >= policy.target_outlier_high_fraction
+        else "moderate"
+        if outliers >= policy.outlier_moderate_fraction or abs(skewness) >= policy.high_target_skewness
+        else "low"
+    )
     return TargetDiagnostics(
         regression=RegressionTargetDiagnostics(
             variance=max(0.0, variance),
@@ -367,7 +378,7 @@ def compute_deterministic_diagnostics(
     missing_fraction = missing_count / max(feature_count, 1)
     if not missing_count:
         missing_pattern = "none"
-    elif missing_fraction <= 0.25 or max_missing >= 0.50:
+    elif missing_fraction <= policy.concentrated_missing_feature_fraction or max_missing >= 0.50:
         missing_pattern = "concentrated"
     else:
         missing_pattern = "widespread"
@@ -495,7 +506,7 @@ def compute_deterministic_diagnostics(
         structural_complexity_signal=structural_complexity_signal,
         numeric_outlier_feature_fraction=outlier_feature_fraction,
         numeric_outlier_cell_fraction=outlier_cell_fraction,
-        target=_target_diagnostics(dataframe, target_column, task_type),
+        target=_target_diagnostics(dataframe, target_column, task_type, policy),
         marginal_association_strength=max(
             0.0,
             min(1.0, relationship.marginal_association_strength),
