@@ -23,6 +23,12 @@ from app.schemas import (
 )
 
 
+# Bump this when the modeling/reconciliation input contract changes.  The
+# evaluation harness records it beside every trial so a result bundle can be
+# interpreted without preserving provider-specific request metadata.
+PROMPT_SCHEMA_VERSION = "2026-08-21.modeling-reconciliation.v1"
+
+
 T = TypeVar("T", bound=BaseModel)
 
 

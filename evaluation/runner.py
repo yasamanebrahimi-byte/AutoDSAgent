@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +14,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
-from app.llm import OpenAIAgents
+from app.llm import PROMPT_SCHEMA_VERSION, OpenAIAgents
 from app.pipeline import (
     _fallback_agent_plan,
     _fallback_resolution,
@@ -53,6 +55,8 @@ class EvaluationConfig:
     offline: bool = False
     include_perturbations: bool = False
     thresholds: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
+    prompt_schema_version: str = PROMPT_SCHEMA_VERSION
+    repository_commit: str | None = None
 
     def __post_init__(self) -> None:
         if self.repetitions < 1:
@@ -123,6 +127,36 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _frame_digest(frame: pd.DataFrame) -> str:
+    """Hash only the frame supplied to an evaluation stage.
+
+    The empirical-reference cache is keyed by the training frame, never by
+    holdout values.  Including column names and dtypes prevents accidental
+    reuse across incompatible schema representations.
+    """
+
+    digest = hashlib.sha256()
+    digest.update(json.dumps([str(column) for column in frame.columns]).encode("utf-8"))
+    digest.update(json.dumps([str(dtype) for dtype in frame.dtypes]).encode("utf-8"))
+    digest.update(pd.util.hash_pandas_object(frame, index=True).to_numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _repository_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
 
 
 def _failed_checks(result: Any) -> list[dict[str, Any]]:
@@ -213,9 +247,9 @@ def _choose_source(
     training_profile: dict[str, Any],
     case: BenchmarkCase,
     warnings: list[str],
-) -> tuple[AgentPlan, str, str]:
+) -> tuple[AgentPlan, str, str, str, str | None]:
     if plan_factory is not None:
-        return plan_factory(context), "mock", "mock"
+        return plan_factory(context), "mock", "mock", "mock", None
     if config.offline or not agents.available:
         if not config.offline:
             warnings.append("OPENAI_API_KEY is unavailable; this trial used the offline fallback.")
@@ -228,6 +262,8 @@ def _choose_source(
             ),
             "offline_fallback",
             "offline",
+            "offline_fallback" if config.offline else "not_requested_fallback",
+            None,
         )
     try:
         return (
@@ -239,6 +275,8 @@ def _choose_source(
             ),
             "openai",
             agents.model,
+            "succeeded",
+            None,
         )
     except Exception as exc:
         warnings.append(f"modeling agent fallback used: {type(exc).__name__}: {exc}")
@@ -251,6 +289,8 @@ def _choose_source(
             ),
             "offline_fallback",
             agents.model,
+            "failed_fallback",
+            f"{type(exc).__name__}: {exc}",
         )
 
 
@@ -271,8 +311,12 @@ def _run_trial(
     plan_factory: AgentPlanFactory | None,
     reconciliation_factory: ReconciliationFactory | None,
     agents: OpenAIAgents,
+    empirical_reference_cache: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    split_seed = config.seed + case.random_seed + trial_number
+    # Repetitions are stochastic LLM repeats over identical evidence.  The
+    # split seed is therefore a property of the case/experiment, not of the
+    # repetition number.
+    split_seed = config.seed + case.random_seed
     perturbation_seed = split_seed + 1009
     base_frame = case.load()
     split = freeze_supervised_split(
@@ -313,13 +357,25 @@ def _run_trial(
         "benchmark_case": case.name,
         "perturbation_id": perturbation_id,
         "trial": trial_number,
+        "trial_id": f"{case.name}:{perturbation_id}:{trial_number}",
         "split_seed": split_seed,
         "target_column": case.target_column,
         "task_type": case.expected_task_type,
         "question": case.question,
         "training_profile": training_profile,
     }
-    plan, agent_source, agent_model = _choose_source(
+    initial_input_artifact = {
+        "question": case.question,
+        "target_hint": case.target_column,
+        "established_task_type": case.expected_task_type,
+        "training_profile": training_profile,
+        "holdout_included": False,
+        "deterministic_recommendation_included": False,
+        "empirical_reference_included": False,
+        "previous_repetitions_included": False,
+        "prompt_schema_version": config.prompt_schema_version,
+    }
+    plan, agent_source, agent_model, agent_request_status, agent_request_error = _choose_source(
         config=config,
         agents=agents,
         plan_factory=plan_factory,
@@ -479,14 +535,35 @@ def _run_trial(
 
     # This is the only section that performs candidate-family fitting.  It is
     # intentionally after the gate call, so empirical results cannot influence
-    # the runtime decision above.
-    reference = evaluate_empirical_reference(
-        training_frame,
-        case.target_column,
-        case.expected_task_type,
-        training_profile,
-        random_state=split_seed,
+    # the runtime decision above.  Repetitions share this training-only cache
+    # entry because their split, profile, and candidate configuration are
+    # identical.
+    cache_key = json.dumps(
+        {
+            "case": case.name,
+            "task_type": case.expected_task_type,
+            "target_column": case.target_column,
+            "split": split.as_dict(),
+            "training_frame_digest": _frame_digest(training_frame),
+            "candidate_methods": [
+                "linear",
+                "regularized_linear",
+                "tree_ensemble",
+                "boosted_tree",
+            ],
+            "prompt_schema_version": config.prompt_schema_version,
+        },
+        sort_keys=True,
     )
+    if cache_key not in empirical_reference_cache:
+        empirical_reference_cache[cache_key] = evaluate_empirical_reference(
+            training_frame,
+            case.target_column,
+            case.expected_task_type,
+            training_profile,
+            random_state=split_seed,
+        )
+    reference = empirical_reference_cache[cache_key]
     reference = {**reference, "frozen_split_contract": split.as_dict()}
     best_score = reference.get("best_primary_mean")
     agent_family_score = (
@@ -547,6 +624,22 @@ def _run_trial(
     )
     agent_regret = regret(case.expected_task_type, best_score, agent_family_score)
     gated_regret = regret(case.expected_task_type, best_score, gated_family_score)
+    paired_cv_improvement = None
+    if agent_family_score is not None and gated_family_score is not None:
+        paired_cv_improvement = (
+            gated_family_score - agent_family_score
+            if case.expected_task_type == "classification"
+            else agent_family_score - gated_family_score
+        )
+    tolerance = float(config.thresholds["paired_normalized_regret"])
+    if agent_regret is None or gated_regret is None:
+        gate_outcome = "not_comparable"
+    elif gated_regret < agent_regret - tolerance:
+        gate_outcome = "improved"
+    elif gated_regret > agent_regret + tolerance:
+        gate_outcome = "worsened"
+    else:
+        gate_outcome = "tie"
     initial_failure_codes = [failure["code"] for failure in _failed_checks(initial_validation)]
     final_failure_codes = [
         check["code"]
@@ -559,11 +652,22 @@ def _run_trial(
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
         "trial": trial_number,
+        "trial_id": context["trial_id"],
+        "trial_status": "completed",
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": split_seed,
         "test_size": config.test_size,
         "split_contract": split.as_dict(),
         "agent_source": agent_source,
+        "requested_live_trial": not config.offline and plan_factory is None,
         "agent_model": agent_model,
+        "repository_commit": config.repository_commit,
+        "agent_request_status": agent_request_status,
+        "agent_request_error": agent_request_error,
+        "live_request_failed": agent_request_status == "failed_fallback",
+        "generation_settings": {"seed": None, "temperature": None},
+        "prompt_schema_version": config.prompt_schema_version,
+        "agent_initial_input": initial_input_artifact,
         "agent_initial": {
             **initial_fields,
             "reasoning": plan.reasoning,
@@ -587,6 +691,9 @@ def _run_trial(
         "task_disagreement": task_disagreement,
         "method_disagreement": method_disagreement,
         "preprocessing_disagreement": preprocessing_disagreement,
+        "preprocessing_agreement_status": (
+            comparison.get("status") if comparison is not None else "unavailable"
+        ),
         "preprocessing_comparison": comparison,
         "reconciliation_invoked": reconciliation_invoked,
         "reconciliation_status": reconciliation_status,
@@ -611,6 +718,8 @@ def _run_trial(
         "training_allowed": training_allowed,
         "unsafe_plan_intercepted": unsafe_plan_intercepted,
         "proceeded_unchanged": proceeded_unchanged,
+        "gate_changed_initial_plan": final_valid and not proceeded_unchanged,
+        "deterministic_validation_intervened": unsafe_plan_intercepted,
         "empirical_best_method": reference.get("best_method"),
         "empirical_reference_method": reference.get("best_method"),
         "empirical_reference": reference,
@@ -623,6 +732,9 @@ def _run_trial(
         "gated_regret": gated_regret,
         "agent_normalized_regret": normalized_regret(case.expected_task_type, best_score, agent_family_score),
         "gated_normalized_regret": normalized_regret(case.expected_task_type, best_score, gated_family_score),
+        "paired_cv_improvement": paired_cv_improvement,
+        "gate_outcome": gate_outcome,
+        "gate_outcome_tolerance": tolerance,
         "agent_initial_cv": agent_plan_cv,
         "gated_final_cv": gated_plan_cv,
         "agent_initial_holdout_metrics": (agent_holdout or {}).get("holdout_metrics", {}),
@@ -668,6 +780,7 @@ def _run_trial(
             else None
         ),
         "warnings": warnings,
+        "empirical_reference_cache_key": cache_key,
     }
     return _jsonable(record)
 
@@ -677,6 +790,7 @@ def _write_outputs(
     config_payload: dict[str, Any],
     trials: list[dict[str, Any]],
     summary: dict[str, Any],
+    empirical_reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "config.json").write_text(json.dumps(config_payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -684,6 +798,10 @@ def _write_outputs(
         for trial in trials:
             handle.write(json.dumps(trial, sort_keys=True) + "\n")
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    if empirical_reference_cache is not None:
+        (output_dir / "empirical_reference.json").write_text(
+            json.dumps(empirical_reference_cache, indent=2, sort_keys=True), encoding="utf-8"
+        )
     from evaluation.reporting import render_summary_markdown
 
     (output_dir / "summary.md").write_text(
@@ -694,6 +812,75 @@ def _write_outputs(
         "trials": str(output_dir / "trials.jsonl"),
         "summary": str(output_dir / "summary.json"),
         "summary_markdown": str(output_dir / "summary.md"),
+        "empirical_reference": str(output_dir / "empirical_reference.json"),
+    }
+
+
+def _failed_trial_record(
+    case: BenchmarkCase,
+    perturbation: Perturbation | None,
+    trial_number: int,
+    config: EvaluationConfig,
+    error: Exception,
+) -> dict[str, Any]:
+    """Persist an execution failure without inventing a modeling decision."""
+
+    split_seed = config.seed + case.random_seed
+    perturbation_id = perturbation.id if perturbation is not None else "clean"
+    split = freeze_supervised_split(
+        case.load(),
+        case.target_column,
+        case.expected_task_type,
+        test_size=config.test_size,
+        random_state=split_seed,
+    )
+    return {
+        "trial_id": f"{case.name}:{perturbation_id}:{trial_number}",
+        "benchmark_case": case.name,
+        "dataset_source": case.dataset_source,
+        "task_type": case.expected_task_type,
+        "trial": trial_number,
+        "trial_status": "failed",
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "split_seed": split_seed,
+        "split_contract": split.as_dict(),
+        "agent_source": "failed",
+        "requested_live_trial": not config.offline,
+        "agent_model": config.model,
+        "repository_commit": config.repository_commit,
+        "agent_request_status": "failed",
+        "agent_request_error": f"{type(error).__name__}: {error}",
+        "live_request_failed": not config.offline,
+        "prompt_schema_version": config.prompt_schema_version,
+        "agent_initial": None,
+        "agent_initial_valid": None,
+        "deterministic_recommendation": None,
+        "agreement_status": "unavailable",
+        "reconciliation_invoked": False,
+        "reconciliation_status": "not_invoked",
+        "final_valid": None,
+        "training_allowed": False,
+        "unsafe_plan_intercepted": False,
+        "proceeded_unchanged": False,
+        "empirical_reference": None,
+        "candidate_cv_metrics": {},
+        "agent_initial_cv_metric": None,
+        "gated_final_cv_metric": None,
+        "agent_normalized_regret": None,
+        "gated_normalized_regret": None,
+        "paired_cv_improvement": None,
+        "gate_outcome": "not_comparable",
+        "final_method": None,
+        "perturbation_id": perturbation_id,
+        "perturbation": perturbation.as_dict() if perturbation is not None else {
+            "id": "clean",
+            "kind": "clean",
+            "description": "Unperturbed benchmark case.",
+            "expected_validation_codes": [],
+        },
+        "validation_failure_codes": [],
+        "failure_reason": f"{type(error).__name__}: {error}",
+        "warnings": ["Trial execution failed; no model-selection result was recorded."],
     }
 
 
@@ -711,6 +898,7 @@ def run_evaluation(
     case_names: Sequence[str] | None = None,
     agent_plan_factory: AgentPlanFactory | None = None,
     reconciliation_factory: ReconciliationFactory | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
@@ -722,6 +910,7 @@ def run_evaluation(
         offline=offline,
         include_perturbations=include_perturbations,
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
+        repository_commit=_repository_commit(),
     )
     selected_cases = list(cases or default_benchmark_cases())
     if case_names:
@@ -730,28 +919,9 @@ def run_evaluation(
     if not selected_cases:
         raise ValueError("No benchmark cases selected.")
     perturbations = default_perturbations() if include_perturbations else []
-    agents = OpenAIAgents(model=model)
-    trials: list[dict[str, Any]] = []
-    for case in selected_cases:
-        scenario_list: list[Perturbation | None] = [None]
-        scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
-        for perturbation in scenario_list:
-            for trial_number in range(repetitions):
-                trials.append(
-                    _run_trial(
-                        case,
-                        perturbation,
-                        trial_number,
-                        config,
-                        plan_factory=agent_plan_factory,
-                        reconciliation_factory=reconciliation_factory,
-                        agents=agents,
-                    )
-                )
-    summary = summarize_trials(trials, thresholds=config.thresholds)
-    config_payload = {
-        "evaluation_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+    output_path = Path(output_dir).resolve()
+    stable_config = {
+        "config_version": "2026-08-21.evaluation.v2",
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,
@@ -759,12 +929,15 @@ def run_evaluation(
         "test_size": config.test_size,
         "agent_mode": "offline" if config.offline else "live_or_fallback",
         "agent_model_requested": config.model,
-        "agent_source_policy": "openai, offline_fallback, or mock; source is persisted per trial",
+        "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
+        "prompt_schema_version": config.prompt_schema_version,
+        "generation_settings": {"seed": None, "temperature": None},
         "evaluation_settings": {
             "primary_metrics": {"classification": "macro_f1", "regression": "rmse"},
             "candidate_methods": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
             "candidate_selection_data": "frozen training partition only",
             "holdout_data": "final evaluation only",
+            "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor",
         },
         "thresholds": config.thresholds,
         "limitations": [
@@ -772,6 +945,75 @@ def run_evaluation(
             "Empirical reference compares only supported families under this CV procedure.",
             "Offline/mock rows are not evidence about live LLM behavior.",
         ],
+        "repository_commit": config.repository_commit,
     }
-    paths = _write_outputs(Path(output_dir).resolve(), config_payload, trials, summary)
-    return {"output_dir": str(Path(output_dir).resolve()), "paths": paths, "summary": summary}
+    if resume:
+        config_path = output_path / "config.json"
+        trials_path = output_path / "trials.jsonl"
+        if not config_path.is_file() or not trials_path.is_file():
+            raise ValueError("--resume requires an existing evaluation bundle with config.json and trials.jsonl.")
+        existing_config = json.loads(config_path.read_text(encoding="utf-8"))
+        compare_keys = [key for key in stable_config if key != "repository_commit"]
+        mismatches = [key for key in compare_keys if existing_config.get(key) != stable_config.get(key)]
+        if mismatches:
+            raise ValueError(
+                "Existing evaluation configuration is incompatible; refusing to resume: "
+                + ", ".join(mismatches)
+            )
+        config_payload = existing_config
+        trials = [
+            json.loads(line)
+            for line in trials_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        reference_path = output_path / "empirical_reference.json"
+        empirical_reference_cache = (
+            json.loads(reference_path.read_text(encoding="utf-8"))
+            if reference_path.is_file()
+            else {}
+        )
+    else:
+        if (output_path / "config.json").exists():
+            raise ValueError("Output directory already contains an evaluation; use --resume or choose a new directory.")
+        config_payload = {
+            "evaluation_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            **stable_config,
+        }
+        trials = []
+        empirical_reference_cache = {}
+    agents = OpenAIAgents(model=model)
+    completed_trial_ids = {trial.get("trial_id") for trial in trials}
+    for case in selected_cases:
+        scenario_list: list[Perturbation | None] = [None]
+        scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
+        for perturbation in scenario_list:
+            for trial_number in range(repetitions):
+                trial_id = f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:{trial_number}"
+                if trial_id in completed_trial_ids:
+                    continue
+                try:
+                    trial = _run_trial(
+                        case,
+                        perturbation,
+                        trial_number,
+                        config,
+                        plan_factory=agent_plan_factory,
+                        reconciliation_factory=reconciliation_factory,
+                        agents=agents,
+                        empirical_reference_cache=empirical_reference_cache,
+                    )
+                except Exception as exc:
+                    trial = _failed_trial_record(case, perturbation, trial_number, config, exc)
+                trials.append(trial)
+                completed_trial_ids.add(trial_id)
+                _write_outputs(
+                    output_path,
+                    config_payload,
+                    trials,
+                    summarize_trials(trials, thresholds=config.thresholds),
+                    empirical_reference_cache,
+                )
+    summary = summarize_trials(trials, thresholds=config.thresholds)
+    paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
+    return {"output_dir": str(output_path), "paths": paths, "summary": summary}

@@ -190,7 +190,11 @@ See [the demo notes and generated figures](docs/demo.md) for a compact walkthrou
 
 ## Evaluation harness
 
-The repository includes a separate evaluation harness for measuring the value of the validation architecture. It compares three conditions on the same frozen train/holdout partition:
+The repository includes a separate, evaluation-only harness for the central research question:
+
+> Given identical training-only evidence, does deterministic validation and reconciliation improve the safety and quality of an LLM data-science agent's modeling decision?
+
+It compares three auditable conditions:
 
 ```text
 agent_initial  →  the independent proposal before reconciliation
@@ -200,11 +204,60 @@ empirical reference →  post-hoc training-only CV across all supported families
 
 Runtime validation does not search every candidate model before approving a plan. The empirical reference is evaluation-only code and cannot influence the runtime decision. It compares `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree` with the canonical preprocessing builder. Classification uses macro F1 as the primary metric; regression uses RMSE. The holdout is scored only after plans and candidate rankings are frozen.
 
-Run an offline smoke evaluation without an API key:
+The decision sequence is deliberately ordered as:
+
+```text
+establish target/task
+  → freeze train/holdout split
+  → build training-only profile
+  → agent_initial
+  → deterministic recommendation
+  → compare / reconcile
+  → deterministic validation gate
+  → model training
+```
+
+The initial modeling request contains only the question, established target/task, and frozen training-only profile. It does not receive the deterministic recommendation, empirical-reference scores, holdout values, or previous repetitions. Repetitions for a case use the same split seed, split membership, and profile; only the stochastic LLM response is intended to vary. Each trial records the split contract, source, model, timestamp, repository commit, generation settings, prompt/schema version, structured initial and reconciliation responses, validation evidence, empirical CV table, and final holdout metrics.
+
+### Benchmark suite and run presets
+
+The default local suite needs no network download:
+
+| Task | Cases |
+|---|---|
+| Classification | `breast_cancer`, `wine` |
+| Regression | `diabetes`, `synthetic_regression` |
 
 ```powershell
-python -m evaluation.run --offline --case wine --repetitions 1 --output evaluation_results/offline
+# Small offline smoke test
+python -m evaluation.run --offline --case wine --repetitions 1 --output evaluation_results/live_smoke
+
+# Main live study: 10 independent OpenAI responses per case
+python -m evaluation.run --live --repetitions 10 --output evaluation_results/live_main
+
+# Larger research-style study
+python -m evaluation.run --live --repetitions 25 --output evaluation_results/live_extended
 ```
+
+For a live run, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. `--live` is explicit but the default when `--offline` is absent. If credentials are unavailable, the run records `offline_fallback`; if an API request fails and production fallback handles it, the row records that failure separately. Neither fallback nor mock rows are included in OpenAI-only metrics.
+
+Interrupted runs can be continued safely with `--resume` using the same configuration:
+
+```powershell
+python -m evaluation.run --live --repetitions 10 --output evaluation_results/live_main --resume
+```
+
+The harness verifies configuration compatibility, skips completed trial IDs, writes after each completed trial, and refuses to overwrite an existing bundle without `--resume`. `empirical_reference.json` stores the in-run training-only reference cache so repeated identical-evidence trials do not recompute candidate CV.
+
+### Metrics and interpretation
+
+The primary live denominator is `agent_source == "openai"`. The summary separately reports requested live trials, successful OpenAI trials, offline fallbacks, failed executions, provider-request failures, and mock trials. Operational/all-source metrics remain available for safety and pipeline coverage, but conclusions about LLM behavior use the OpenAI-only view.
+
+The empirical reference ranks all four supported families using identical training-only CV folds whenever possible. Classification retains macro F1, balanced accuracy, and accuracy; regression retains RMSE, MAE, and R². The ranking is frozen before either method is scored on the untouched holdout. It is a benchmark under this candidate set and CV design, not an oracle or universal optimum.
+
+For each comparable trial, normalized regret is larger-is-worse: classification regret is `max(0, best_macro_f1 - selected_macro_f1)`; regression regret is `max(0, selected_rmse - best_rmse) / max(abs(best_rmse), 1e-12)`. A gate outcome is `improved`, `worsened`, or `tie` when gated regret differs from initial regret by more than the configured tolerance (`0.02` by default); otherwise it is a tie. Paired CV improvement is `gated_macro_f1 - initial_macro_f1` for classification and `initial_rmse - gated_rmse` for regression, so positive always means gating helped. The summary reports mean, median, standard deviation, counts, method distributions, modal-method frequency, pairwise consistency, reference-match rates, reconciliation sides, and dataset-level breakdowns.
+
+“Potentially unnecessary intervention” is intentionally cautious: the initial plan was valid, the agent and deterministic methods disagreed, the final method changed, and the initial method was within the task-specific reference tolerance. It does not prove that the gate was universally wrong. Holdout results are retained as a descriptive external check, not used to label the gate outcome.
 
 Add the deterministic missing-value, infinity, identifier, target-copy, invalid-regression-target, and classification-feasibility scenarios with:
 
@@ -212,15 +265,7 @@ Add the deterministic missing-value, infinity, identifier, target-copy, invalid-
 python -m evaluation.run --offline --include-perturbations --repetitions 1 --output evaluation_results/perturbations
 ```
 
-For live-agent evidence, configure `OPENAI_API_KEY` and use repeated trials, for example:
-
-```powershell
-python -m evaluation.run --repetitions 5 --output evaluation_results/live
-```
-
-If the key is missing or a live call fails, the row is labeled `offline_fallback`; injected test providers are labeled `mock`. These rows must be filtered out before making claims about actual LLM behavior. Results are written as `config.json`, `trials.jsonl`, `summary.json`, and deterministic `summary.md` under the requested output directory. The summary reports validity, interception, agreement, reconciliation, empirical-reference matches, normalized regret, paired better/worse/tie outcomes, and potentially unnecessary interventions.
-
-The empirical reference is not an oracle or universal optimum: it only ranks the currently supported families under the selected CV procedure. The initial suite is small and local (`breast_cancer`, `wine`, `diabetes`, and a seeded synthetic regression case), and live conclusions require repeated trials. Domain leakage and feature availability still require expert review.
+Results are written as `config.json`, `trials.jsonl`, `summary.json`, `summary.md`, and `empirical_reference.json`. `summary.md` is generated from structured rows, never by an LLM, and includes experiment configuration, trial coverage, OpenAI-only stability, agreement, empirical-reference comparison, gate outcomes, reconciliation, predictive performance, dataset results, safety interceptions, and limitations. Meaningful claims about LLM behavior require successful `openai` trials; offline fallback and mocks are useful for pipeline testing only.
 
 ## Reading a run
 
