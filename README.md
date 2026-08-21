@@ -188,6 +188,40 @@ python scripts/run_demo.py --offline
 
 See [the demo notes and generated figures](docs/demo.md) for a compact walkthrough.
 
+## Evaluation harness
+
+The repository includes a separate evaluation harness for measuring the value of the validation architecture. It compares three conditions on the same frozen train/holdout partition:
+
+```text
+agent_initial  →  the independent proposal before reconciliation
+gated_final    →  the existing deterministic validation/reconciliation path
+empirical reference →  post-hoc training-only CV across all supported families
+```
+
+Runtime validation does not search every candidate model before approving a plan. The empirical reference is evaluation-only code and cannot influence the runtime decision. It compares `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree` with the canonical preprocessing builder. Classification uses macro F1 as the primary metric; regression uses RMSE. The holdout is scored only after plans and candidate rankings are frozen.
+
+Run an offline smoke evaluation without an API key:
+
+```powershell
+python -m evaluation.run --offline --case wine --repetitions 1 --output evaluation_results/offline
+```
+
+Add the deterministic missing-value, infinity, identifier, target-copy, invalid-regression-target, and classification-feasibility scenarios with:
+
+```powershell
+python -m evaluation.run --offline --include-perturbations --repetitions 1 --output evaluation_results/perturbations
+```
+
+For live-agent evidence, configure `OPENAI_API_KEY` and use repeated trials, for example:
+
+```powershell
+python -m evaluation.run --repetitions 5 --output evaluation_results/live
+```
+
+If the key is missing or a live call fails, the row is labeled `offline_fallback`; injected test providers are labeled `mock`. These rows must be filtered out before making claims about actual LLM behavior. Results are written as `config.json`, `trials.jsonl`, `summary.json`, and deterministic `summary.md` under the requested output directory. The summary reports validity, interception, agreement, reconciliation, empirical-reference matches, normalized regret, paired better/worse/tie outcomes, and potentially unnecessary interventions.
+
+The empirical reference is not an oracle or universal optimum: it only ranks the currently supported families under the selected CV procedure. The initial suite is small and local (`breast_cancer`, `wine`, `diabetes`, and a seeded synthetic regression case), and live conclusions require repeated trials. Domain leakage and feature availability still require expert review.
+
 ## Reading a run
 
 The most important files are:

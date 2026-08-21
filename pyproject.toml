@@ -28,7 +28,7 @@ dev = [
 autods-agent = "app.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "evaluation*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

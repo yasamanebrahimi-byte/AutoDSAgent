@@ -50,7 +50,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Lint Python sources
-        run: python -m ruff check app tests scripts
+        run: python -m ruff check app evaluation tests scripts
 
   offline-smoke:
     runs-on: ubuntu-latest
@@ -77,3 +77,11 @@ jobs:
           --question "Estimate disease progression from the supplied measurements."
           --output-dir "${{ runner.temp }}/autods-agent-smoke"
           --offline
+
+      - name: Run evaluation harness smoke test
+        run: >-
+          python -m evaluation.run
+          --offline
+          --case wine
+          --repetitions 1
+          --output "${{ runner.temp }}/autods-agent-evaluation-smoke"
