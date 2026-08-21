@@ -117,6 +117,8 @@ class ClassificationTargetDiagnostics(StrictModel):
     minority_class_fraction: float = Field(ge=0, le=1)
     majority_class_fraction: float = Field(ge=0, le=1)
     imbalance_ratio: float = Field(ge=0)
+    # Keys are stable size ranks (class_1 is the largest class), not source
+    # labels.  Structural diagnostics should not persist arbitrary label names.
     samples_per_class: dict[str, int] = Field(default_factory=dict)
     minimum_class_size: int = Field(ge=0)
 
@@ -174,6 +176,10 @@ class DeterministicDiagnostics(StrictModel):
     numeric_outlier_feature_fraction: float = Field(ge=0, le=1)
     numeric_outlier_cell_fraction: float = Field(ge=0, le=1)
     target: TargetDiagnostics
+    marginal_association_strength: float = Field(default=0.0, ge=0, le=1)
+    class_separation_strength: float = Field(default=0.0, ge=0, le=1)
+    association_measure: str = Field(default="unspecified", min_length=1)
+    nonlinearity_applicable: bool = True
 
 
 class DeterministicScoreContribution(StrictModel):
@@ -198,7 +204,7 @@ class DeterministicRecommendation(StrictModel):
     preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
     reasoning: str = Field(min_length=20, max_length=1200)
     evidence: list[str] = Field(min_length=1, max_length=12)
-    policy_version: str = "3"
+    policy_version: str = "4"
     method_scores: dict[Method, Optional[float]] = Field(default_factory=dict)
     ranked_methods: list[Method] = Field(default_factory=list, max_length=4)
     method_assessments: dict[Method, DeterministicMethodAssessment] = Field(default_factory=dict)

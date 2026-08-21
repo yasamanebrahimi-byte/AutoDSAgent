@@ -37,22 +37,13 @@ def _iqr_outlier_fraction(values: pd.Series) -> float:
     return float(outliers.mean())
 
 
-def _target_numeric(dataframe: pd.DataFrame, target_column: str, task_type: TaskType) -> pd.Series:
-    target = dataframe[target_column]
-    if task_type == "regression":
-        return _finite_numeric(target)
-    values = target.dropna()
-    categories = sorted(values.astype(str).unique().tolist())
-    mapping = {category: float(index) for index, category in enumerate(categories)}
-    return values.astype(str).map(mapping).astype(float)
-
-
-def _binned_signal(feature: pd.Series, target: pd.Series, task_type: TaskType, min_bin_count: int = 8) -> tuple[float, float]:
+def _regression_binned_signal(
+    feature: pd.Series,
+    target: pd.Series,
+    min_bin_count: int = 8,
+) -> tuple[float, float]:
     x = pd.to_numeric(feature, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    if task_type == "regression":
-        y = pd.to_numeric(target, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    else:
-        y = target
+    y = pd.to_numeric(target, errors="coerce").replace([np.inf, -np.inf], np.nan)
     valid = x.notna() & y.notna()
     if int(valid.sum()) < max(4 * min_bin_count, 24):
         return 0.0, 0.0
@@ -66,7 +57,7 @@ def _binned_signal(feature: pd.Series, target: pd.Series, task_type: TaskType, m
         return 0.0, 0.0
     if len(means) < 4:
         return 0.0, 0.0
-    target_scale = float(y.loc[valid].std(ddof=0)) if task_type == "regression" else 1.0
+    target_scale = float(y.loc[valid].std(ddof=0))
     target_scale = max(target_scale, 1e-12)
     range_signal = min(1.0, float(means.max() - means.min()) / (2.0 * target_scale))
     order = np.arange(len(means), dtype=float)
@@ -75,6 +66,59 @@ def _binned_signal(feature: pd.Series, target: pd.Series, task_type: TaskType, m
         monotonicity = 0.0
     nonlinearity = min(1.0, range_signal * (1.0 - monotonicity))
     return nonlinearity, min(1.0, range_signal)
+
+
+def _eta_squared(feature: pd.Series, target: pd.Series) -> float:
+    """Return bounded numeric-feature/nominal-target association.
+
+    This is the correlation-ratio (eta-squared): between-class variation in a
+    numeric feature divided by its total variation.  It only groups by target
+    membership, so class names, dtypes, and ordering cannot affect the value.
+    """
+
+    paired = pd.DataFrame({"x": feature, "target": target}).dropna()
+    if len(paired) < 2 or paired["x"].nunique(dropna=True) <= 1:
+        return 0.0
+    if paired["target"].nunique(dropna=True) <= 1:
+        return 0.0
+    grand_mean = float(paired["x"].mean())
+    ss_total = float(((paired["x"] - grand_mean) ** 2).sum())
+    if not np.isfinite(ss_total) or ss_total <= 0:
+        return 0.0
+    grouped = paired.groupby("target", sort=False, observed=True)["x"].agg(["count", "mean"])
+    ss_between = float(
+        (grouped["count"] * (grouped["mean"] - grand_mean) ** 2).sum()
+    )
+    if not np.isfinite(ss_between):
+        return 0.0
+    return min(1.0, max(0.0, ss_between / ss_total))
+
+
+def _cramers_v(feature: pd.Series, target: pd.Series) -> float:
+    """Return bounded, label-order-invariant categorical association."""
+
+    paired = pd.DataFrame({"feature": feature, "target": target}).dropna()
+    if len(paired) < 2:
+        return 0.0
+    table = pd.crosstab(paired["feature"], paired["target"])
+    observed = table.to_numpy(dtype=float)
+    if observed.shape[0] <= 1 or observed.shape[1] <= 1:
+        return 0.0
+    total = float(observed.sum())
+    if total <= 0 or not np.isfinite(total):
+        return 0.0
+    row_totals = observed.sum(axis=1, keepdims=True)
+    column_totals = observed.sum(axis=0, keepdims=True)
+    expected = row_totals @ column_totals / total
+    valid_expected = expected > 0
+    chi_squared = float(
+        (((observed - expected) ** 2) / np.where(valid_expected, expected, 1.0))[valid_expected].sum()
+    )
+    phi_squared = chi_squared / total
+    denominator = min(observed.shape[0] - 1, observed.shape[1] - 1)
+    if denominator <= 0 or not np.isfinite(phi_squared):
+        return 0.0
+    return min(1.0, max(0.0, float(np.sqrt(phi_squared / denominator))))
 
 
 @dataclass(frozen=True)
@@ -87,17 +131,42 @@ class _RelationshipSignals:
     nonlinear_feature_count: int
     nonlinear_feature_fraction: float
     nonlinearity_heterogeneity: float
+    marginal_association_strength: float
+    class_separation_strength: float
+    association_measure: str
+    nonlinearity_applicable: bool
 
 
-def _relationship_signals(
+def _empty_relationship_signals(
+    *,
+    association_measure: str,
+    nonlinearity_applicable: bool,
+) -> _RelationshipSignals:
+    return _RelationshipSignals(
+        nonlinearity_score=0.0,
+        pearson_spearman_gap=0.0,
+        univariate_signal=0.0,
+        nonlinear_feature_count=0,
+        nonlinear_feature_fraction=0.0,
+        nonlinearity_heterogeneity=0.0,
+        marginal_association_strength=0.0,
+        class_separation_strength=0.0,
+        association_measure=association_measure,
+        nonlinearity_applicable=nonlinearity_applicable,
+    )
+
+
+def _regression_relationship_signals(
     dataframe: pd.DataFrame,
     target_column: str,
-    task_type: TaskType,
     numeric_names: list[str],
 ) -> _RelationshipSignals:
     if not numeric_names:
-        return _RelationshipSignals(0.0, 0.0, 0.0, 0, 0.0, 0.0)
-    target = _target_numeric(dataframe, target_column, task_type)
+        return _empty_relationship_signals(
+            association_measure="regression_pearson_spearman_binned",
+            nonlinearity_applicable=True,
+        )
+    target = _finite_numeric(dataframe[target_column])
     gaps: list[float] = []
     feature_nonlinearity_scores: list[float] = []
     marginal: list[float] = []
@@ -110,7 +179,7 @@ def _relationship_signals(
             if np.isfinite(pearson) and np.isfinite(spearman):
                 gaps.append(min(1.0, abs(pearson - spearman)))
                 marginal.append(min(1.0, max(pearson, spearman)))
-        binned, range_signal = _binned_signal(dataframe[name], target, task_type)
+        binned, range_signal = _regression_binned_signal(dataframe[name], target)
         # Keep one bounded marginal nonlinearity measurement per numeric
         # feature.  The aggregate score below is useful for policy bands, but
         # it must not be reused as if it contained feature-level variation.
@@ -118,7 +187,10 @@ def _relationship_signals(
         if range_signal:
             marginal.append(range_signal)
     if not feature_nonlinearity_scores:
-        return _RelationshipSignals(0.0, 0.0, 0.0, 0, 0.0, 0.0)
+        return _empty_relationship_signals(
+            association_measure="regression_pearson_spearman_binned",
+            nonlinearity_applicable=True,
+        )
     mean_nonlinear = float(np.mean(feature_nonlinearity_scores))
     top_count = max(1, int(np.ceil(len(feature_nonlinearity_scores) * 0.25)))
     top_nonlinear = float(np.mean(sorted(feature_nonlinearity_scores, reverse=True)[:top_count]))
@@ -141,25 +213,97 @@ def _relationship_signals(
         nonlinear_feature_count=int(nonlinear_count),
         nonlinear_feature_fraction=float(nonlinear_count / len(feature_nonlinearity_scores)),
         nonlinearity_heterogeneity=heterogeneity,
+        marginal_association_strength=float(np.mean(marginal)) if marginal else 0.0,
+        class_separation_strength=0.0,
+        association_measure="regression_pearson_spearman_binned",
+        nonlinearity_applicable=True,
     )
+
+
+def _classification_relationship_signals(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    numeric_names: list[str],
+    categorical_names: list[str],
+) -> _RelationshipSignals:
+    associations: list[float] = []
+    numeric_associations = False
+    categorical_associations = False
+    target = dataframe[target_column]
+    for name in numeric_names:
+        associations.append(_eta_squared(dataframe[name], target))
+        numeric_associations = True
+    for name in categorical_names:
+        associations.append(_cramers_v(dataframe[name], target))
+        categorical_associations = True
+    if numeric_associations and categorical_associations:
+        measure = "classification_eta_squared_and_cramers_v"
+    elif numeric_associations:
+        measure = "classification_eta_squared"
+    elif categorical_associations:
+        measure = "classification_cramers_v"
+    else:
+        measure = "classification_nominal_association"
+    if not associations:
+        return _empty_relationship_signals(
+            association_measure=measure,
+            nonlinearity_applicable=False,
+        )
+    return _RelationshipSignals(
+        # Eta-squared and Cramer's V establish marginal class association, not
+        # linearity or nonlinearity.  Keep the latter neutral for nominal
+        # multiclass targets rather than inventing a target ordering.
+        nonlinearity_score=0.0,
+        pearson_spearman_gap=0.0,
+        univariate_signal=float(np.mean(associations)),
+        nonlinear_feature_count=0,
+        nonlinear_feature_fraction=0.0,
+        nonlinearity_heterogeneity=0.0,
+        marginal_association_strength=float(np.mean(associations)),
+        class_separation_strength=max(associations, default=0.0),
+        association_measure=measure,
+        nonlinearity_applicable=False,
+    )
+
+
+def _relationship_signals(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    task_type: TaskType,
+    numeric_names: list[str],
+    categorical_names: list[str] | None = None,
+) -> _RelationshipSignals:
+    if task_type == "classification":
+        return _classification_relationship_signals(
+            dataframe,
+            target_column,
+            numeric_names,
+            categorical_names or [],
+        )
+    return _regression_relationship_signals(dataframe, target_column, numeric_names)
 
 
 def _target_diagnostics(dataframe: pd.DataFrame, target_column: str, task_type: TaskType) -> TargetDiagnostics:
     target = dataframe[target_column].dropna()
     if task_type == "classification":
-        counts = target.astype(str).value_counts().sort_index()
-        values = counts.to_numpy(dtype=float)
+        # Keep this aggregate distribution label-free.  The deterministic
+        # policy needs class sizes, not arbitrary class names or their order.
+        raw_counts = target.value_counts(sort=False)
+        raw_counts = raw_counts[raw_counts > 0]
+        values = np.sort(raw_counts.to_numpy(dtype=float))[::-1]
         total = max(float(values.sum()), 1.0)
         minimum = int(values.min()) if len(values) else 0
         majority = float(values.max() / total) if len(values) else 0.0
         minority = float(values.min() / total) if len(values) else 0.0
         return TargetDiagnostics(
             classification=ClassificationTargetDiagnostics(
-                classes=int(len(counts)),
+                classes=int(len(values)),
                 minority_class_fraction=minority,
                 majority_class_fraction=majority,
                 imbalance_ratio=float(values.max() / max(values.min(), 1.0)) if len(values) else 0.0,
-                samples_per_class={str(key): int(value) for key, value in counts.items()},
+                samples_per_class={
+                    f"class_{index + 1}": int(value) for index, value in enumerate(values)
+                },
                 minimum_class_size=minimum,
             )
         )
@@ -257,7 +401,13 @@ def compute_deterministic_diagnostics(
     max_corr = max(pair_values, default=0.0)
     high_pairs = sum(value >= policy.high_correlation_threshold for value in pair_values)
     high_pair_fraction = high_pairs / max(len(pair_values), 1)
-    relationship = _relationship_signals(dataframe, target_column, task_type, numeric_names)
+    relationship = _relationship_signals(
+        dataframe,
+        target_column,
+        task_type,
+        numeric_names,
+        categorical_names,
+    )
     nonlinearity = relationship.nonlinearity_score
     pearson_spearman_gap = relationship.pearson_spearman_gap
     univariate_signal = relationship.univariate_signal
@@ -271,7 +421,12 @@ def compute_deterministic_diagnostics(
     heterogeneity = relationship.nonlinearity_heterogeneity
     mixed_signal = 1.0 if numeric_names and categorical_names else 0.0
     categorical_signal = min(1.0, len(categorical_names) / 3.0)
-    weak_univariate = 1.0 if univariate_signal < 0.20 and usable >= 3 else 0.0
+    weak_association_threshold = (
+        policy.classification_weak_association_threshold
+        if task_type == "classification"
+        else policy.regression_weak_association_threshold
+    )
+    weak_univariate = 1.0 if univariate_signal < weak_association_threshold and usable >= 3 else 0.0
     nonlinear_share = relationship.nonlinear_feature_fraction
     # This is a bounded structural prior for model-family compatibility.  It
     # summarizes several observable reasons a simple additive linear family
@@ -341,4 +496,11 @@ def compute_deterministic_diagnostics(
         numeric_outlier_feature_fraction=outlier_feature_fraction,
         numeric_outlier_cell_fraction=outlier_cell_fraction,
         target=_target_diagnostics(dataframe, target_column, task_type),
+        marginal_association_strength=max(
+            0.0,
+            min(1.0, relationship.marginal_association_strength),
+        ),
+        class_separation_strength=max(0.0, min(1.0, relationship.class_separation_strength)),
+        association_measure=relationship.association_measure,
+        nonlinearity_applicable=relationship.nonlinearity_applicable,
     )

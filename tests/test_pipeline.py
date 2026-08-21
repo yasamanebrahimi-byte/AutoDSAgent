@@ -35,8 +35,8 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
         "boosted_tree",
     }
     assert deterministic["diagnostics"]["rows"] == decision["split_contract"]["train_rows"]
-    assert deterministic["policy_version"] == "3"
-    assert decision["deterministic_policy_version"] == "3"
+    assert deterministic["policy_version"] == "4"
+    assert decision["deterministic_policy_version"] == "4"
     deterministic_validation = decision["validation"]["deterministic_validation"]
     assert deterministic_validation["overall_status"] == "passed"
     assert {check["code"] for check in deterministic_validation["checks"]} >= {

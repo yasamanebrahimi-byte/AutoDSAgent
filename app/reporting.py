@@ -236,6 +236,8 @@ Method-family compatibility scores (bounded policy points, not probabilities):
 
 Training-only diagnostics: <code>{json.dumps(diagnostics, sort_keys=True)}</code>.
 
+{"Classification diagnostics use label-order-invariant eta-squared/Cramér's V class-association measures and do not treat nominal class labels as ordered numeric values." if deterministic.task_type == "classification" else "Regression diagnostics use numeric-target correlation, rank, and binned-target evidence."}
+
 The structural-complexity score is a bounded training-only compatibility heuristic; it summarizes observable feature structure and does not prove the presence of statistical feature interactions.
 
 Selected-family score contributions:

@@ -21,14 +21,14 @@ MAX_ONE_HOT_FEATURES = 4000
 
 @dataclass(frozen=True)
 class DeterministicPolicy:
-    """Named thresholds and score bands for policy version 3.
+    """Named thresholds and score bands for policy version 4.
 
     Compatibility scores are bounded policy points, not probabilities.  The
     thresholds are deliberately coarse and documented so a reviewer can see
     which structural observation caused a score change.
     """
 
-    version: str = "3"
+    version: str = "4"
     high_correlation_threshold: float = 0.80
     severe_correlation_threshold: float = 0.90
     low_sample_feature_ratio: float = 3.0
@@ -41,6 +41,10 @@ class DeterministicPolicy:
     widespread_missing_feature_fraction: float = 0.40
     nonlinear_moderate_threshold: float = 0.15
     nonlinear_high_threshold: float = 0.35
+    # These thresholds are explicit by task because eta-squared/Cramer's V
+    # and regression correlation evidence are bounded but not interchangeable.
+    regression_weak_association_threshold: float = 0.20
+    classification_weak_association_threshold: float = 0.20
     # The structural-complexity score is normalized by weights that sum to
     # one, so these coarse low/moderate/high bands remain interpretable.
     structural_complexity_moderate_threshold: float = 0.30
@@ -214,20 +218,21 @@ def score_model_families(
         add("regularized_linear", "multicollinearity", 4, f"max absolute correlation {corr:.2f} is limited")
 
     signal = diagnostics.nonlinearity_signal
-    if signal == "high":
-        add("linear", "nonlinearity", -10, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
-        add("regularized_linear", "nonlinearity", -8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
-        add("tree_ensemble", "nonlinearity", 15, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
-        add("boosted_tree", "nonlinearity", 17, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
-    elif signal == "moderate":
-        add("linear", "nonlinearity", -3, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
-        add("tree_ensemble", "nonlinearity", 10, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
-        add("boosted_tree", "nonlinearity", 8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
-    else:
-        add("linear", "nonlinearity", 8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
-        add("regularized_linear", "nonlinearity", 5, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
-        add("tree_ensemble", "nonlinearity", 1, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
-        add("boosted_tree", "nonlinearity", -2, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
+    if diagnostics.nonlinearity_applicable:
+        if signal == "high":
+            add("linear", "nonlinearity", -10, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
+            add("regularized_linear", "nonlinearity", -8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
+            add("tree_ensemble", "nonlinearity", 15, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
+            add("boosted_tree", "nonlinearity", 17, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is high")
+        elif signal == "moderate":
+            add("linear", "nonlinearity", -3, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
+            add("tree_ensemble", "nonlinearity", 10, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
+            add("boosted_tree", "nonlinearity", 8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is moderate")
+        else:
+            add("linear", "nonlinearity", 8, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
+            add("regularized_linear", "nonlinearity", 5, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
+            add("tree_ensemble", "nonlinearity", 1, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
+            add("boosted_tree", "nonlinearity", -2, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
 
     complexity = diagnostics.structural_complexity_score
     if complexity >= policy.structural_complexity_high_threshold:
@@ -236,12 +241,22 @@ def score_model_families(
         points = {"linear": -2, "regularized_linear": 0, "tree_ensemble": 4, "boosted_tree": 4}
     else:
         points = {"linear": 2, "regularized_linear": 2, "tree_ensemble": 0, "boosted_tree": 0}
+    if diagnostics.target.classification is not None:
+        complexity_observation = (
+            f"structural complexity score {complexity:.2f} reflects mixed/categorical structure "
+            "and weak marginal class association; it does not assert multiclass nonlinearity"
+        )
+    else:
+        complexity_observation = (
+            f"structural complexity score {complexity:.2f} suggests heterogeneous or nonlinear "
+            "feature relationships"
+        )
     for method, points_for_method in points.items():
         add(
             method,
             "structural_complexity",
             points_for_method,
-            f"structural complexity score {complexity:.2f} suggests heterogeneous or nonlinear feature relationships",
+            complexity_observation,
         )
 
     if diagnostics.overall_missing_fraction >= policy.high_missing_fraction:
@@ -279,7 +294,7 @@ def score_model_families(
             for method, points_for_method in {"linear": -2, "regularized_linear": 0, "tree_ensemble": 1, "boosted_tree": 1}.items():
                 add(method, "target_shape", points_for_method, f"target skewness {regression.skewness:.2f} is large")
 
-    if diagnostics.rows >= policy.boosted_tree_preferred_samples and signal in {"moderate", "high"}:
+    if diagnostics.nonlinearity_applicable and diagnostics.rows >= policy.boosted_tree_preferred_samples and signal in {"moderate", "high"}:
         add("boosted_tree", "boosted_tree_scale_signal", 8, "sample size and nonlinear signal support a higher-capacity structured fit")
         add("tree_ensemble", "boosted_tree_scale_signal", 3, "sample size and nonlinear signal also support an ensemble")
 

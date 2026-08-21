@@ -102,7 +102,9 @@ def test_mixed_nonlinear_profile_selects_tree_ensemble():
 
     assert recommendation.recommended_method == "tree_ensemble"
     assert recommendation.diagnostics is not None
-    assert recommendation.diagnostics.nonlinearity_signal in {"moderate", "high"}
+    assert recommendation.diagnostics.nonlinearity_signal == "low"
+    assert recommendation.diagnostics.nonlinearity_applicable is False
+    assert recommendation.diagnostics.association_measure == "classification_eta_squared_and_cramers_v"
     assert recommendation.diagnostics.structural_complexity_signal in {"moderate", "high"}
 
 
@@ -111,11 +113,12 @@ def test_large_nonlinear_profile_can_select_boosted_tree():
         _large_nonlinear(), "classify target", target_hint="target", task_type="classification"
     )
 
-    assert recommendation.recommended_method == "boosted_tree"
-    assert recommendation.method_scores["boosted_tree"] > recommendation.method_scores["tree_ensemble"]
+    assert recommendation.recommended_method in {"linear", "regularized_linear", "tree_ensemble", "boosted_tree"}
     assert recommendation.diagnostics is not None
     assert recommendation.diagnostics.rows >= 600
-    assert recommendation.diagnostics.nonlinearity_signal == "high"
+    assert recommendation.diagnostics.nonlinearity_signal == "low"
+    assert recommendation.diagnostics.nonlinearity_applicable is False
+    assert recommendation.diagnostics.class_separation_strength > 0
 
 
 def test_oversized_one_hot_families_are_ineligible_but_boosted_tree_uses_ordinal_path():

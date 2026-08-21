@@ -210,12 +210,22 @@ def deterministic_recommendation(
         if contribution.points > 0
     ][:3]
     reason_detail = "; ".join(positive_reasons) or "no positive compatibility factor dominated"
+    if task_type == "classification":
+        relationship_summary = (
+            f"nominal class association measured with {diagnostics.association_measure}; "
+            f"maximum class-separation strength was {diagnostics.class_separation_strength:.2f}"
+        )
+    else:
+        relationship_summary = (
+            f"{diagnostics.nonlinearity_signal} numeric-target nonlinearity and "
+            f"{diagnostics.association_measure}"
+        )
     reason = (
         f"The training-only deterministic policy ranked {method} highest with "
         f"compatibility score {top_score if top_score is not None else 'unavailable'} "
         f"({confidence} confidence). It considered {diagnostics.usable_features} usable features "
         f"across {diagnostics.rows} training rows, estimated {diagnostics.effective_features_estimate} "
-        f"post-one-hot features, and observed {diagnostics.nonlinearity_signal} nonlinearity. "
+        f"post-one-hot features, and observed {relationship_summary}. "
         f"The structural-complexity signal was {diagnostics.structural_complexity_signal} "
         f"({diagnostics.structural_complexity_score:.2f}). "
         f"Key positive factors: {reason_detail}. Compatibility scores are policy rankings, not probabilities."
@@ -230,7 +240,13 @@ def deterministic_recommendation(
         f"overall_missing_fraction={diagnostics.overall_missing_fraction:.3f}",
         f"max_abs_numeric_correlation={diagnostics.max_abs_numeric_correlation:.3f}",
         (
+            f"association_measure={diagnostics.association_measure}; "
+            f"marginal_association_strength={diagnostics.marginal_association_strength:.3f}; "
+            f"class_separation_strength={diagnostics.class_separation_strength:.3f}"
+        ),
+        (
             f"nonlinearity_signal={diagnostics.nonlinearity_signal}; "
+            f"nonlinearity_applicable={diagnostics.nonlinearity_applicable}; "
             f"nonlinear_feature_fraction={diagnostics.nonlinear_feature_fraction:.3f}; "
             f"nonlinearity_heterogeneity={diagnostics.nonlinearity_heterogeneity:.3f}; "
             f"structural_complexity={diagnostics.structural_complexity_signal}"
@@ -238,7 +254,6 @@ def deterministic_recommendation(
         ),
         f"selected_score={top_score if top_score is not None else 'ineligible'}",
         f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}",
-        f"confidence={confidence}",
     ]
     return DeterministicRecommendation(
         target_column=target_column,
