@@ -4,10 +4,10 @@ AutoDS Agent is a compact, auditable agent-vs-deterministic machine-learning wor
 
 The central idea is simple:
 
-1. An independent planning agent reads the question and a dataset profile and proposes a target, task type, preprocessing, and model family.
-2. A deterministic recommender independently inspects the schema, missingness, cardinality, and dataset size and proposes its own plan.
-3. A validation gate compares both plans before any model is fit, then applies the same deterministic feasibility and leakage contract even when the plans agree.
-4. Agreement records a provisional choice. Disagreement triggers a second agent call that investigates the deterministic recommendation and records a justified final choice; either path must pass deterministic validation.
+1. Establish the target and task type. A supplied target is validated directly; an omitted target is inferred from the question and dataset schema.
+2. Freeze one deterministic supervised train/holdout partition using positional row membership, the configured seed, and stratification when required.
+3. Give the independent modeling agent and deterministic recommender the same compact profile built from training rows only.
+4. A validation gate compares both independent plans before any model is fit. Disagreement triggers a second agent call that investigates the deterministic recommendation using the same training-only evidence.
 5. Specialist calls help plan cleaning, interpret computed EDA, and write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
@@ -59,26 +59,39 @@ The important control flow is:
 CSV + question
     |
     v
-profile -> independent agent plan
+target/task establishment
+    |
+    v
+freeze supervised train/holdout partition
+    |
+    +---- holdout locked until final evaluation
+    |
+    v
+training-only profile
     |                  \
+    +--> independent modeling agent
     |                   \ mismatch
-    v                    -> reconciliation agent
-deterministic plan ----/
+    +--> deterministic recommender -> reconciliation agent
     |
     v
 VALIDATION GATE
     |
     v
-clean -> EDA -> approved training -> report + artifacts
+training-only CV + preprocessing
+    |
+    v
+one final holdout evaluation -> report + artifacts
 ```
 
-The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable data characteristics. Once the gate approves a method, a separate deterministic contract still has to prove that training may safely proceed. Agreement between two recommenders is not proof of model quality or data validity.
+Target establishment is the one unavoidable pre-split stage: the target and task are needed to construct the correct supervised split, especially a stratified classification split. It does not choose a model family. After target/task establishment, the holdout membership is frozen before any model-family, preprocessing, reconciliation, or model-selection reasoning, and those decisions use training-partition evidence only. The holdout is reserved for the final evaluation.
+
+The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable training-partition characteristics. Once the gate approves a method, a separate deterministic contract still has to prove that training may safely proceed. Agreement between two recommenders is not proof of model quality or data validity.
 
 If the deterministic recommender fails, the validation gate remains incomplete and the run stops before training; the agent plan is retained for auditability, but it is never copied into a deterministic recommendation.
 
 ## Deterministic validation boundary
 
-`app/validation.py` is the hard boundary before fitting. It evaluates the approved target, task, method, feature matrix, holdout fraction, and cross-validation strategy against the actual dataframe. Every check has a stable code, pass/fail status, compact evidence, and an actionable message; the evidence is saved in `decision.json` and repeated in `modeling.json` for successful runs.
+`app/validation.py` is the hard boundary before fitting. It evaluates the approved target, task, method, feature matrix, frozen positional membership, holdout fraction, and cross-validation strategy against the actual dataframe. Every check has a stable code, pass/fail status, compact evidence, and an actionable message; the evidence is saved in `decision.json` and repeated in `modeling.json` for successful runs. The split contract records a source-data fingerprint and digests of the train/holdout positions, so reproduction fails if the source data changes or a different partition would be constructed.
 
 The contract stops training when:
 
@@ -95,7 +108,7 @@ Name-based indicators such as a feature containing the target name are recorded 
 
 ## Preprocessing contract and validation gate
 
-Structural cleaning and learned preprocessing are intentionally separate. The cleaning plan may trim strings, coerce numeric strings, remove exact duplicates, drop all-null or constant columns, and remove rows with missing targets. These operations happen before the modeling view is validated. Imputation, scaling, categorical encoding, and any other learned transformation are never cleaning actions; they are fitted inside the scikit-learn pipeline after the train/holdout split and inside every cross-validation fold.
+Structural cleaning and learned preprocessing are intentionally separate. The cleaning plan is selected from the training-only profile and may trim strings, coerce numeric strings, remove exact duplicates, drop all-null or constant columns, and remove rows with missing targets. The same deterministic structural actions are applied with original row positions carried through, so validation and fitting can verify the frozen membership after cleaning. Imputation, scaling, categorical encoding, and any other learned transformation are never cleaning actions; they are fitted inside the scikit-learn pipeline after the train/holdout split and inside every cross-validation fold. Global deterministic normalization is safe to apply consistently; training-derived structural decisions use training evidence; learned preprocessing is always fit inside the training pipeline.
 
 The modeling agent and deterministic recommender independently return the typed `PreprocessingContract` persisted in `decision.json`. Its compact vocabulary includes numeric and categorical imputation, numeric scaling, one-hot or ordinal encoding, safe unknown-category handling, infinity handling, identifier/high-cardinality/text/datetime policies, and the invariant `fit_inside_pipeline=true`. Known legacy names are accepted only as an allow-listed migration and are serialized back to the typed object; arbitrary transformation names and Python code are rejected.
 
@@ -181,6 +194,8 @@ The most important files are:
 
 - `decision.json`: independent plan, deterministic plan, final gate status, reconciliation evidence, and every deterministic invariant check.
 - `profile.json`: compact dataset facts supplied to the agents.
+- `planning_profile.json`: the compact profile supplied to modeling and reconciliation, built from frozen training rows only.
+- `split_contract` in `decision.json`: target/task, seed, holdout policy, source fingerprint, and train/holdout position digests.
 - `cleaning.json`: requested and applied structural actions.
 - `eda.json`: deterministic EDA values plus agent findings and plot paths.
 - `modeling.json`: selected model, CV metrics, holdout metrics, feature handling, and artifact path.

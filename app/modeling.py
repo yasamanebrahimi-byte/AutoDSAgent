@@ -28,7 +28,12 @@ from sklearn.pipeline import Pipeline
 
 from app.preprocessing import build_preprocessor
 from app.schemas import Method, PreprocessingContract, TaskType
-from app.validation import modeling_arrays, validate_training_plan
+from app.validation import (
+    FrozenSplit,
+    modeling_arrays,
+    validated_row_positions,
+    validate_training_plan,
+)
 
 
 def fit_selected_model(
@@ -41,6 +46,8 @@ def fit_selected_model(
     random_state: int = 42,
     feature_columns: Sequence[str] | None = None,
     preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
+    split: FrozenSplit | None = None,
+    row_positions: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     validation = validate_training_plan(
         dataframe,
@@ -51,6 +58,8 @@ def fit_selected_model(
         random_state=random_state,
         feature_columns=feature_columns,
         preprocessing=preprocessing,
+        split=split,
+        row_positions=row_positions,
     )
     validation.raise_if_failed()
     frame, target = modeling_arrays(dataframe, validation)
@@ -68,14 +77,25 @@ def fit_selected_model(
         categorical_features,
         method,
     )
-    stratify = target if task_type == "classification" else None
-    X_train, X_test, y_train, y_test = train_test_split(
-        frame,
-        target,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=stratify,
-    )
+    if split is None:
+        stratify = target if task_type == "classification" else None
+        X_train, X_test, y_train, y_test = train_test_split(
+            frame,
+            target,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=stratify,
+        )
+    else:
+        current_positions = validated_row_positions(dataframe, validation, row_positions)
+        train_mask = np.isin(current_positions, np.asarray(split.train_row_positions, dtype=int))
+        holdout_mask = np.isin(current_positions, np.asarray(split.holdout_row_positions, dtype=int))
+        if not np.all(train_mask | holdout_mask) or np.any(train_mask & holdout_mask):
+            raise ValueError("The validated rows do not resolve to the frozen train/holdout membership.")
+        X_train = frame.loc[train_mask].copy()
+        X_test = frame.loc[holdout_mask].copy()
+        y_train = target.loc[train_mask].copy()
+        y_test = target.loc[holdout_mask].copy()
     if task_type == "classification":
         cv_folds = int(validation.split["cv_folds"])
         splitter: Any = StratifiedKFold(

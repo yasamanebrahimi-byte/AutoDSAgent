@@ -28,7 +28,7 @@ What happened instead?
 
 - OS:
 - Python version:
-- Run method: local, Docker Compose, or CI
+- Run method: offline CLI, API-backed CLI, or CI
 
 ## Additional Context
 

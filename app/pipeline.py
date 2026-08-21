@@ -11,6 +11,7 @@ import pandas as pd
 from app.deterministic import (
     apply_cleaning,
     deterministic_recommendation,
+    establish_target_task,
     eda_summary,
     make_plots,
     profile_dataframe,
@@ -29,10 +30,13 @@ from app.schemas import (
 )
 from app.validation import (
     DeterministicRecommendationUnavailable,
+    FrozenSplit,
     InvariantViolation,
     ValidationResult,
+    freeze_supervised_split,
     prepare_validated_frame,
     training_profile_frame,
+    validated_row_positions,
     validate_training_plan,
 )
 
@@ -62,15 +66,6 @@ def run_analysis(
 
     profile = profile_dataframe(dataframe)
     write_json(run_dir / "profile.json", profile)
-    planning_frame = training_profile_frame(
-        dataframe,
-        target_column,
-        None,
-        test_size=test_size,
-        random_state=random_state,
-    )
-    planning_profile = profile_dataframe(planning_frame)
-    write_json(run_dir / "planning_profile.json", planning_profile)
 
     agents = OpenAIAgents(api_key=api_key, model=model)
     warnings: list[str] = []
@@ -78,6 +73,11 @@ def run_analysis(
     agent_plan: AgentPlan | None = None
     deterministic: DeterministicRecommendation | None = None
     validation: dict[str, Any] | None = None
+    planning_frame: pd.DataFrame | None = None
+    planning_profile: dict[str, Any] | None = None
+    split: FrozenSplit | None = None
+    established_target: str | None = None
+    established_task: str | None = None
     decision_payload: dict[str, Any] = {
         "agent_plan": None,
         "deterministic_recommendation": None,
@@ -87,21 +87,79 @@ def run_analysis(
         "gate_completed_before_training": False,
         "validation_gate_status": "not_completed",
         "model_training_occurred": False,
+        "holdout_policy": {
+            "frozen_before_modeling_recommendations": True,
+            "planning_data": "training_partition_only",
+            "holdout_used_for": "final_evaluation_only",
+        },
+        "cleaning_policy": {
+            "decision_evidence": "training_partition_only",
+            "structural_actions": "applied_with_original_row_positions_preserved",
+            "learned_preprocessing": "fit_inside_training_pipeline_only",
+        },
     }
     try:
+        # Target/task establishment is the one deliberately pre-split stage.
+        # No model family or preprocessing recommendation is made here.
+        try:
+            established_target, established_task = establish_target_task(
+                dataframe,
+                question,
+                target_column,
+            )
+        except Exception as exc:
+            raise InvariantViolation(
+                f"[target_task_establishment_failed] Could not establish a valid target/task before freezing the holdout: {exc}"
+            ) from exc
+        split = freeze_supervised_split(
+            dataframe,
+            established_target,
+            established_task,
+            test_size=test_size,
+            random_state=random_state,
+        )
+        planning_frame = training_profile_frame(
+            dataframe,
+            established_target,
+            established_task,
+            test_size=test_size,
+            random_state=random_state,
+            split=split,
+        )
+        planning_profile = profile_dataframe(planning_frame)
+        write_json(run_dir / "planning_profile.json", planning_profile)
+        decision_payload["target_establishment"] = {
+            "target_column": established_target,
+            "task_type": established_task,
+            "target_source": "user_supplied" if target_column else "deterministic_schema_and_question",
+            "completed_before_holdout_freeze": True,
+        }
+        decision_payload["split_contract"] = split.as_dict()
         agent_plan = _call_or_fallback(
             "modeling",
-            lambda: agents.modeling_plan(planning_profile, question, target_column),
-            lambda: _fallback_agent_plan(planning_profile, question, target_column),
+            lambda: agents.modeling_plan(
+                planning_profile,
+                question,
+                established_target,
+                established_task,
+            ),
+            lambda: _fallback_agent_plan(
+                planning_profile,
+                question,
+                established_target,
+                established_task,
+            ),
             warnings,
             agent_sources,
             offline=offline,
         )
+        _ensure_established_target_task(agent_plan, established_target, established_task)
         deterministic = _deterministic_recommendation_or_fail(
             planning_frame,
             question,
-            target_column,
+            established_target,
             warnings,
+            task_type=established_task,
         )
         validation = _validate_before_training(
             agents,
@@ -116,6 +174,10 @@ def run_analysis(
             test_size=test_size,
             random_state=random_state,
             reconciliation_profile=planning_profile,
+            split=split,
+            row_positions=list(range(len(dataframe))),
+            established_target=established_target,
+            established_task=established_task,
         )
         decision_payload.update(
             {
@@ -135,11 +197,22 @@ def run_analysis(
             agent_sources,
             offline=offline,
         )
+        row_position_column = "__autods_row_position__"
+        if row_position_column in dataframe.columns:
+            raise InvariantViolation(
+                f"The reserved row-position column '{row_position_column}' is already present in the dataset."
+            )
+        cleaning_input = dataframe.copy()
+        cleaning_input[row_position_column] = range(len(cleaning_input))
         cleaned, cleaning_log = apply_cleaning(
-            dataframe,
+            cleaning_input,
             selected_target,
             list(cleaning_plan.actions),
+            row_position_column=row_position_column,
         )
+        cleaned_row_positions = cleaned.pop(row_position_column).to_numpy(dtype=int)
+        cleaning_log["original_shape"] = [int(dataframe.shape[0]), int(dataframe.shape[1])]
+        cleaning_log["cleaned_shape"] = [int(cleaned.shape[0]), int(cleaned.shape[1])]
         post_cleaning_result = validate_training_plan(
             cleaned,
             selected_target,
@@ -148,6 +221,8 @@ def run_analysis(
             test_size=test_size,
             random_state=random_state,
             preprocessing=validation["approved_preprocessing"],
+            split=split,
+            row_positions=cleaned_row_positions,
         )
         post_cleaning_result.raise_if_failed()
         validation["pre_cleaning_deterministic_validation"] = validation[
@@ -155,6 +230,11 @@ def run_analysis(
         ]
         validation["deterministic_validation"] = post_cleaning_result.as_dict()
         validation["validated_after_cleaning"] = True
+        cleaned_row_positions = validated_row_positions(
+            cleaned,
+            post_cleaning_result,
+            cleaned_row_positions,
+        )
         cleaned = prepare_validated_frame(cleaned, post_cleaning_result)
         cleaning_log["deterministic_target_rows_removed"] = post_cleaning_result.target_rows_removed
         cleaning_log["removed_rows"] += post_cleaning_result.target_rows_removed
@@ -197,6 +277,8 @@ def run_analysis(
             output_dir=run_dir / "model",
             test_size=test_size,
             random_state=random_state,
+            split=split,
+            row_positions=cleaned_row_positions,
         )
         write_json(run_dir / "modeling.json", modeling)
         decision_payload["model_training_occurred"] = True
@@ -339,6 +421,10 @@ def _validate_before_training(
     test_size: float = 0.2,
     random_state: int = 42,
     reconciliation_profile: dict[str, Any] | None = None,
+    split: FrozenSplit | None = None,
+    row_positions: list[int] | None = None,
+    established_target: str | None = None,
+    established_task: str | None = None,
 ) -> dict[str, Any]:
     requirements = None
     if dataframe is not None:
@@ -406,6 +492,13 @@ def _validate_before_training(
         checks = resolution.checks
         status = "disagreement_resolved"
 
+    if established_target is not None and (
+        selected_target != established_target or selected_task != established_task
+    ):
+        raise InvariantViolation(
+            "[established_target_task_is_immutable] Reconciliation cannot change the target/task after the supervised holdout is frozen."
+        )
+
     if dataframe is not None:
         deterministic_validation = validate_training_plan(
             dataframe,
@@ -415,6 +508,8 @@ def _validate_before_training(
             test_size=test_size,
             random_state=random_state,
             preprocessing=selected_preprocessing,
+            split=split,
+            row_positions=row_positions,
         )
         if requirements is not None:
             deterministic_validation.add_check(
@@ -531,9 +626,10 @@ def _deterministic_recommendation_or_fail(
     question: str,
     target_hint: str | None,
     warnings: list[str],
+    task_type: str | None = None,
 ) -> DeterministicRecommendation:
     try:
-        return deterministic_recommendation(dataframe, question, target_hint)
+        return deterministic_recommendation(dataframe, question, target_hint, task_type=task_type)
     except Exception as exc:
         warnings.append(
             f"Deterministic recommendation failed closed: {type(exc).__name__}: {exc}"
@@ -566,6 +662,7 @@ def _fallback_agent_plan(
     profile: dict[str, Any],
     question: str,
     target_hint: str | None,
+    task_type_hint: str | None = None,
 ) -> AgentPlan:
     columns = [record["name"] for record in profile["column_details"]]
     target = target_hint or next(
@@ -576,7 +673,7 @@ def _fallback_agent_plan(
         (record for record in profile["column_details"] if record["name"] == target),
         {"semantic_type": "unknown"},
     )
-    task = (
+    task = task_type_hint or (
         "classification"
         if target_record["semantic_type"] in {"categorical", "boolean", "text", "unknown"}
         else "regression"
@@ -601,6 +698,17 @@ def _fallback_agent_plan(
         reasoning="Offline fallback uses an independent schema heuristic so the workflow remains runnable without an API key.",
         confidence=0.4,
     )
+
+
+def _ensure_established_target_task(
+    plan: AgentPlan,
+    target_column: str,
+    task_type: str,
+) -> None:
+    if plan.target_column != target_column or plan.task_type != task_type:
+        raise InvariantViolation(
+            "[established_target_task_is_immutable] The modeling agent changed the target/task after the supervised holdout was frozen."
+        )
 
 
 def _failed_validation_payload(

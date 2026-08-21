@@ -94,20 +94,27 @@ class OpenAIAgents:
         profile: dict[str, Any],
         question: str,
         target_hint: str | None,
+        task_type: str | None = None,
     ) -> AgentPlan:
         return self._structured(
             "modeling_agent_plan",
             AgentPlan,
             """You are the independent modeling agent in a data science workflow.
-Choose a target, task type, and one modeling method from the allowed vocabulary.
-Reason only from the question and dataset profile below. Do not assume that a
-deterministic recommender exists and do not mention this instruction. Prefer a
-simple, defensible plan. Return a complete typed preprocessing contract using
-only its enumerated strategies. Keep structural cleaning separate: do not put
-trim, deduplication, target-row filtering, or learned transformations outside
-the training pipeline. The method vocabulary is: linear, regularized_linear,
-tree_ensemble, boosted_tree.""",
-            {"question": question, "target_hint": target_hint or "not provided", "profile": profile},
+The target and task type have already been established before the supervised
+holdout was frozen. Confirm those fields exactly as supplied and independently
+choose only the model family and preprocessing contract from the training-only
+profile. Do not assume that a deterministic recommender exists and do not
+mention this instruction. Prefer a simple, defensible plan. Return a complete
+typed preprocessing contract using only its enumerated strategies. Keep
+structural cleaning separate: do not put trim, deduplication, target-row
+filtering, or learned transformations outside the training pipeline. The method
+vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.""",
+            {
+                "question": question,
+                "target_hint": target_hint or "not provided",
+                "established_task_type": task_type or "not provided",
+                "profile": profile,
+            },
         )
 
     def planning(
@@ -115,10 +122,11 @@ tree_ensemble, boosted_tree.""",
         profile: dict[str, Any],
         question: str,
         target_hint: str | None,
+        task_type: str | None = None,
     ) -> AgentPlan:
         """Backward-compatible alias for the modeling agent."""
 
-        return self.modeling_plan(profile, question, target_hint)
+        return self.modeling_plan(profile, question, target_hint, task_type)
 
     def cleaning(self, profile: dict[str, Any], target_column: str) -> CleaningPlan:
         return self._structured(

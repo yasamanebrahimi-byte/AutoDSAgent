@@ -8,6 +8,8 @@ the fitter use the exact data that was checked.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from math import ceil, isfinite
 from typing import Any, Sequence
@@ -53,6 +55,43 @@ class ValidationCheck:
             "severity": self.severity,
             "evidence": self.evidence,
             "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class FrozenSplit:
+    """Canonical supervised split expressed in original row positions.
+
+    Incoming dataframe index labels are deliberately ignored.  The dataset
+    fingerprint and position digests make the split auditable and let the
+    reproduction artifact fail closed if the source data changes.
+    """
+
+    target_column: str
+    task_type: str
+    test_size: float
+    random_state: int
+    strategy: str
+    dataset_fingerprint: str
+    valid_row_positions: tuple[int, ...]
+    train_row_positions: tuple[int, ...]
+    holdout_row_positions: tuple[int, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "target_column": self.target_column,
+            "task_type": self.task_type,
+            "random_state": int(self.random_state),
+            "test_size": float(self.test_size),
+            "strategy": self.strategy,
+            "row_index_policy": "zero_based_row_position",
+            "dataset_fingerprint": self.dataset_fingerprint,
+            "valid_rows": len(self.valid_row_positions),
+            "train_rows": len(self.train_row_positions),
+            "holdout_rows": len(self.holdout_row_positions),
+            "train_positions_digest": _position_digest(self.train_row_positions),
+            "holdout_positions_digest": _position_digest(self.holdout_row_positions),
+            "valid_positions_digest": _position_digest(self.valid_row_positions),
         }
 
 
@@ -179,6 +218,8 @@ def validate_training_plan(
     random_state: int = 42,
     feature_columns: Sequence[str] | None = None,
     preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
+    split: FrozenSplit | None = None,
+    row_positions: Sequence[int] | None = None,
 ) -> ValidationResult:
     """Evaluate one complete plan against the actual modeling dataframe.
 
@@ -365,7 +406,7 @@ def validate_training_plan(
     frame_for_features = dataframe.iloc[valid_mask.to_numpy(), requested_positions].reset_index(drop=True)
     direct_copies: list[str] = []
     name_warnings: list[str] = []
-    for name, position in zip(requested_names, requested_positions, strict=True):
+    for name, position in zip(requested_names, requested_positions):
         feature = dataframe.iloc[:, position]
         if _safe_series_equal(target_for_comparison, feature.loc[valid_mask].reset_index(drop=True)):
             direct_copies.append(name)
@@ -390,7 +431,7 @@ def validate_training_plan(
 
     usable_names: list[str] = []
     inf_replacements: dict[str, int] = {}
-    for name, position in zip(requested_names, requested_positions, strict=True):
+    for name, position in zip(requested_names, requested_positions):
         if name in direct_copies:
             continue
         series = dataframe.iloc[:, position].loc[valid_mask]
@@ -636,12 +677,43 @@ def validate_training_plan(
     )
     result.direct_leakage_detected = result.direct_leakage_detected or conflict_groups > 0
 
-    split_evidence = _validate_split_and_cv(
-        normalized_for_model,
-        str(task_type),
-        test_size,
-        random_state,
-    )
+    if split is None:
+        split_evidence = _validate_split_and_cv(
+            normalized_for_model,
+            str(task_type),
+            test_size,
+            random_state,
+        )
+    else:
+        current_positions = (
+            np.arange(len(dataframe), dtype=int)
+            if row_positions is None
+            else np.asarray(row_positions, dtype=int)
+        )
+        if len(current_positions) != len(dataframe):
+            split_evidence = {
+                "test_size": _safe_float(test_size),
+                "valid_rows": int(len(normalized_for_model)),
+                "checks": [
+                    {
+                        "code": "frozen_split_row_mapping_is_valid",
+                        "passed": False,
+                        "evidence": {"mapped_rows": len(current_positions), "dataframe_rows": len(dataframe)},
+                        "message": "The frozen split row-position mapping must have one entry per dataframe row.",
+                    }
+                ],
+            }
+        else:
+            split_positions = current_positions[valid_mask.to_numpy(dtype=bool)]
+            split_evidence = _validate_frozen_split(
+                normalized_for_model,
+                str(target_column),
+                str(task_type),
+                test_size,
+                random_state,
+                split,
+                split_positions,
+            )
     result.split = split_evidence
     for check in split_evidence.pop("checks", []):
         result.add_check(
@@ -656,13 +728,13 @@ def validate_training_plan(
         estimated_one_hot = int(
             sum(
                 dataframe.iloc[:, position].loc[valid_mask].nunique(dropna=True) + 1
-                for name, position in zip(requested_names, requested_positions, strict=True)
+                for name, position in zip(requested_names, requested_positions)
                 if name in usable_names
                 and semantic_type(dataframe.iloc[:, position].loc[valid_mask]) in {"categorical", "boolean"}
             )
             + sum(
                 1
-                for name, position in zip(requested_names, requested_positions, strict=True)
+                for name, position in zip(requested_names, requested_positions)
                 if name in usable_names
                 and pd.api.types.is_numeric_dtype(dataframe.iloc[:, position])
             )
@@ -718,37 +790,158 @@ def training_profile_frame(
     *,
     test_size: float,
     random_state: int,
+    split: FrozenSplit | None = None,
 ) -> pd.DataFrame:
     """Return a deterministic training-only view for planning/reconciliation prompts."""
 
-    if not _valid_test_size(test_size) or dataframe.empty:
-        return dataframe.copy()
+    if split is None:
+        if target_column is None or task_type is None:
+            raise InvariantViolation(
+                "A target and task must be established before constructing a training-only planning profile."
+            )
+        split = freeze_supervised_split(
+            dataframe,
+            target_column,
+            task_type,
+            test_size=test_size,
+            random_state=random_state,
+        )
+    if split.target_column != str(target_column) or split.task_type != str(task_type):
+        raise InvariantViolation("The planning profile target/task does not match the frozen split contract.")
+    return dataframe.iloc[list(split.train_row_positions)].reset_index(drop=True)
+
+
+def freeze_supervised_split(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    task_type: str,
+    *,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> FrozenSplit:
+    """Establish one fail-closed train/holdout partition for the whole run."""
+
     columns = [str(column) for column in dataframe.columns]
     positions = [index for index, name in enumerate(columns) if name == str(target_column)]
     if len(positions) != 1:
-        return _head_training_frame(dataframe, test_size)
-    target = dataframe.iloc[:, positions[0]]
-    valid_mask, normalized_target, _ = _normalize_target(target, task_type or "classification")
-    valid = dataframe.loc[valid_mask].reset_index(drop=True)
-    if len(valid) < 2:
-        return _head_training_frame(dataframe, test_size)
-    stratify = None
-    if task_type == "classification":
-        counts = normalized_target.loc[valid_mask].value_counts()
-        test_rows = ceil(len(valid) * test_size)
-        train_rows = len(valid) - test_rows
-        if len(counts) >= 2 and counts.min() >= 2 and test_rows >= len(counts) and train_rows >= len(counts):
-            stratify = normalized_target.loc[valid_mask].reset_index(drop=True)
-    try:
-        train_indices, _ = train_test_split(
-            np.arange(len(valid)),
-            test_size=test_size,
-            random_state=random_state,
-            stratify=stratify,
+        _raise_split_failure(
+            target_column,
+            task_type,
+            "target_resolves_once",
+            f"Target '{target_column}' must resolve to exactly one column.",
         )
-    except ValueError:
-        return _head_training_frame(valid, test_size)
-    return valid.iloc[np.sort(train_indices)].reset_index(drop=True)
+    if task_type not in SUPPORTED_TASKS:
+        _raise_split_failure(
+            target_column,
+            task_type,
+            "task_is_supported",
+            f"Unsupported task type: {task_type!r}.",
+        )
+    if not _valid_test_size(test_size):
+        _raise_split_failure(
+            target_column,
+            task_type,
+            "test_size_is_supported",
+            f"test_size must be finite and between {MIN_TEST_SIZE:.2f} and {MAX_TEST_SIZE:.2f}.",
+        )
+
+    target = dataframe.iloc[:, positions[0]].copy()
+    valid_mask, normalized_target, target_evidence = _normalize_target(target, task_type)
+    if task_type == "regression" and (
+        target_evidence["invalid_nonnumeric_rows"] or target_evidence["nonfinite_rows"]
+    ):
+        _raise_split_failure(
+            target_column,
+            task_type,
+            "target_is_valid_before_split",
+            "Regression target values must be finite and numeric before the holdout is frozen.",
+        )
+    valid_target = normalized_target.loc[valid_mask].reset_index(drop=True)
+    split_evidence = _validate_split_and_cv(valid_target, task_type, test_size, random_state)
+    failed = [check for check in split_evidence.get("checks", []) if not check["passed"]]
+    if task_type == "classification" and valid_target.nunique(dropna=True) < 2:
+        failed.append(
+            {
+                "code": "classification_target_has_two_classes",
+                "message": "Classification requires at least two valid classes before the holdout is frozen.",
+            }
+        )
+    if failed:
+        first = failed[0]
+        _raise_split_failure(
+            target_column,
+            task_type,
+            first["code"],
+            first["message"],
+            first.get("evidence", split_evidence),
+        )
+
+    valid_positions = np.flatnonzero(valid_mask.to_numpy(dtype=bool))
+    stratify = valid_target if task_type == "classification" else None
+    train_indices, holdout_indices = train_test_split(
+        np.arange(len(valid_positions)),
+        test_size=test_size,
+        random_state=random_state,
+        stratify=stratify,
+    )
+    return FrozenSplit(
+        target_column=str(target_column),
+        task_type=str(task_type),
+        test_size=float(test_size),
+        random_state=int(random_state),
+        strategy="stratified" if task_type == "classification" else "seeded_random",
+        dataset_fingerprint=dataset_fingerprint(dataframe),
+        valid_row_positions=tuple(int(value) for value in valid_positions),
+        train_row_positions=tuple(int(valid_positions[value]) for value in np.sort(train_indices)),
+        holdout_row_positions=tuple(int(valid_positions[value]) for value in np.sort(holdout_indices)),
+    )
+
+
+def dataset_fingerprint(dataframe: pd.DataFrame) -> str:
+    """Return a stable lightweight integrity fingerprint for a dataframe."""
+
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps(
+            {"columns": [str(column) for column in dataframe.columns], "dtypes": [str(dtype) for dtype in dataframe.dtypes]},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    digest.update(pd.util.hash_pandas_object(dataframe, index=False).to_numpy(dtype=np.uint64).tobytes())
+    return digest.hexdigest()
+
+
+def _raise_split_failure(
+    target_column: str,
+    task_type: str,
+    code: str,
+    message: str,
+    evidence: dict[str, Any] | None = None,
+) -> None:
+    result = ValidationResult(
+        target_column=str(target_column),
+        task_type=str(task_type),
+        method="not_selected",
+    )
+    result.add_failure(code, message, evidence or {})
+    raise InvariantViolation.from_result(result)
+
+
+def validated_row_positions(
+    dataframe: pd.DataFrame,
+    result: ValidationResult,
+    row_positions: Sequence[int] | None = None,
+) -> np.ndarray:
+    """Map the validated modeling rows back to original positional row ids."""
+
+    positions = np.arange(len(dataframe), dtype=int) if row_positions is None else np.asarray(row_positions, dtype=int)
+    if len(positions) != len(dataframe):
+        raise InvariantViolation("The row-position mapping must have one entry per dataframe row.", result)
+    target_positions = [index for index, name in enumerate(map(str, dataframe.columns)) if name == result.target_column]
+    if len(target_positions) != 1:
+        raise InvariantViolation("The validated target no longer resolves to exactly one column.", result)
+    valid_mask, _, _ = _normalize_target(dataframe.iloc[:, target_positions[0]], result.task_type)
+    return positions[valid_mask.to_numpy(dtype=bool)]
 
 
 def _normalize_target(
@@ -912,6 +1105,147 @@ def _validate_split_and_cv(
     return evidence
 
 
+def _validate_frozen_split(
+    target: pd.Series,
+    target_column: str,
+    task_type: str,
+    test_size: float,
+    random_state: int,
+    split: FrozenSplit,
+    valid_row_positions: Sequence[int],
+) -> dict[str, Any]:
+    """Validate the already-frozen membership without reconstructing it."""
+
+    positions = np.asarray(valid_row_positions, dtype=int)
+    evidence: dict[str, Any] = {
+        "test_size": _safe_float(test_size),
+        "valid_rows": int(len(target)),
+        "strategy": split.strategy,
+        "random_state": int(random_state),
+        "contract": split.as_dict(),
+        "membership_verified": False,
+    }
+    checks: list[dict[str, Any]] = []
+    config_matches = (
+        split.target_column == target_column
+        and split.task_type == task_type
+        and float(split.test_size) == float(test_size)
+        and int(split.random_state) == int(random_state)
+    )
+    checks.append(
+        {
+            "code": "frozen_split_contract_matches_run",
+            "passed": config_matches,
+            "evidence": {
+                "contract_target": split.target_column,
+                "contract_task": split.task_type,
+                "task_type": task_type,
+                "contract_test_size": float(split.test_size),
+                "test_size": _safe_float(test_size),
+                "contract_random_state": int(split.random_state),
+                "random_state": int(random_state),
+            },
+            "message": "Planning, validation, and modeling must use the same frozen target/task, holdout fraction, and seed.",
+        }
+    )
+    known = set(split.valid_row_positions)
+    rows_known = all(int(position) in known for position in positions)
+    checks.append(
+        {
+            "code": "frozen_split_membership_is_known",
+            "passed": rows_known,
+            "evidence": {"unknown_positions": [int(position) for position in positions if int(position) not in known][:10]},
+            "message": "Every validated row must belong to the original supervised split contract.",
+        }
+    )
+    train_set = set(split.train_row_positions)
+    holdout_set = set(split.holdout_row_positions)
+    train_mask = np.array([int(position) in train_set for position in positions], dtype=bool)
+    holdout_mask = np.array([int(position) in holdout_set for position in positions], dtype=bool)
+    disjoint = not bool(np.any(train_mask & holdout_mask))
+    covered = bool(np.all(train_mask | holdout_mask)) if len(positions) else False
+    checks.append(
+        {
+            "code": "frozen_split_membership_is_disjoint_and_complete",
+            "passed": rows_known and disjoint and covered,
+            "evidence": {
+                "train_rows": int(train_mask.sum()),
+                "holdout_rows": int(holdout_mask.sum()),
+                "unassigned_rows": int((~(train_mask | holdout_mask)).sum()),
+            },
+            "message": "Validated rows must map to exactly one of the frozen training or holdout partitions.",
+        }
+    )
+    train_rows = int(train_mask.sum())
+    holdout_rows = int(holdout_mask.sum())
+    nonempty = train_rows > 0 and holdout_rows > 0
+    checks.append(
+        {
+            "code": "split_has_nonempty_partitions",
+            "passed": nonempty,
+            "evidence": {"train_rows": train_rows, "holdout_rows": holdout_rows},
+            "message": "The frozen split must retain at least one training row and one holdout row after structural cleaning.",
+        }
+    )
+    if task_type == "classification":
+        train_target = target.iloc[np.flatnonzero(train_mask)]
+        holdout_target = target.iloc[np.flatnonzero(holdout_mask)]
+        all_classes = set(target.astype("string").tolist())
+        train_counts = train_target.value_counts()
+        holdout_counts = holdout_target.value_counts()
+        class_count = len(all_classes)
+        min_train = int(train_counts.min()) if len(train_counts) else 0
+        min_holdout = int(holdout_counts.min()) if len(holdout_counts) else 0
+        class_safe = (
+            class_count >= 2
+            and len(train_counts) == class_count
+            and len(holdout_counts) == class_count
+            and min_train >= 2
+            and min_holdout >= 1
+        )
+        checks.append(
+            {
+                "code": "classification_split_and_stratification_feasible",
+                "passed": class_safe,
+                "evidence": {
+                    "class_count": class_count,
+                    "train_class_counts": {str(key): int(value) for key, value in train_counts.items()},
+                    "holdout_class_counts": {str(key): int(value) for key, value in holdout_counts.items()},
+                    "minimum_training_class_rows": min_train,
+                    "minimum_holdout_class_rows": min_holdout,
+                },
+                "message": "The frozen stratified holdout must retain every class and at least two training rows per class for cross-validation.",
+            }
+        )
+        cv_folds = min(MAX_CV_FOLDS, min_train) if class_safe else 0
+        checks.append(
+            {
+                "code": "classification_training_supports_cross_validation",
+                "passed": class_safe and cv_folds >= 2,
+                "evidence": {"cv_folds": cv_folds, "cv_strategy": "stratified_kfold"},
+                "message": "Every training fold must contain every class; the frozen training partition must support at least two folds.",
+            }
+        )
+        evidence.update({"cv_folds": cv_folds, "cv_strategy": "stratified_kfold", "stratification": "required"})
+    else:
+        cv_folds = min(MAX_CV_FOLDS, train_rows)
+        regression_safe = len(target) >= 4 and nonempty and train_rows >= 2 and cv_folds >= 2
+        checks.append(
+            {
+                "code": "regression_split_and_cross_validation_feasible",
+                "passed": regression_safe,
+                "evidence": {"train_rows": train_rows, "holdout_rows": holdout_rows, "cv_folds": cv_folds, "cv_strategy": "kfold"},
+                "message": "The frozen regression split must support a nonempty holdout and at least two training CV folds.",
+            }
+        )
+        evidence.update({"cv_folds": cv_folds, "cv_strategy": "kfold"})
+    evidence["train_rows"] = train_rows
+    evidence["holdout_rows"] = holdout_rows
+    evidence["membership_verified"] = rows_known and disjoint and covered
+    evidence["checks"] = checks
+    return evidence
+
+
 def _safe_series_equal(left: pd.Series, right: pd.Series) -> bool:
     if len(left) != len(right):
         return False
@@ -979,6 +1313,11 @@ def _safe_float(value: Any) -> float | str:
     except (TypeError, ValueError):
         return str(value)
     return numeric if isfinite(numeric) else str(value)
+
+
+def _position_digest(positions: Sequence[int]) -> str:
+    values = np.asarray(tuple(int(position) for position in positions), dtype=np.int64)
+    return hashlib.sha256(values.tobytes()).hexdigest()
 
 
 def _head_training_frame(dataframe: pd.DataFrame, test_size: float) -> pd.DataFrame:

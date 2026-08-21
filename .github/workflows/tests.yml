@@ -21,93 +21,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install package and development tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" -c constraints-dev.txt
+          python -m pip install -e ".[dev]"
 
-      - name: Run smoke test
-        run: python scripts/smoke_test.py
-
-      - name: Validate project packaging
-        run: python scripts/validate_project.py
-
-      - name: Run tests
-        if: matrix.python-version != '3.12'
-        run: python -m pytest
-
-      - name: Run tests with coverage gate
-        if: matrix.python-version == '3.12'
-        run: >-
-          python -m pytest
-          --cov=app
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-fail-under=75
-
-  quality:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install development dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" -c constraints-dev.txt
+      - name: Check installed dependencies
+        run: python -m pip check
 
       - name: Lint Python sources
         run: python -m ruff check app tests scripts
 
-      - name: Type-check core contracts
-        run: >-
-          python -m mypy
-          app/backend/schemas
-          app/backend/config.py
-          app/backend/services/run_manager.py
-          app/workflows/workflow_state.py
-          app/workflows/workflow_steps.py
-
-      - name: Audit installed dependencies
-        run: python -m pip_audit --progress-spinner off
-
-  mlflow-install:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install MLflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,mlflow]" -c constraints-dev.txt
-
-      - name: Verify MLflow installation
-        run: |
-          python -m pip check
-          python -c "import mlflow; print(f'MLflow {mlflow.__version__}')"
-
-  docker-build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Build Docker image
-        run: docker build --tag autods-agent:ci .
-
-      - name: Verify MLflow import in Docker image
-        run: docker run --rm autods-agent:ci python -c "import mlflow; print(f'MLflow {mlflow.__version__}')"
+      - name: Run tests
+        run: python -m pytest

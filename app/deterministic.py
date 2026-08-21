@@ -124,13 +124,25 @@ def infer_task(dataframe: pd.DataFrame, target_column: str) -> TaskType:
     return "regression"
 
 
+def establish_target_task(
+    dataframe: pd.DataFrame,
+    question: str,
+    target_hint: str | None = None,
+) -> tuple[str, TaskType]:
+    """Perform only the target/task work needed before a supervised split."""
+
+    target_column = choose_target(dataframe, question, target_hint)
+    return target_column, infer_task(dataframe, target_column)
+
+
 def deterministic_recommendation(
     dataframe: pd.DataFrame,
     question: str,
     target_hint: str | None = None,
+    task_type: TaskType | None = None,
 ) -> DeterministicRecommendation:
     target_column = choose_target(dataframe, question, target_hint)
-    task_type = infer_task(dataframe, target_column)
+    task_type = task_type or infer_task(dataframe, target_column)
     feature_records = [
         record
         for record in profile_dataframe(dataframe)["column_details"]
@@ -186,6 +198,7 @@ def apply_cleaning(
     dataframe: pd.DataFrame,
     target_column: str,
     actions: list[str],
+    row_position_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply only allow-listed structural operations selected by the agent."""
 
@@ -212,7 +225,8 @@ def apply_cleaning(
 
     if "drop_exact_duplicates" in actions:
         before = len(frame)
-        frame = frame.drop_duplicates().reset_index(drop=True)
+        duplicate_columns = [column for column in frame.columns if column != row_position_column]
+        frame = frame.drop_duplicates(subset=duplicate_columns).reset_index(drop=True)
         removed_rows += before - len(frame)
         applied.append("drop_exact_duplicates")
 
@@ -220,7 +234,9 @@ def apply_cleaning(
         all_null = [
             str(column)
             for column in frame.columns
-            if frame[column].isna().all() and column != target_column
+            if frame[column].isna().all()
+            and column != target_column
+            and column != row_position_column
         ]
         if all_null:
             frame = frame.drop(columns=all_null)
@@ -231,7 +247,9 @@ def apply_cleaning(
         constant = [
             str(column)
             for column in frame.columns
-            if column != target_column and frame[column].nunique(dropna=True) <= 1
+            if column != target_column
+            and column != row_position_column
+            and frame[column].nunique(dropna=True) <= 1
         ]
         if constant:
             frame = frame.drop(columns=constant)
@@ -324,8 +342,10 @@ def make_plots(dataframe: pd.DataFrame, target_column: str, output_dir: Path) ->
         matrix = numeric.corr(numeric_only=True)
         fig, ax = plt.subplots(figsize=(7, 6))
         image = ax.imshow(matrix, cmap="coolwarm", vmin=-1, vmax=1)
-        ax.set_xticks(range(len(matrix.columns)), matrix.columns, rotation=90, fontsize=7)
-        ax.set_yticks(range(len(matrix.index)), matrix.index, fontsize=7)
+        ax.set_xticks(range(len(matrix.columns)))
+        ax.set_xticklabels(matrix.columns, rotation=90, fontsize=7)
+        ax.set_yticks(range(len(matrix.index)))
+        ax.set_yticklabels(matrix.index, fontsize=7)
         fig.colorbar(image, ax=ax, shrink=0.8)
         ax.set_title("Numeric correlation heatmap")
         fig.tight_layout()
