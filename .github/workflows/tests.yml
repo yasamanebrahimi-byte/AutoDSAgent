@@ -29,8 +29,51 @@ jobs:
       - name: Check installed dependencies
         run: python -m pip check
 
+      - name: Run tests
+        run: python -m pytest
+
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package and development tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
       - name: Lint Python sources
         run: python -m ruff check app tests scripts
 
-      - name: Run tests
-        run: python -m pytest
+  offline-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package and development tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run offline end-to-end smoke test
+        run: >-
+          python -m app
+          --data examples/sample_data/diabetes_progression.csv
+          --target disease_progression
+          --question "Estimate disease progression from the supplied measurements."
+          --output-dir "${{ runner.temp }}/autods-agent-smoke"
+          --offline
