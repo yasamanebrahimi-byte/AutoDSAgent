@@ -167,8 +167,10 @@ class DeterministicDiagnostics(StrictModel):
     nonlinearity_score: float = Field(ge=0, le=1)
     nonlinearity_signal: Literal["low", "moderate", "high"]
     nonlinear_feature_count: int = Field(ge=0)
-    interaction_potential: float = Field(ge=0, le=1)
-    interaction_signal: Literal["low", "moderate", "high"]
+    nonlinear_feature_fraction: float = Field(ge=0, le=1)
+    nonlinearity_heterogeneity: float = Field(ge=0, le=1)
+    structural_complexity_score: float = Field(ge=0, le=1)
+    structural_complexity_signal: Literal["low", "moderate", "high"]
     numeric_outlier_feature_fraction: float = Field(ge=0, le=1)
     numeric_outlier_cell_fraction: float = Field(ge=0, le=1)
     target: TargetDiagnostics
@@ -196,7 +198,7 @@ class DeterministicRecommendation(StrictModel):
     preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
     reasoning: str = Field(min_length=20, max_length=1200)
     evidence: list[str] = Field(min_length=1, max_length=12)
-    policy_version: str = "2"
+    policy_version: str = "3"
     method_scores: dict[Method, Optional[float]] = Field(default_factory=dict)
     ranked_methods: list[Method] = Field(default_factory=list, max_length=4)
     method_assessments: dict[Method, DeterministicMethodAssessment] = Field(default_factory=dict)

@@ -315,7 +315,7 @@ def test_reconciliation_receives_structured_deterministic_evidence():
 
     evidence = captured["deterministic"]
     assert result["status"] == "disagreement_resolved"
-    assert evidence["policy_version"] == "2"
+    assert evidence["policy_version"] == "3"
     assert set(evidence["method_scores"]) == {
         "linear",
         "regularized_linear",

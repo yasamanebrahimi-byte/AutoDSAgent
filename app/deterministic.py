@@ -216,6 +216,8 @@ def deterministic_recommendation(
         f"({confidence} confidence). It considered {diagnostics.usable_features} usable features "
         f"across {diagnostics.rows} training rows, estimated {diagnostics.effective_features_estimate} "
         f"post-one-hot features, and observed {diagnostics.nonlinearity_signal} nonlinearity. "
+        f"The structural-complexity signal was {diagnostics.structural_complexity_signal} "
+        f"({diagnostics.structural_complexity_score:.2f}). "
         f"Key positive factors: {reason_detail}. Compatibility scores are policy rankings, not probabilities."
     )
     evidence = [
@@ -227,7 +229,13 @@ def deterministic_recommendation(
         f"sample_to_feature_ratio={diagnostics.sample_to_feature_ratio:.3f}",
         f"overall_missing_fraction={diagnostics.overall_missing_fraction:.3f}",
         f"max_abs_numeric_correlation={diagnostics.max_abs_numeric_correlation:.3f}",
-        f"nonlinearity_signal={diagnostics.nonlinearity_signal}",
+        (
+            f"nonlinearity_signal={diagnostics.nonlinearity_signal}; "
+            f"nonlinear_feature_fraction={diagnostics.nonlinear_feature_fraction:.3f}; "
+            f"nonlinearity_heterogeneity={diagnostics.nonlinearity_heterogeneity:.3f}; "
+            f"structural_complexity={diagnostics.structural_complexity_signal}"
+            f"({diagnostics.structural_complexity_score:.3f})"
+        ),
         f"selected_score={top_score if top_score is not None else 'ineligible'}",
         f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}",
         f"confidence={confidence}",

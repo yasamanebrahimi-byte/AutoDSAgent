@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -75,17 +77,29 @@ def _binned_signal(feature: pd.Series, target: pd.Series, task_type: TaskType, m
     return nonlinearity, min(1.0, range_signal)
 
 
+@dataclass(frozen=True)
+class _RelationshipSignals:
+    """Aggregate relationship facts plus variation across numeric features."""
+
+    nonlinearity_score: float
+    pearson_spearman_gap: float
+    univariate_signal: float
+    nonlinear_feature_count: int
+    nonlinear_feature_fraction: float
+    nonlinearity_heterogeneity: float
+
+
 def _relationship_signals(
     dataframe: pd.DataFrame,
     target_column: str,
     task_type: TaskType,
     numeric_names: list[str],
-) -> tuple[float, float, float, int]:
+) -> _RelationshipSignals:
     if not numeric_names:
-        return 0.0, 0.0, 0.0, 0
+        return _RelationshipSignals(0.0, 0.0, 0.0, 0, 0.0, 0.0)
     target = _target_numeric(dataframe, target_column, task_type)
     gaps: list[float] = []
-    nonlinear: list[float] = []
+    feature_nonlinearity_scores: list[float] = []
     marginal: list[float] = []
     for name in numeric_names:
         x = pd.to_numeric(dataframe[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
@@ -97,19 +111,37 @@ def _relationship_signals(
                 gaps.append(min(1.0, abs(pearson - spearman)))
                 marginal.append(min(1.0, max(pearson, spearman)))
         binned, range_signal = _binned_signal(dataframe[name], target, task_type)
-        nonlinear.append(binned)
+        # Keep one bounded marginal nonlinearity measurement per numeric
+        # feature.  The aggregate score below is useful for policy bands, but
+        # it must not be reused as if it contained feature-level variation.
+        feature_nonlinearity_scores.append(binned)
         if range_signal:
             marginal.append(range_signal)
-    if not nonlinear:
-        return 0.0, 0.0, 0.0, 0
-    mean_nonlinear = float(np.mean(nonlinear))
-    top_count = max(1, int(np.ceil(len(nonlinear) * 0.25)))
-    top_nonlinear = float(np.mean(sorted(nonlinear, reverse=True)[:top_count]))
+    if not feature_nonlinearity_scores:
+        return _RelationshipSignals(0.0, 0.0, 0.0, 0, 0.0, 0.0)
+    mean_nonlinear = float(np.mean(feature_nonlinearity_scores))
+    top_count = max(1, int(np.ceil(len(feature_nonlinearity_scores) * 0.25)))
+    top_nonlinear = float(np.mean(sorted(feature_nonlinearity_scores, reverse=True)[:top_count]))
     # One strong nonlinear marginal relationship should not disappear merely
     # because a dataset also contains several deliberately weak predictors.
     score = min(1.0, 0.70 * top_nonlinear + 0.30 * mean_nonlinear + 0.35 * (max(gaps) if gaps else 0.0))
-    nonlinear_count = sum(value >= 0.15 for value in nonlinear)
-    return score, max(gaps, default=0.0), float(np.mean(marginal)) if marginal else 0.0, int(nonlinear_count)
+    nonlinear_count = sum(value >= 0.15 for value in feature_nonlinearity_scores)
+    if len(feature_nonlinearity_scores) < 2:
+        # A single feature cannot establish cross-feature heterogeneity.
+        heterogeneity = 0.0
+    else:
+        # Each feature score is bounded to [0, 1].  Population standard
+        # deviation is therefore at most 0.5; multiplying by two maps the
+        # largest possible two-point spread to the policy's [0, 1] range.
+        heterogeneity = min(1.0, max(0.0, float(np.std(feature_nonlinearity_scores)) * 2.0))
+    return _RelationshipSignals(
+        nonlinearity_score=score,
+        pearson_spearman_gap=max(gaps, default=0.0),
+        univariate_signal=float(np.mean(marginal)) if marginal else 0.0,
+        nonlinear_feature_count=int(nonlinear_count),
+        nonlinear_feature_fraction=float(nonlinear_count / len(feature_nonlinearity_scores)),
+        nonlinearity_heterogeneity=heterogeneity,
+    )
 
 
 def _target_diagnostics(dataframe: pd.DataFrame, target_column: str, task_type: TaskType) -> TargetDiagnostics:
@@ -225,34 +257,40 @@ def compute_deterministic_diagnostics(
     max_corr = max(pair_values, default=0.0)
     high_pairs = sum(value >= policy.high_correlation_threshold for value in pair_values)
     high_pair_fraction = high_pairs / max(len(pair_values), 1)
-    nonlinearity, pearson_spearman_gap, univariate_signal, nonlinear_count = _relationship_signals(
-        dataframe, target_column, task_type, numeric_names
-    )
+    relationship = _relationship_signals(dataframe, target_column, task_type, numeric_names)
+    nonlinearity = relationship.nonlinearity_score
+    pearson_spearman_gap = relationship.pearson_spearman_gap
+    univariate_signal = relationship.univariate_signal
+    nonlinear_count = relationship.nonlinear_feature_count
     if nonlinearity >= policy.nonlinear_high_threshold:
         nonlinearity_signal = "high"
     elif nonlinearity >= policy.nonlinear_moderate_threshold:
         nonlinearity_signal = "moderate"
     else:
         nonlinearity_signal = "low"
-    heterogeneity = min(1.0, float(np.std([nonlinearity])) * 2.0) if numeric_names else 0.0
+    heterogeneity = relationship.nonlinearity_heterogeneity
     mixed_signal = 1.0 if numeric_names and categorical_names else 0.0
     categorical_signal = min(1.0, len(categorical_names) / 3.0)
     weak_univariate = 1.0 if univariate_signal < 0.20 and usable >= 3 else 0.0
-    nonlinear_share = nonlinear_count / max(len(numeric_names), 1)
-    interaction = min(
+    nonlinear_share = relationship.nonlinear_feature_fraction
+    # This is a bounded structural prior for model-family compatibility.  It
+    # summarizes several observable reasons a simple additive linear family
+    # may be inadequate; it does not identify or prove feature interactions.
+    structural_complexity = min(
         1.0,
-        0.40 * mixed_signal
-        + 0.20 * categorical_signal
-        + 0.15 * heterogeneity
-        + 0.10 * weak_univariate
-        + 0.15 * min(1.0, nonlinear_share),
+        policy.structural_complexity_mixed_weight * mixed_signal
+        + policy.structural_complexity_categorical_weight * categorical_signal
+        + policy.structural_complexity_nonlinear_fraction_weight * nonlinear_share
+        + policy.structural_complexity_nonlinearity_strength_weight * nonlinearity
+        + policy.structural_complexity_heterogeneity_weight * heterogeneity
+        + policy.structural_complexity_weak_marginal_weight * weak_univariate,
     )
-    if interaction >= policy.interaction_high_threshold:
-        interaction_signal = "high"
-    elif interaction >= policy.interaction_moderate_threshold:
-        interaction_signal = "moderate"
+    if structural_complexity >= policy.structural_complexity_high_threshold:
+        structural_complexity_signal = "high"
+    elif structural_complexity >= policy.structural_complexity_moderate_threshold:
+        structural_complexity_signal = "moderate"
     else:
-        interaction_signal = "low"
+        structural_complexity_signal = "low"
 
     outlier_fractions = [_iqr_outlier_fraction(dataframe[name]) for name in numeric_names]
     outlier_feature_fraction = float(np.mean([value >= policy.outlier_moderate_fraction for value in outlier_fractions])) if outlier_fractions else 0.0
@@ -296,8 +334,10 @@ def compute_deterministic_diagnostics(
         nonlinearity_score=max(0.0, min(1.0, nonlinearity)),
         nonlinearity_signal=nonlinearity_signal,
         nonlinear_feature_count=nonlinear_count,
-        interaction_potential=interaction,
-        interaction_signal=interaction_signal,
+        nonlinear_feature_fraction=max(0.0, min(1.0, nonlinear_share)),
+        nonlinearity_heterogeneity=max(0.0, min(1.0, heterogeneity)),
+        structural_complexity_score=max(0.0, min(1.0, structural_complexity)),
+        structural_complexity_signal=structural_complexity_signal,
         numeric_outlier_feature_fraction=outlier_feature_fraction,
         numeric_outlier_cell_fraction=outlier_cell_fraction,
         target=_target_diagnostics(dataframe, target_column, task_type),

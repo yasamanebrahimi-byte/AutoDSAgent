@@ -21,14 +21,14 @@ MAX_ONE_HOT_FEATURES = 4000
 
 @dataclass(frozen=True)
 class DeterministicPolicy:
-    """Named thresholds and score bands for policy version 2.
+    """Named thresholds and score bands for policy version 3.
 
     Compatibility scores are bounded policy points, not probabilities.  The
     thresholds are deliberately coarse and documented so a reviewer can see
     which structural observation caused a score change.
     """
 
-    version: str = "2"
+    version: str = "3"
     high_correlation_threshold: float = 0.80
     severe_correlation_threshold: float = 0.90
     low_sample_feature_ratio: float = 3.0
@@ -41,8 +41,20 @@ class DeterministicPolicy:
     widespread_missing_feature_fraction: float = 0.40
     nonlinear_moderate_threshold: float = 0.15
     nonlinear_high_threshold: float = 0.35
-    interaction_moderate_threshold: float = 0.30
-    interaction_high_threshold: float = 0.60
+    # The structural-complexity score is normalized by weights that sum to
+    # one, so these coarse low/moderate/high bands remain interpretable.
+    structural_complexity_moderate_threshold: float = 0.30
+    structural_complexity_high_threshold: float = 0.60
+    # Explicit policy weights keep the heuristic auditable and easy to revise.
+    # Mixed types and categorical structure are modest priors; nonlinearity is
+    # the strongest signal; heterogeneity and weak marginal evidence are
+    # supporting signals rather than proof of interactions.
+    structural_complexity_mixed_weight: float = 0.15
+    structural_complexity_categorical_weight: float = 0.15
+    structural_complexity_nonlinear_fraction_weight: float = 0.20
+    structural_complexity_nonlinearity_strength_weight: float = 0.25
+    structural_complexity_heterogeneity_weight: float = 0.15
+    structural_complexity_weak_marginal_weight: float = 0.10
     outlier_moderate_fraction: float = 0.05
     boosted_tree_min_samples: int = 300
     boosted_tree_preferred_samples: int = 600
@@ -217,15 +229,20 @@ def score_model_families(
         add("tree_ensemble", "nonlinearity", 1, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
         add("boosted_tree", "nonlinearity", -2, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
 
-    interaction = diagnostics.interaction_potential
-    if interaction >= policy.interaction_high_threshold:
+    complexity = diagnostics.structural_complexity_score
+    if complexity >= policy.structural_complexity_high_threshold:
         points = {"linear": -5, "regularized_linear": -2, "tree_ensemble": 8, "boosted_tree": 8}
-    elif interaction >= policy.interaction_moderate_threshold:
+    elif complexity >= policy.structural_complexity_moderate_threshold:
         points = {"linear": -2, "regularized_linear": 0, "tree_ensemble": 4, "boosted_tree": 4}
     else:
         points = {"linear": 2, "regularized_linear": 2, "tree_ensemble": 0, "boosted_tree": 0}
     for method, points_for_method in points.items():
-        add(method, "interaction_potential", points_for_method, f"heuristic interaction potential {interaction:.2f}")
+        add(
+            method,
+            "structural_complexity",
+            points_for_method,
+            f"structural complexity score {complexity:.2f} suggests heterogeneous or nonlinear feature relationships",
+        )
 
     if diagnostics.overall_missing_fraction >= policy.high_missing_fraction:
         missing_points = {"linear": -3, "regularized_linear": -1, "tree_ensemble": 2, "boosted_tree": 1}
