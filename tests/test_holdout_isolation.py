@@ -218,3 +218,73 @@ def test_holdout_only_perturbation_does_not_change_planning_evidence_or_recommen
     assert original_recommendation.model_dump(mode="json") == perturbed_recommendation.model_dump(mode="json")
     assert split.train_row_positions == perturbed_split.train_row_positions
     assert split.holdout_row_positions == perturbed_split.holdout_row_positions
+
+
+def test_reconciliation_receives_structured_deterministic_evidence():
+    frame = _frame()
+    split = freeze_supervised_split(frame, "target", "classification")
+    planning_frame = training_profile_frame(
+        frame,
+        "target",
+        "classification",
+        test_size=0.2,
+        random_state=42,
+        split=split,
+    )
+    planning_profile = profile_dataframe(planning_frame)
+    deterministic = deterministic_recommendation(
+        planning_frame,
+        "classify target",
+        "target",
+        task_type="classification",
+    )
+    agent_plan = AgentPlan(
+        target_column="target",
+        task_type="classification",
+        recommended_method="linear",
+        reasoning="The independent planner selected a linear baseline from the training schema.",
+        confidence=0.7,
+    )
+    captured: dict[str, object] = {}
+
+    class Reconciler:
+        def reconcile(self, question, profile, agent_plan, deterministic):
+            captured["deterministic"] = deterministic
+            return ConflictResolution(
+                selected_target_column="target",
+                selected_task_type="classification",
+                selected_method=deterministic["recommended_method"],
+                selected_preprocessing=deterministic["preprocessing"],
+                checks=["structured_evidence_checked"],
+                justification="The deterministic score evidence is more compatible with the observed training feature structure and preprocessing contract.",
+                confidence=0.7,
+            )
+
+    result = _validate_before_training(
+        Reconciler(),
+        planning_profile,
+        "classify target",
+        agent_plan,
+        deterministic,
+        [],
+        {},
+        offline=False,
+        dataframe=frame,
+        split=split,
+        row_positions=list(range(len(frame))),
+        reconciliation_profile=planning_profile,
+        established_target="target",
+        established_task="classification",
+    )
+
+    evidence = captured["deterministic"]
+    assert result["status"] == "disagreement_resolved"
+    assert evidence["policy_version"] == "2"
+    assert set(evidence["method_scores"]) == {
+        "linear",
+        "regularized_linear",
+        "tree_ensemble",
+        "boosted_tree",
+    }
+    assert evidence["diagnostics"]["rows"] == split.as_dict()["train_rows"]
+    assert "holdout" not in str(evidence).lower()

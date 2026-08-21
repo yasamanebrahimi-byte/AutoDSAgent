@@ -42,7 +42,9 @@ The code is deliberately small:
 
 ```text
 app/
-  deterministic.py  # profile, task inference, recommendation, cleaning, EDA, plots
+  deterministic.py  # profile, task inference, public recommendation, cleaning, EDA, plots
+  deterministic_diagnostics.py  # compact training-only structural and target diagnostics
+  deterministic_policy.py  # versioned thresholds, compatibility scoring, eligibility
   validation.py     # fail-closed target, leakage, preprocessing, and split/CV invariants
   preprocessing.py  # typed contract, requirement derivation, and canonical builder
   llm.py            # OpenAI Responses API specialist agents
@@ -85,7 +87,11 @@ one final holdout evaluation -> report + artifacts
 
 Target establishment is the one unavoidable pre-split stage: the target and task are needed to construct the correct supervised split, especially a stratified classification split. It does not choose a model family. After target/task establishment, the holdout membership is frozen before any model-family, preprocessing, reconciliation, or model-selection reasoning, and those decisions use training-partition evidence only. The holdout is reserved for the final evaluation.
 
-The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable training-partition characteristics. Once the gate approves a method, a separate deterministic contract still has to prove that training may safely proceed. Agreement between two recommenders is not proof of model quality or data validity.
+The deterministic recommendation is intentionally not a model-selection benchmark or a second predictive model. Policy version 2 profiles only the frozen training partition and scores the compatibility of `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree` using explicit, auditable factors: dataset scale, usable feature count, sample-to-feature ratio, numeric/categorical/binary composition, exclusions, missingness pattern, categorical cardinality and estimated one-hot expansion, candidate post-preprocessing dimensionality, numeric multicollinearity, Pearson/Spearman and binned-target nonlinearity signals, heuristic interaction potential, numeric outlier burden, and task-appropriate target balance or robustness diagnostics. Compatibility scores are bounded policy points, not probabilities and not claims of optimality. The recommendation persists the score for every family, ranked methods, eligibility and safety reasons, diagnostics, score contributions, confidence/margin, preprocessing contract, and policy version. It remains independent of the LLM, holdout, empirical reference, and prior live results.
+
+The policy uses the same canonical categorical-cardinality and one-hot safety limits as `app.preprocessing`. Linear and regularized-linear families use the production one-hot path; boosted trees use the production ordinal path. Candidate one-hot families are marked ineligible when the estimated encoded dimension exceeds the canonical safe bound; this is distinct from merely ranking a valid family lower. The validation gate remains the fail-closed authority after recommendation. In classification, `linear` uses unregularized logistic regression (`penalty=None`) while `regularized_linear` uses L2-regularized logistic regression; regression uses `LinearRegression` versus `Ridge`. Boosted trees can rank first when nonlinear evidence, adequate sample size, and manageable effective dimensionality jointly support them, but the policy does not force that outcome.
+
+The policy can be wrong and is evaluated separately against the evaluation-only empirical CV reference. That reference never enters runtime recommendation or reconciliation, and the holdout is never used for model-family recommendation.
 
 If the deterministic recommender fails, the validation gate remains incomplete and the run stops before training; the agent plan is retained for auditability, but it is never copied into a deterministic recommendation.
 
@@ -307,4 +313,4 @@ Rotate any key that has been pasted into chat, a terminal transcript, or a repos
 
 This is a strong foundation for experimentation, not an autonomous production data scientist. It currently focuses on CSV tables, supervised classification/regression, a small allow-list of model families, and one holdout split. Natural next extensions are schema adapters for Parquet/SQL, richer target inference, uncertainty and calibration, experiment tracking, formal evaluation of agent-vs-deterministic agreement rates, and domain-specific semantic leakage policies. The deterministic gate validates whether training may safely proceed; it does not replace domain review or empirical model comparison.
 
-The design keeps those extensions localized: schema/recommendation policies live in `app/deterministic.py`, hard training invariants in `app/validation.py`, new models in `app/modeling.py`, and new specialist outputs in `app/llm.py` and `app/schemas.py`.
+The design keeps those extensions localized: the public recommendation interface lives in `app/deterministic.py`, diagnostics in `app/deterministic_diagnostics.py`, the versioned scoring policy in `app/deterministic_policy.py`, hard training invariants in `app/validation.py`, new models in `app/modeling.py`, and new specialist outputs in `app/llm.py` and `app/schemas.py`.

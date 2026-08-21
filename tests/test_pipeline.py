@@ -26,6 +26,16 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
 
     assert decision["validation"]["selected_method"]
     assert decision["validation"]["status"] in {"agreement", "disagreement_resolved"}
+    deterministic = decision["deterministic_recommendation"]
+    assert set(deterministic["method_scores"]) == {
+        "linear",
+        "regularized_linear",
+        "tree_ensemble",
+        "boosted_tree",
+    }
+    assert deterministic["diagnostics"]["rows"] == decision["split_contract"]["train_rows"]
+    assert deterministic["policy_version"] == "2"
+    assert decision["deterministic_policy_version"] == "2"
     deterministic_validation = decision["validation"]["deterministic_validation"]
     assert deterministic_validation["overall_status"] == "passed"
     assert {check["code"] for check in deterministic_validation["checks"]} >= {
@@ -39,6 +49,9 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
     assert manifest["api_used"] is False
     assert (run_dir / "report.md").exists()
     assert (run_dir / "reproduce_analysis.py").exists()
+    report = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "Deterministic compatibility evidence" in report
+    assert "bounded policy points, not probabilities" in report
     assert "deterministic_recommendation" in (run_dir / "reproduce_analysis.py").read_text(
         encoding="utf-8"
     )

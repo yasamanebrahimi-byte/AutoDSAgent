@@ -183,6 +183,7 @@ def run_analysis(
             {
                 "agent_plan": agent_plan.model_dump(mode="json"),
                 "deterministic_recommendation": deterministic.model_dump(mode="json"),
+                "deterministic_policy_version": deterministic.policy_version,
                 "validation": validation,
             }
         )
@@ -351,6 +352,7 @@ def run_analysis(
             "warnings": warnings,
             "validation_status": validation["status"],
             "selected_method": validation["selected_method"],
+            "deterministic_policy_version": deterministic.policy_version,
             "artifacts": artifact_names,
         }
         write_json(run_dir / "run.json", manifest)
@@ -398,6 +400,7 @@ def run_analysis(
                 "validation_status": "failed",
                 "failure": decision_payload["failure"],
                 "api_used": any(source == "openai" for source in agent_sources.values()),
+                "deterministic_policy_version": deterministic.policy_version if deterministic else None,
                 "gate_completed_before_training": False,
                 "model_training_occurred": False,
             },
@@ -602,6 +605,8 @@ def _validate_before_training(
         else None,
         "agent_method": agent_plan.recommended_method,
         "deterministic_method": deterministic.recommended_method,
+        "deterministic_policy_version": deterministic.policy_version,
+        "deterministic_recommendation_evidence": deterministic.model_dump(mode="json"),
     }
 
 

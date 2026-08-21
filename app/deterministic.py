@@ -141,44 +141,96 @@ def deterministic_recommendation(
     target_hint: str | None = None,
     task_type: TaskType | None = None,
 ) -> DeterministicRecommendation:
+    """Recommend a model family from the supplied training-only dataframe.
+
+    The public caller must provide the frozen training partition.  This
+    function never receives or consults holdout values, empirical CV results,
+    or prior agent decisions.
+    """
+
     target_column = choose_target(dataframe, question, target_hint)
     task_type = task_type or infer_task(dataframe, target_column)
+    from app.deterministic_diagnostics import compute_deterministic_diagnostics
+    from app.deterministic_policy import (
+        SUPPORTED_METHOD_ORDER,
+        DeterministicPolicy,
+        score_model_families,
+    )
+    from app.preprocessing import requirements_from_records
+
+    policy = DeterministicPolicy()
+    diagnostics = compute_deterministic_diagnostics(
+        dataframe,
+        target_column,
+        task_type,
+        policy=policy,
+    )
     feature_records = [
         record
         for record in profile_dataframe(dataframe)["column_details"]
         if record["name"] != target_column
     ]
-    usable = [record for record in feature_records if not record["identifier_like"]]
-    numeric_count = sum(record["semantic_type"] in {"numeric", "numeric_like"} for record in usable)
-    categorical_count = sum(record["semantic_type"] in {"categorical", "boolean"} for record in usable)
-    text_count = sum(record["semantic_type"] == "text" for record in usable)
-    missing_fraction = max((record["missing_fraction"] for record in usable), default=0.0)
-    rows = len(dataframe)
-
-    if text_count or categorical_count >= 2 or missing_fraction >= 0.25:
-        method: Method = "tree_ensemble"
-        reason = "The schema contains categorical/text structure or substantial missingness, so a tree ensemble is a conservative non-linear baseline after safe preprocessing."
-    elif numeric_count >= 3 and rows >= 200 and numeric_count < rows / 8:
-        method = "regularized_linear"
-        reason = "The dataset is numeric, has enough rows for stable validation, and has a feature count where regularization controls coefficient variance."
+    requirements_by_method = {
+        candidate: requirements_from_records(feature_records, task_type, candidate)
+        for candidate in SUPPORTED_METHOD_ORDER
+    }
+    assessments = score_model_families(diagnostics, policy=policy)
+    eligible_scores = {
+        method: int(assessment.score)
+        for method, assessment in assessments.items()
+        if assessment.eligible and assessment.score is not None
+    }
+    if eligible_scores:
+        ranked = sorted(
+            eligible_scores,
+            key=lambda candidate: (-eligible_scores[candidate], SUPPORTED_METHOD_ORDER.index(candidate)),
+        )
+        method: Method = ranked[0]
     else:
+        # The fail-closed validation gate remains the authority when no family
+        # is executable.  Keeping a supported fallback makes the failed
+        # recommendation itself inspectable rather than hiding the evidence.
+        ranked = list(SUPPORTED_METHOD_ORDER)
         method = "linear"
-        reason = "The compact deterministic baseline favors an interpretable linear family when the schema is mostly numeric and no stronger structural signal is available before fitting."
-
-    from app.preprocessing import requirements_from_records
-
-    preprocessing_requirements = requirements_from_records(
-        feature_records,
-        task_type,
-        method,
-    )
+    top_score = eligible_scores.get(method)
+    runner_up_score = eligible_scores.get(ranked[1]) if len(ranked) > 1 else None
+    score_margin = float(top_score - runner_up_score) if top_score is not None and runner_up_score is not None else None
+    if score_margin is None or score_margin < policy.low_confidence_margin:
+        confidence = "low"
+    elif score_margin < policy.high_confidence_margin:
+        confidence = "medium"
+    else:
+        confidence = "high"
+    preprocessing_requirements = requirements_by_method[method]
     preprocessing = preprocessing_requirements.expected_contract
+    selected_assessment = assessments[method]
+    positive_reasons = [
+        contribution.observation
+        for contribution in selected_assessment.contributions
+        if contribution.points > 0
+    ][:3]
+    reason_detail = "; ".join(positive_reasons) or "no positive compatibility factor dominated"
+    reason = (
+        f"The training-only deterministic policy ranked {method} highest with "
+        f"compatibility score {top_score if top_score is not None else 'unavailable'} "
+        f"({confidence} confidence). It considered {diagnostics.usable_features} usable features "
+        f"across {diagnostics.rows} training rows, estimated {diagnostics.effective_features_estimate} "
+        f"post-one-hot features, and observed {diagnostics.nonlinearity_signal} nonlinearity. "
+        f"Key positive factors: {reason_detail}. Compatibility scores are policy rankings, not probabilities."
+    )
     evidence = [
-        f"rows={rows}",
-        f"usable_numeric_features={numeric_count}",
-        f"usable_categorical_features={categorical_count}",
-        f"text_features={text_count}",
-        f"max_missing_fraction={missing_fraction:.3f}",
+        f"training_rows={diagnostics.rows}",
+        f"usable_features={diagnostics.usable_features}",
+        f"numeric_features={diagnostics.numeric_feature_count}",
+        f"categorical_features={diagnostics.categorical_feature_count}",
+        f"effective_one_hot_features={diagnostics.effective_features_estimate}",
+        f"sample_to_feature_ratio={diagnostics.sample_to_feature_ratio:.3f}",
+        f"overall_missing_fraction={diagnostics.overall_missing_fraction:.3f}",
+        f"max_abs_numeric_correlation={diagnostics.max_abs_numeric_correlation:.3f}",
+        f"nonlinearity_signal={diagnostics.nonlinearity_signal}",
+        f"selected_score={top_score if top_score is not None else 'ineligible'}",
+        f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}",
+        f"confidence={confidence}",
     ]
     return DeterministicRecommendation(
         target_column=target_column,
@@ -186,11 +238,19 @@ def deterministic_recommendation(
         recommended_method=method,
         preprocessing=preprocessing,
         reasoning=reason,
-        evidence=evidence
-        + [
-            f"required_preprocessing={','.join(preprocessing_requirements.required_steps)}",
-            f"irrelevant_preprocessing={','.join(preprocessing_requirements.irrelevant_steps) or 'none'}",
-        ],
+        evidence=evidence,
+        policy_version=policy.version,
+        method_scores={
+            candidate: assessment.score
+            for candidate, assessment in assessments.items()
+        },
+        ranked_methods=ranked,
+        method_assessments=assessments,
+        diagnostics=diagnostics,
+        top_score=float(top_score) if top_score is not None else None,
+        runner_up_score=float(runner_up_score) if runner_up_score is not None else None,
+        score_margin=score_margin,
+        confidence=confidence,
     )
 
 

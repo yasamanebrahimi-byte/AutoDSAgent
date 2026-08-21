@@ -13,11 +13,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 from app.deterministic import is_identifier, semantic_type
+from app.deterministic_policy import MAX_CATEGORICAL_CARDINALITY, MAX_ONE_HOT_FEATURES
 from app.schemas import Method, PreprocessingContract, TaskType
-
-
-MAX_CATEGORICAL_CARDINALITY = 80
-MAX_ONE_HOT_FEATURES = 4000
 
 
 @dataclass(frozen=True)

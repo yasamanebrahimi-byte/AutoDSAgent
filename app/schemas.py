@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
 TaskType = Literal["classification", "regression"]
 Method = Literal["linear", "regularized_linear", "tree_ensemble", "boosted_tree"]
+ScoreEffect = Literal["favors", "penalizes", "limits"]
+ConfidenceLevel = Literal["low", "medium", "high"]
 CleaningAction = Literal[
     "trim_strings",
     "drop_exact_duplicates",
@@ -110,13 +112,99 @@ class AgentPlan(StrictModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class ClassificationTargetDiagnostics(StrictModel):
+    classes: int = Field(ge=0)
+    minority_class_fraction: float = Field(ge=0, le=1)
+    majority_class_fraction: float = Field(ge=0, le=1)
+    imbalance_ratio: float = Field(ge=0)
+    samples_per_class: dict[str, int] = Field(default_factory=dict)
+    minimum_class_size: int = Field(ge=0)
+
+
+class RegressionTargetDiagnostics(StrictModel):
+    variance: float = Field(ge=0)
+    skewness: float
+    outlier_fraction: float = Field(ge=0, le=1)
+    heavy_tail_signal: Literal["low", "moderate", "high"]
+
+
+class TargetDiagnostics(StrictModel):
+    classification: Optional[ClassificationTargetDiagnostics] = None
+    regression: Optional[RegressionTargetDiagnostics] = None
+
+
+class DeterministicDiagnostics(StrictModel):
+    """Compact, training-only facts used by the deterministic policy."""
+
+    rows: int = Field(ge=0)
+    usable_features: int = Field(ge=0)
+    excluded_features: int = Field(ge=0)
+    excluded_feature_types: dict[str, int] = Field(default_factory=dict)
+    numeric_feature_count: int = Field(ge=0)
+    categorical_feature_count: int = Field(ge=0)
+    binary_feature_count: int = Field(ge=0)
+    text_feature_count: int = Field(ge=0)
+    sample_to_feature_ratio: float = Field(ge=0)
+    effective_features_estimate: int = Field(ge=0)
+    linear_effective_features_estimate: int = Field(ge=0)
+    tree_effective_features_estimate: int = Field(ge=0)
+    boosted_effective_features_estimate: int = Field(ge=0)
+    overall_missing_fraction: float = Field(ge=0, le=1)
+    max_feature_missing_fraction: float = Field(ge=0, le=1)
+    features_with_missing_count: int = Field(ge=0)
+    features_with_missing_fraction: float = Field(ge=0, le=1)
+    missingness_pattern: Literal["none", "concentrated", "widespread"]
+    mean_categorical_cardinality: float = Field(ge=0)
+    max_categorical_cardinality: int = Field(ge=0)
+    estimated_one_hot_dimensionality: int = Field(ge=0)
+    high_cardinality_feature_count: int = Field(ge=0)
+    high_cardinality_feature_fraction: float = Field(ge=0, le=1)
+    max_abs_numeric_correlation: float = Field(ge=0, le=1)
+    high_correlation_pair_count: int = Field(ge=0)
+    high_correlation_pair_fraction: float = Field(ge=0, le=1)
+    pearson_spearman_gap: float = Field(ge=0, le=1)
+    mean_univariate_signal: float = Field(ge=0, le=1)
+    nonlinearity_score: float = Field(ge=0, le=1)
+    nonlinearity_signal: Literal["low", "moderate", "high"]
+    nonlinear_feature_count: int = Field(ge=0)
+    interaction_potential: float = Field(ge=0, le=1)
+    interaction_signal: Literal["low", "moderate", "high"]
+    numeric_outlier_feature_fraction: float = Field(ge=0, le=1)
+    numeric_outlier_cell_fraction: float = Field(ge=0, le=1)
+    target: TargetDiagnostics
+
+
+class DeterministicScoreContribution(StrictModel):
+    factor: str
+    effect: ScoreEffect
+    method: Method
+    points: int
+    observation: str
+
+
+class DeterministicMethodAssessment(StrictModel):
+    score: Optional[int] = Field(default=None, ge=0, le=100)
+    eligible: StrictBool
+    eligibility_reason: Optional[str] = None
+    contributions: list[DeterministicScoreContribution] = Field(default_factory=list, max_length=32)
+
+
 class DeterministicRecommendation(StrictModel):
     target_column: str
     task_type: TaskType
     recommended_method: Method
     preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
     reasoning: str = Field(min_length=20, max_length=1200)
-    evidence: list[str] = Field(min_length=1, max_length=8)
+    evidence: list[str] = Field(min_length=1, max_length=12)
+    policy_version: str = "2"
+    method_scores: dict[Method, Optional[float]] = Field(default_factory=dict)
+    ranked_methods: list[Method] = Field(default_factory=list, max_length=4)
+    method_assessments: dict[Method, DeterministicMethodAssessment] = Field(default_factory=dict)
+    diagnostics: Optional[DeterministicDiagnostics] = None
+    top_score: Optional[float] = Field(default=None, ge=0, le=100)
+    runner_up_score: Optional[float] = Field(default=None, ge=0, le=100)
+    score_margin: Optional[float] = Field(default=None, ge=0, le=100)
+    confidence: ConfidenceLevel = "low"
 
 
 class ConflictResolution(StrictModel):

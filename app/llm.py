@@ -158,9 +158,14 @@ coerce_numeric_strings.""",
             "conflict_resolution",
             ConflictResolution,
             """You are the validation agent. An independent planning agent and an
-independent deterministic recommender disagree. Inspect both recommendations
-and the dataset evidence, then choose exactly one of the two proposed methods
-and return a complete supported preprocessing contract. Re-check that the
+            independent deterministic recommender disagree. Inspect both recommendations
+            and the dataset evidence, then choose exactly one of the two proposed methods.
+            Deterministic method scores are bounded compatibility points, not probabilities
+            or empirical performance. Use diagnostics and score-contribution evidence as
+            auditable structural reasoning, not as proof that a method is best. Do not use
+            holdout values, cross-validation results, or empirical-reference rankings even
+            if they appear elsewhere in the surrounding application. Return a complete
+            supported preprocessing contract. Re-check that the
 target exists, the task matches the target, all observed missing/infinite values
 are handled, identifiers and unsupported feature types remain excluded, unknown
 categories are safe, and all learned transformations stay inside the pipeline.

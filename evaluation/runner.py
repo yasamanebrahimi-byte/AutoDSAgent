@@ -14,6 +14,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
+from app.deterministic_policy import DeterministicPolicy
 from app.llm import PROMPT_SCHEMA_VERSION, OpenAIAgents
 from app.pipeline import (
     _fallback_agent_plan,
@@ -684,6 +685,7 @@ def _run_trial(
         "deterministic_target": deterministic.target_column if deterministic else None,
         "deterministic_task": deterministic.task_type if deterministic else None,
         "deterministic_method": deterministic.recommended_method if deterministic else None,
+        "deterministic_policy_version": deterministic.policy_version if deterministic else None,
         "deterministic_preprocessing": deterministic.preprocessing.model_dump(mode="json") if deterministic else None,
         "deterministic_failure": deterministic_failure,
         "agreement_status": agreement_status,
@@ -931,6 +933,7 @@ def run_evaluation(
         "agent_model_requested": config.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
         "prompt_schema_version": config.prompt_schema_version,
+        "deterministic_policy_version": DeterministicPolicy().version,
         "generation_settings": {"seed": None, "temperature": None},
         "evaluation_settings": {
             "primary_metrics": {"classification": "macro_f1", "regression": "rmse"},

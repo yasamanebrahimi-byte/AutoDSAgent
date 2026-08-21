@@ -182,6 +182,17 @@ def render_report(
     deterministic_preprocessing = validation.get("deterministic_preprocessing", {})
     material_differences = preprocessing_comparison.get("material_differences", [])
     reconciliation = validation.get("reconciliation")
+    diagnostics = deterministic.diagnostics.model_dump(mode="json") if deterministic.diagnostics else {}
+    score_lines = "\n".join(
+        f"- <code>{method}</code>: <code>{score if score is not None else 'ineligible'}</code>"
+        for method, score in deterministic.method_scores.items()
+    )
+    selected_assessment = deterministic.method_assessments.get(deterministic.recommended_method)
+    contribution_lines = "\n".join(
+        f"- <code>{item.factor}</code> ({item.points:+d}): {item.observation}"
+        for item in (selected_assessment.contributions if selected_assessment else [])
+        if item.points != 0
+    ) or "- no non-zero contribution recorded"
     cv_lines = "\n".join(
         f"- <code>{key}</code>: <code>{value:.4f}</code>"
         for key, value in modeling["cv_metrics"].items()
@@ -208,6 +219,20 @@ The workflow intentionally made a modeling decision before fitting any model.
 | Final approved plan | <code>{validation['selected_target_column']}</code> | <code>{validation['selected_task_type']}</code> | <code>{chosen}</code> |
 
 Deterministic reasoning: {deterministic.reasoning}
+
+### Deterministic compatibility evidence
+
+Policy version: <code>{deterministic.policy_version}</code>; confidence: <code>{deterministic.confidence}</code>; score margin: <code>{deterministic.score_margin if deterministic.score_margin is not None else 'unavailable'}</code>.
+
+Method-family compatibility scores (bounded policy points, not probabilities):
+
+{score_lines}
+
+Training-only diagnostics: <code>{json.dumps(diagnostics, sort_keys=True)}</code>.
+
+Selected-family score contributions:
+
+{contribution_lines}
 
 Validation decision: {validation.get('justification', 'The recommendations matched on target, task, and method.')}
 
