@@ -7,7 +7,12 @@ import pytest
 
 from app.pipeline import _validate_before_training, run_analysis
 from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation
-from app.validation import InvariantViolation, validate_training_plan
+from app.validation import (
+    InvariantViolation,
+    freeze_supervised_split,
+    training_partition_frame,
+    validate_training_plan,
+)
 
 
 def _classification_frame(rows: int = 40) -> pd.DataFrame:
@@ -50,6 +55,18 @@ def test_missing_classification_targets_are_filtered_before_string_encoding():
     assert "None" not in _check(result, "classification_target_has_two_classes")["evidence"][
         "class_counts"
     ]
+
+
+def test_training_partition_frame_fails_closed_for_unreconciled_positions():
+    frame = _classification_frame()
+    split = freeze_supervised_split(frame, "target", "classification")
+
+    with pytest.raises(InvariantViolation):
+        training_partition_frame(frame.iloc[:-1], split, np.arange(len(frame)))
+    unknown_positions = np.arange(len(frame))
+    unknown_positions[0] = len(frame)
+    with pytest.raises(InvariantViolation):
+        training_partition_frame(frame, split, unknown_positions)
 
 
 @pytest.mark.parametrize(

@@ -40,9 +40,15 @@ import json
 from pathlib import Path
 import pandas as pd
 from app.schemas import PreprocessingContract
-from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary, profile_dataframe
+from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary
 from app.modeling import fit_selected_model
-from app.validation import freeze_supervised_split, prepare_validated_frame, validated_row_positions, validate_training_plan
+from app.validation import (
+    freeze_supervised_split,
+    prepare_validated_frame,
+    training_partition_frame,
+    validated_row_positions,
+    validate_training_plan,
+)
 
 DATASET = Path(r"{dataset_path}")
 RUN_DIR = Path(__file__).resolve().parent
@@ -83,7 +89,6 @@ if split.as_dict() != recorded_split:
     )
 # deterministic_recommendation is recorded for audit; reproduction never makes
 # a new preprocessing decision and uses the recorded approved contract below.
-profile = profile_dataframe(raw)
 raw_validation = validate_training_plan(
     raw,
     TARGET,
@@ -127,7 +132,8 @@ cleaned_row_positions = validated_row_positions(
     cleaned_row_positions,
 )
 cleaned = prepare_validated_frame(cleaned, cleaned_validation)
-print(eda_summary(cleaned, TARGET))
+eda_frame = training_partition_frame(cleaned, split, cleaned_row_positions)
+print(eda_summary(eda_frame, TARGET))
 result = fit_selected_model(
     cleaned,
     target_column=TARGET,
@@ -236,7 +242,7 @@ Selected-family score contributions:
 
 Validation decision: {validation.get('justification', 'The recommendations matched on target, task, and method.')}
 
-Holdout boundary: target/task establishment completed before the supervised split; the frozen holdout was reserved for final evaluation. Modeling-agent evidence, deterministic recommendation evidence, preprocessing requirements, and any reconciliation used the training partition only.
+Holdout boundary: target/task establishment completed before the supervised split. Modeling-agent evidence, deterministic recommendation evidence, reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation used training-partition evidence only. The EDA artifact contains <code>{eda.get('rows', 0)}</code> cleaned training rows and no holdout rows. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those guardrail checks are not planning evidence. The frozen holdout was scored once for final model evaluation.
 
 Deterministic contract: <code>{deterministic_validation.get('status', 'not recorded')}</code> ({passed_checks}/{len(validation_checks)} checks passed); target rows removed: <code>{deterministic_validation.get('target_rows_removed', 0)}</code>; direct leakage detected: <code>{deterministic_validation.get('direct_leakage_detected', False)}</code>.
 
@@ -276,7 +282,7 @@ Applied structural actions: <code>{', '.join(cleaning_log['applied_actions']) if
 
 {finding_lines}
 
-The numeric relationships and target distribution are computed deterministically; the EDA agent only interprets those values.
+The pre-evaluation numeric relationships, target distribution, missingness, and plots were computed deterministically from the frozen training partition only; the EDA agent received only those training-only summaries and interpreted those values without inspecting holdout data.
 
 ## Modeling
 

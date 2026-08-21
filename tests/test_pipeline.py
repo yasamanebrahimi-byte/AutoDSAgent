@@ -23,6 +23,7 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
     run_dir = Path(result["run_dir"])
     decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    eda = json.loads((run_dir / "eda.json").read_text(encoding="utf-8"))
 
     assert decision["validation"]["selected_method"]
     assert decision["validation"]["status"] in {"agreement", "disagreement_resolved"}
@@ -45,6 +46,10 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
     }
     assert deterministic_validation["validated_target_column"] == "disease_progression"
     assert decision["gate_completed_before_training"] is True
+    assert eda["data_scope"] == "training_partition_only"
+    assert eda["training_rows"] == eda["computed"]["rows"]
+    assert eda["holdout_rows_included"] == 0
+    assert eda["train_positions_digest"] == decision["split_contract"]["train_positions_digest"]
     assert set(decision["agent_sources"]) >= {"modeling", "cleaning", "eda", "report"}
     assert manifest["api_used"] is False
     assert (run_dir / "report.md").exists()
@@ -52,10 +57,15 @@ def test_offline_run_persists_the_validation_gate_and_report(tmp_path: Path):
     report = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "Deterministic compatibility evidence" in report
     assert "bounded policy points, not probabilities" in report
+    assert "pre-evaluation numeric relationships" in report
+    assert "no holdout rows" in report
     assert "deterministic_recommendation" in (run_dir / "reproduce_analysis.py").read_text(
         encoding="utf-8"
     )
     assert "validate_training_plan" in (run_dir / "reproduce_analysis.py").read_text(
+        encoding="utf-8"
+    )
+    assert "training_partition_frame" in (run_dir / "reproduce_analysis.py").read_text(
         encoding="utf-8"
     )
 

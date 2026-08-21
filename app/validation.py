@@ -811,6 +811,59 @@ def training_profile_frame(
     return dataframe.iloc[list(split.train_row_positions)].reset_index(drop=True)
 
 
+def training_partition_frame(
+    dataframe: pd.DataFrame,
+    split: FrozenSplit,
+    row_positions: Sequence[int],
+) -> pd.DataFrame:
+    """Return only cleaned rows mapped to the frozen training partition.
+
+    The mapping is expressed in original source-row positions because cleaning
+    can remove rows and reset the dataframe index.  This helper validates the
+    complete frozen membership contract before selecting rows and fails closed
+    if the caller supplies an unreconcilable mapping.
+    """
+
+    raw_positions = np.asarray(row_positions)
+    if raw_positions.ndim != 1 or len(raw_positions) != len(dataframe):
+        raise InvariantViolation(
+            "The row-position mapping must be one-dimensional with one entry per cleaned dataframe row."
+        )
+    try:
+        positions = raw_positions.astype(np.int64)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InvariantViolation("The row-position mapping must contain integer source-row positions.") from exc
+    if not np.array_equal(raw_positions, positions):
+        raise InvariantViolation("The row-position mapping must contain integer source-row positions.")
+    if len(np.unique(positions)) != len(positions):
+        raise InvariantViolation("The row-position mapping must not contain duplicate source-row positions.")
+
+    valid_set = set(int(value) for value in split.valid_row_positions)
+    train_set = set(int(value) for value in split.train_row_positions)
+    holdout_set = set(int(value) for value in split.holdout_row_positions)
+    if train_set & holdout_set or valid_set != train_set | holdout_set:
+        raise InvariantViolation("The frozen split contract has inconsistent train/holdout membership.")
+    if not set(int(value) for value in positions).issubset(valid_set):
+        raise InvariantViolation(
+            "Cleaned rows contain source positions outside the valid rows in the frozen split contract."
+        )
+
+    training_mask = np.isin(positions, np.asarray(tuple(train_set), dtype=np.int64))
+    holdout_mask = np.isin(positions, np.asarray(tuple(holdout_set), dtype=np.int64))
+    if np.any(training_mask & holdout_mask) or not np.all(training_mask | holdout_mask):
+        raise InvariantViolation(
+            "Every cleaned row must resolve to exactly one frozen training or holdout partition."
+        )
+    training_positions = positions[training_mask]
+    if not set(int(value) for value in training_positions).issubset(train_set):
+        raise InvariantViolation("The EDA frame contains a source position outside the frozen training partition.")
+
+    training_frame = dataframe.loc[training_mask].reset_index(drop=True).copy()
+    if len(training_frame) != len(training_positions):
+        raise InvariantViolation("The training-only EDA frame could not be reconciled with source positions.")
+    return training_frame
+
+
 def freeze_supervised_split(
     dataframe: pd.DataFrame,
     target_column: str,

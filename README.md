@@ -8,7 +8,8 @@ The central idea is simple:
 2. Freeze one deterministic supervised train/holdout partition using positional row membership, the configured seed, and stratification when required.
 3. Give the independent modeling agent and deterministic recommender the same compact profile built from training rows only.
 4. A validation gate compares both independent plans before any model is fit. Disagreement triggers a second agent call that investigates the deterministic recommendation using the same training-only evidence.
-5. Specialist calls help plan cleaning, interpret computed EDA, and write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
+5. Apply structural cleaning while preserving original row positions, then compute EDA and plots from cleaned training rows only. The EDA agent interprets those training-only summaries before the approved model is fit.
+6. Specialist calls write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
@@ -31,7 +32,7 @@ The actual fit is deliberately deterministic after the gate: scikit-learn trains
 - Deterministic schema profiling and classification/regression inference.
 - A pre-training validation gate persisted in `decision.json`.
 - Safe structural cleaning with an allow-list; learned imputation and encoding live inside scikit-learn pipelines.
-- Cross-validation on the training partition only, followed by one untouched holdout evaluation.
+- Training-only modeling-agent planning, deterministic diagnostics/recommendation, reconciliation, preprocessing requirements, structural-cleaning decisions, EDA, and plots, followed by training-only cross-validation and one untouched holdout evaluation.
 - A saved model, plots, compact JSON artifacts, Markdown report, and generated reproduction script for every run.
 - Small tests covering recommendation, model training, artifact persistence, and the full offline path.
 - Bundled public benchmark datasets for a repeatable walkthrough.
@@ -79,13 +80,16 @@ training-only profile
 VALIDATION GATE
     |
     v
+structural cleaning -> training-only EDA + plots
+    |
+    v
 training-only CV + preprocessing
     |
     v
 one final holdout evaluation -> report + artifacts
 ```
 
-Target establishment is the one unavoidable pre-split stage: the target and task are needed to construct the correct supervised split, especially a stratified classification split. It does not choose a model family. After target/task establishment, the holdout membership is frozen before any model-family, preprocessing, reconciliation, or model-selection reasoning, and those decisions use training-partition evidence only. The holdout is reserved for the final evaluation.
+Target establishment is the one unavoidable pre-split stage: the target and task are needed to construct the correct supervised split, especially a stratified classification split. It does not choose a model family. After target/task establishment, the holdout membership is frozen before any model-family, preprocessing, reconciliation, structural-cleaning, or model-selection reasoning. Modeling-agent planning, deterministic diagnostics/recommendation, reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation use training-partition evidence only. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those checks are guardrails rather than planning evidence. The holdout is reserved for the one final model evaluation.
 
 The deterministic recommendation is intentionally not a model-selection benchmark or a second predictive model. Policy version 2 profiles only the frozen training partition and scores the compatibility of `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree` using explicit, auditable factors: dataset scale, usable feature count, sample-to-feature ratio, numeric/categorical/binary composition, exclusions, missingness pattern, categorical cardinality and estimated one-hot expansion, candidate post-preprocessing dimensionality, numeric multicollinearity, Pearson/Spearman and binned-target nonlinearity signals, heuristic interaction potential, numeric outlier burden, and task-appropriate target balance or robustness diagnostics. Compatibility scores are bounded policy points, not probabilities and not claims of optimality. The recommendation persists the score for every family, ranked methods, eligibility and safety reasons, diagnostics, score contributions, confidence/margin, preprocessing contract, and policy version. It remains independent of the LLM, holdout, empirical reference, and prior live results.
 
@@ -108,7 +112,7 @@ The contract stops training when:
 - `test_size`, stratification, holdout size, training-fold class coverage, or regression CV feasibility is invalid;
 - numeric infinities cannot be handled under the documented policy.
 
-Target rows are filtered deterministically before classification labels are converted to strings. Numeric feature infinities become missing values before training-only imputation. Imputation, scaling, encoding, and model fitting remain inside the scikit-learn pipeline; the holdout is reserved for the final evaluation and is not used for reconciliation, preprocessing fitting, or cross-validation. Boosted trees use bounded ordinal encoding for categorical features instead of a dense one-hot expansion.
+Target rows are filtered deterministically before classification labels are converted to strings. Numeric feature infinities become missing values before training-only imputation. Imputation, scaling, encoding, and model fitting remain inside the scikit-learn pipeline; the holdout is reserved for the final evaluation and is not used for reconciliation, preprocessing fitting, pre-evaluation EDA, plots, or cross-validation. Boosted trees use bounded ordinal encoding for categorical features instead of a dense one-hot expansion.
 
 Name-based indicators such as a feature containing the target name are recorded as warnings for domain review. They do not block a run without stronger deterministic evidence. Semantic leakage, post-outcome variables, temporal leakage, proxy variables, and whether a feature was available at prediction time still require subject-matter review. These checks prove that a run meets the workflow's safety and feasibility preconditions; they do not prove that leakage is impossible, that the chosen family is empirically optimal, or that the model is fit for deployment.
 
@@ -278,11 +282,11 @@ Results are written as `config.json`, `trials.jsonl`, `summary.json`, `summary.m
 The most important files are:
 
 - `decision.json`: independent plan, deterministic plan, final gate status, reconciliation evidence, and every deterministic invariant check.
-- `profile.json`: compact dataset facts supplied to the agents.
+- `profile.json`: compact full-dataset facts recorded after final evaluation for report context; `planning_profile.json` is the training-only profile supplied to modeling and reconciliation.
 - `planning_profile.json`: the compact profile supplied to modeling and reconciliation, built from frozen training rows only.
 - `split_contract` in `decision.json`: target/task, seed, holdout policy, source fingerprint, and train/holdout position digests.
 - `cleaning.json`: requested and applied structural actions.
-- `eda.json`: deterministic EDA values plus agent findings and plot paths.
+- `eda.json`: deterministic training-partition-only EDA values, scope metadata, agent findings, and plot paths.
 - `modeling.json`: selected model, CV metrics, holdout metrics, feature handling, and artifact path.
 - `report.md`: analyst-style narrative.
 - `reproduce_analysis.py`: executable replay of the approved decision plus the deterministic cleaning, EDA, and modeling stages.

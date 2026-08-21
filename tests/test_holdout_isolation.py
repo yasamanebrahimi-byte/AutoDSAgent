@@ -6,11 +6,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app.deterministic import deterministic_recommendation, profile_dataframe
+from app.deterministic import deterministic_recommendation, eda_summary, profile_dataframe
 from app.pipeline import _validate_before_training, run_analysis
 from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation
 from app.validation import (
     freeze_supervised_split,
+    training_partition_frame,
     training_profile_frame,
     validate_training_plan,
 )
@@ -218,6 +219,41 @@ def test_holdout_only_perturbation_does_not_change_planning_evidence_or_recommen
     assert original_recommendation.model_dump(mode="json") == perturbed_recommendation.model_dump(mode="json")
     assert split.train_row_positions == perturbed_split.train_row_positions
     assert split.holdout_row_positions == perturbed_split.holdout_row_positions
+
+
+def test_holdout_only_perturbation_does_not_change_training_only_eda_input():
+    original = _frame(100)
+    split = freeze_supervised_split(original, "target", "classification")
+    holdout = np.asarray(split.holdout_row_positions, dtype=int)
+    perturbed = original.copy()
+    perturbed.loc[holdout, "signal"] = np.linspace(1e9, 2e9, len(holdout))
+    perturbed.loc[holdout, "segment"] = [f"unseen-category-{index}" for index in range(len(holdout))]
+    perturbed.loc[holdout, "region"] = [f"unseen-region-{index}" for index in range(len(holdout))]
+
+    # Emulate structural cleaning having removed rows while retaining the
+    # original source positions rather than relying on reset dataframe indices.
+    removed = np.array([split.train_row_positions[0], split.holdout_row_positions[0]])
+    keep = ~np.isin(np.arange(len(original)), removed)
+    original_cleaned = original.loc[keep].reset_index(drop=True)
+    perturbed_cleaned = perturbed.loc[keep].reset_index(drop=True)
+    cleaned_positions = np.flatnonzero(keep)
+
+    original_eda_frame = training_partition_frame(original_cleaned, split, cleaned_positions)
+    perturbed_eda_frame = training_partition_frame(perturbed_cleaned, split, cleaned_positions)
+    original_agent_input = eda_summary(original_eda_frame, "target")
+    perturbed_agent_input = eda_summary(perturbed_eda_frame, "target")
+    expected_training_positions = cleaned_positions[
+        np.isin(cleaned_positions, split.train_row_positions)
+    ]
+
+    assert original_agent_input == perturbed_agent_input
+    assert original_agent_input["rows"] == len(split.train_row_positions) - 1
+    assert set(cleaned_positions).issubset(set(split.valid_row_positions))
+    assert np.array_equal(
+        original_eda_frame["signal"].to_numpy(),
+        original.loc[expected_training_positions, "signal"].to_numpy(),
+    )
+    assert not set(expected_training_positions).intersection(set(split.holdout_row_positions))
 
 
 def test_reconciliation_receives_structured_deterministic_evidence():

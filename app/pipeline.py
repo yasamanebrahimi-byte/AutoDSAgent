@@ -35,6 +35,7 @@ from app.validation import (
     ValidationResult,
     freeze_supervised_split,
     prepare_validated_frame,
+    training_partition_frame,
     training_profile_frame,
     validated_row_positions,
     validate_training_plan,
@@ -63,9 +64,6 @@ def run_analysis(
     run_dir = Path(output_dir).resolve() / run_id
     for child in ["data", "plots", "model"]:
         (run_dir / child).mkdir(parents=True, exist_ok=True)
-
-    profile = profile_dataframe(dataframe)
-    write_json(run_dir / "profile.json", profile)
 
     agents = OpenAIAgents(api_key=api_key, model=model)
     warnings: list[str] = []
@@ -249,8 +247,9 @@ def run_analysis(
         decision_payload["validation"] = validation
         write_json(run_dir / "decision.json", decision_payload)
 
-        computed_eda = eda_summary(cleaned, selected_target)
-        plot_paths = make_plots(cleaned, selected_target, run_dir / "plots")
+        eda_frame = training_partition_frame(cleaned, split, cleaned_row_positions)
+        computed_eda = eda_summary(eda_frame, selected_target)
+        plot_paths = make_plots(eda_frame, selected_target, run_dir / "plots")
         findings = _call_or_fallback(
             "eda",
             lambda: agents.eda(question, computed_eda),
@@ -261,7 +260,15 @@ def run_analysis(
         )
         write_json(
             run_dir / "eda.json",
-            {"computed": computed_eda, "agent_findings": findings, "plots": plot_paths},
+            {
+                "data_scope": "training_partition_only",
+                "training_rows": int(len(eda_frame)),
+                "holdout_rows_included": 0,
+                "train_positions_digest": split.as_dict()["train_positions_digest"],
+                "computed": computed_eda,
+                "agent_findings": findings,
+                "plots": plot_paths,
+            },
         )
 
         decision_payload["gate_completed_before_training"] = True
@@ -284,6 +291,8 @@ def run_analysis(
         write_json(run_dir / "modeling.json", modeling)
         decision_payload["model_training_occurred"] = True
         write_json(run_dir / "decision.json", decision_payload)
+        profile = profile_dataframe(dataframe)
+        write_json(run_dir / "profile.json", profile)
 
         report_context = {
             "profile": profile,
