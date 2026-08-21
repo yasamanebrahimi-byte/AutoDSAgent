@@ -12,6 +12,8 @@ The central idea is simple:
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
+The agent recommendation can never substitute for a failed deterministic recommendation. If the independent deterministic recommender is unavailable, the run fails closed before model training. A recorded agreement means both independent recommendation paths completed successfully and materially agreed.
+
 ### Agent roles
 
 - Modeling agent: independently proposes the target, classification/regression task, preprocessing, and model family.
@@ -71,6 +73,8 @@ clean -> EDA -> approved training -> report + artifacts
 ```
 
 The deterministic recommendation is intentionally not a model-selection benchmark. It is a pre-training policy that makes a defensible recommendation from observable data characteristics. Once the gate approves a method, a separate deterministic contract still has to prove that training may safely proceed. Agreement between two recommenders is not proof of model quality or data validity.
+
+If the deterministic recommender fails, the validation gate remains incomplete and the run stops before training; the agent plan is retained for auditability, but it is never copied into a deterministic recommendation.
 
 ## Deterministic validation boundary
 

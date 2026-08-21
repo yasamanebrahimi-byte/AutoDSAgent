@@ -28,6 +28,7 @@ from app.schemas import (
     ReportDraft,
 )
 from app.validation import (
+    DeterministicRecommendationUnavailable,
     InvariantViolation,
     ValidationResult,
     prepare_validated_frame,
@@ -84,6 +85,8 @@ def run_analysis(
         "warnings": warnings,
         "agent_sources": agent_sources,
         "gate_completed_before_training": False,
+        "validation_gate_status": "not_completed",
+        "model_training_occurred": False,
     }
     try:
         agent_plan = _call_or_fallback(
@@ -94,11 +97,10 @@ def run_analysis(
             agent_sources,
             offline=offline,
         )
-        deterministic = _safe_deterministic_recommendation(
+        deterministic = _deterministic_recommendation_or_fail(
             planning_frame,
             question,
             target_column,
-            agent_plan,
             warnings,
         )
         validation = _validate_before_training(
@@ -182,6 +184,7 @@ def run_analysis(
         )
 
         decision_payload["gate_completed_before_training"] = True
+        decision_payload["validation_gate_status"] = "completed"
         decision_payload["warnings"] = warnings
         decision_payload["agent_sources"] = agent_sources
         write_json(run_dir / "decision.json", decision_payload)
@@ -196,6 +199,8 @@ def run_analysis(
             random_state=random_state,
         )
         write_json(run_dir / "modeling.json", modeling)
+        decision_payload["model_training_occurred"] = True
+        write_json(run_dir / "decision.json", decision_payload)
 
         report_context = {
             "profile": profile,
@@ -278,16 +283,26 @@ def run_analysis(
         if exc.result is not None:
             failed_validation = _failed_validation_payload(exc.result, validation)
             decision_payload["validation"] = failed_validation
+            decision_payload["validation_gate_status"] = "failed"
         decision_payload["warnings"] = warnings
         decision_payload["agent_sources"] = agent_sources
         decision_payload["gate_completed_before_training"] = False
+        decision_payload["model_training_occurred"] = False
         decision_payload["failure"] = {
+            "code": getattr(exc, "code", "validation_failed"),
             "error_type": type(exc).__name__,
             "message": str(exc),
             "check_codes": [check.code for check in exc.result.failed_checks]
             if exc.result is not None
             else [],
         }
+        if isinstance(exc, DeterministicRecommendationUnavailable):
+            decision_payload["failure"].update(
+                {
+                    "original_error_type": exc.original_error_type,
+                    "original_error_message": exc.original_error_message,
+                }
+            )
         if agent_plan is not None:
             decision_payload["agent_plan"] = agent_plan.model_dump(mode="json")
         if deterministic is not None:
@@ -301,6 +316,8 @@ def run_analysis(
                 "validation_status": "failed",
                 "failure": decision_payload["failure"],
                 "api_used": any(source == "openai" for source in agent_sources.values()),
+                "gate_completed_before_training": False,
+                "model_training_occurred": False,
             },
         )
         model_path = run_dir / "model" / "selected_model.joblib"
@@ -509,26 +526,19 @@ def _justification_discusses_preprocessing(justification: str) -> bool:
     return any(term in text for term in terms)
 
 
-def _safe_deterministic_recommendation(
+def _deterministic_recommendation_or_fail(
     dataframe: pd.DataFrame,
     question: str,
     target_hint: str | None,
-    agent_plan: AgentPlan,
     warnings: list[str],
 ) -> DeterministicRecommendation:
     try:
         return deterministic_recommendation(dataframe, question, target_hint)
     except Exception as exc:
-        warnings.append(f"Deterministic recommendation could not complete: {exc}")
-        target = target_hint or agent_plan.target_column
-        return DeterministicRecommendation(
-            target_column=target,
-            task_type=agent_plan.task_type,
-            recommended_method=agent_plan.recommended_method,
-            preprocessing=agent_plan.preprocessing,
-            reasoning="The deterministic recommendation was unavailable because the data requires deterministic validation before a recommendation can be completed.",
-            evidence=["recommendation_unavailable=true", f"error_type={type(exc).__name__}"],
+        warnings.append(
+            f"Deterministic recommendation failed closed: {type(exc).__name__}: {exc}"
         )
+        raise DeterministicRecommendationUnavailable(exc) from exc
 
 
 def _call_or_fallback(

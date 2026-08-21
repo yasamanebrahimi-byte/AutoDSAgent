@@ -155,6 +155,20 @@ class InvariantViolation(ValueError):
         return cls(message, result)
 
 
+class DeterministicRecommendationUnavailable(InvariantViolation):
+    """Raised when the independent deterministic recommender cannot complete."""
+
+    code = "deterministic_recommendation_unavailable"
+
+    def __init__(self, original_exception: Exception) -> None:
+        self.original_error_type = type(original_exception).__name__
+        self.original_error_message = str(original_exception)
+        super().__init__(
+            f"[{self.code}] The independent deterministic recommender failed before validation could begin.",
+            None,
+        )
+
+
 def validate_training_plan(
     dataframe: pd.DataFrame,
     target_column: str,

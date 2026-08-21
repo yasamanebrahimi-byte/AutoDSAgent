@@ -269,7 +269,7 @@ def test_reconciliation_cannot_select_incoherent_pair_or_unproposed_method():
 
 def test_offline_invalid_run_persists_failure_and_no_model(tmp_path: Path):
     frame = _classification_frame()
-    frame["target"] = "only"
+    frame["target"] = ["only"] * 39 + ["other"]
     dataset = tmp_path / "invalid.csv"
     frame.to_csv(dataset, index=False)
 
