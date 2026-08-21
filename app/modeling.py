@@ -8,14 +8,12 @@ from typing import Any, Sequence
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
     RandomForestClassifier,
     RandomForestRegressor,
 )
-from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.metrics import (
     accuracy_score,
@@ -27,9 +25,9 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import KFold, StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
-from app.schemas import Method, TaskType
+from app.preprocessing import build_preprocessor
+from app.schemas import Method, PreprocessingContract, TaskType
 from app.validation import modeling_arrays, validate_training_plan
 
 
@@ -42,6 +40,7 @@ def fit_selected_model(
     test_size: float = 0.2,
     random_state: int = 42,
     feature_columns: Sequence[str] | None = None,
+    preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
 ) -> dict[str, Any]:
     validation = validate_training_plan(
         dataframe,
@@ -51,6 +50,7 @@ def fit_selected_model(
         test_size=test_size,
         random_state=random_state,
         feature_columns=feature_columns,
+        preprocessing=preprocessing,
     )
     validation.raise_if_failed()
     frame, target = modeling_arrays(dataframe, validation)
@@ -59,41 +59,15 @@ def fit_selected_model(
         column for column in usable_features if pd.api.types.is_numeric_dtype(frame[column])
     ]
     categorical_features = [column for column in usable_features if column not in numeric_features]
-    dense = method == "boosted_tree"
-
-    transformers = []
-    if numeric_features:
-        transformers.append(
-            (
-                "numeric",
-                Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scale", StandardScaler()),
-                    ]
-                ),
-                numeric_features,
-            )
-        )
-    if categorical_features:
-        categorical_encoder: Any = (
-            OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
-            if dense
-            else OneHotEncoder(handle_unknown="ignore", sparse_output=True)
-        )
-        transformers.append(
-            (
-                "categorical",
-                Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="most_frequent")),
-                        ("encoder", categorical_encoder),
-                    ]
-                ),
-                categorical_features,
-            )
-        )
-    preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
+    approved_preprocessing = validation.preprocessing_contract
+    if approved_preprocessing is None:  # pragma: no cover - defensive invariant
+        raise RuntimeError("Validated training plan did not produce a preprocessing contract.")
+    preprocessor = build_preprocessor(
+        approved_preprocessing,
+        numeric_features,
+        categorical_features,
+        method,
+    )
     stratify = target if task_type == "classification" else None
     X_train, X_test, y_train, y_test = train_test_split(
         frame,
@@ -165,11 +139,18 @@ def fit_selected_model(
         "model_path": str(model_path),
         "validation": validation.as_dict(),
         "split_evidence": validation.split,
-        "preprocessing_policy": {
-            "fit_inside_pipeline": True,
-            "numeric_infinity_policy": "converted_to_missing_before_imputation",
-            "categorical_encoding": "ordinal_for_boosted_tree" if dense else "one_hot",
+        "approved_preprocessing": approved_preprocessing.model_dump(mode="json"),
+        "executed_preprocessing": {
+            "contract": approved_preprocessing.model_dump(mode="json"),
+            "numeric_features": numeric_features,
+            "categorical_features": categorical_features,
+            "fit_inside_pipeline": approved_preprocessing.fit_inside_pipeline,
             "holdout_used_for": "final_evaluation_only",
+            "pipeline_components": _pipeline_components(
+                approved_preprocessing,
+                numeric_features,
+                categorical_features,
+            ),
         },
     }
 
@@ -210,6 +191,32 @@ def _model_name(task_type: TaskType, method: Method) -> str:
         "boosted_tree": "hist_gradient_boosting",
     }
     return names[method]
+
+
+def _pipeline_components(
+    contract: PreprocessingContract,
+    numeric_features: Sequence[str],
+    categorical_features: Sequence[str],
+) -> dict[str, Any]:
+    """Return a concise, stable description of what the fitted pipeline runs."""
+
+    numeric_steps: list[str] = []
+    if numeric_features and contract.numeric_imputation == "median":
+        numeric_steps.append("median_imputation")
+    if numeric_features and contract.numeric_scaling == "standard":
+        numeric_steps.append("standard_scaling")
+    categorical_steps: list[str] = []
+    if categorical_features and contract.categorical_imputation == "most_frequent":
+        categorical_steps.append("most_frequent_imputation")
+    if categorical_features and contract.categorical_encoding != "none":
+        categorical_steps.append(contract.categorical_encoding)
+    return {
+        "numeric": numeric_steps,
+        "categorical": categorical_steps,
+        "unknown_category_handling": contract.categorical_unknown_handling,
+        "remainder": "drop",
+        "infinity_handling_before_pipeline": contract.infinity_handling,
+    }
 
 
 def _baseline_predictions(task_type: TaskType, y_train: pd.Series, count: int) -> np.ndarray:

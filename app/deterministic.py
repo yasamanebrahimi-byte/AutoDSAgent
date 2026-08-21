@@ -67,11 +67,13 @@ def profile_dataframe(dataframe: pd.DataFrame) -> dict[str, Any]:
             "sample_values": [to_json_value(value) for value in non_null.head(3).tolist()],
         }
         if pd.api.types.is_numeric_dtype(series) and not non_null.empty:
+            infinity = int(np.isinf(series.to_numpy(dtype=float, na_value=np.nan)).sum())
             record.update(
                 {
                     "min": to_json_value(non_null.min()),
                     "max": to_json_value(non_null.max()),
                     "mean": round(float(non_null.mean()), 4),
+                    "infinity": infinity,
                 }
             )
         columns.append(record)
@@ -151,11 +153,14 @@ def deterministic_recommendation(
         method = "linear"
         reason = "The compact deterministic baseline favors an interpretable linear family when the schema is mostly numeric and no stronger structural signal is available before fitting."
 
-    preprocessing = ["training_only_imputation", "scale_numeric_features"]
-    if categorical_count:
-        preprocessing.append("one_hot_encode_categories")
-    if method == "tree_ensemble":
-        preprocessing.append("ignore_high_cardinality_identifiers")
+    from app.preprocessing import requirements_from_records
+
+    preprocessing_requirements = requirements_from_records(
+        feature_records,
+        task_type,
+        method,
+    )
+    preprocessing = preprocessing_requirements.expected_contract
     evidence = [
         f"rows={rows}",
         f"usable_numeric_features={numeric_count}",
@@ -169,7 +174,11 @@ def deterministic_recommendation(
         recommended_method=method,
         preprocessing=preprocessing,
         reasoning=reason,
-        evidence=evidence,
+        evidence=evidence
+        + [
+            f"required_preprocessing={','.join(preprocessing_requirements.required_steps)}",
+            f"irrelevant_preprocessing={','.join(preprocessing_requirements.irrelevant_steps) or 'none'}",
+        ],
     )
 
 

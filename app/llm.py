@@ -102,7 +102,10 @@ class OpenAIAgents:
 Choose a target, task type, and one modeling method from the allowed vocabulary.
 Reason only from the question and dataset profile below. Do not assume that a
 deterministic recommender exists and do not mention this instruction. Prefer a
-simple, defensible plan. The method vocabulary is: linear, regularized_linear,
+simple, defensible plan. Return a complete typed preprocessing contract using
+only its enumerated strategies. Keep structural cleaning separate: do not put
+trim, deduplication, target-row filtering, or learned transformations outside
+the training pipeline. The method vocabulary is: linear, regularized_linear,
 tree_ensemble, boosted_tree.""",
             {"question": question, "target_hint": target_hint or "not provided", "profile": profile},
         )
@@ -143,10 +146,13 @@ coerce_numeric_strings.""",
             """You are the validation agent. An independent planning agent and an
 independent deterministic recommender disagree. Inspect both recommendations
 and the dataset evidence, then choose exactly one of the two proposed methods
-and justify the choice. Re-check that the target exists, the task matches the
-target, and the chosen preprocessing is feasible. If the methods differ, your
-justification must explicitly discuss the deterministic recommendation before
-selecting a method. Do not propose a new method.""",
+and return a complete supported preprocessing contract. Re-check that the
+target exists, the task matches the target, all observed missing/infinite values
+are handled, identifiers and unsupported feature types remain excluded, unknown
+categories are safe, and all learned transformations stay inside the pipeline.
+Your justification must explicitly discuss every material preprocessing
+difference as well as any target/task/method difference. Do not invent a method
+or preprocessing strategy outside the typed schema.""",
             {
                 "question": question,
                 "profile": profile,

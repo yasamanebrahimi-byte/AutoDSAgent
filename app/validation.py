@@ -17,6 +17,12 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from app.deterministic import is_identifier, semantic_type
+from app.preprocessing import (
+    PreprocessingRequirements,
+    records_from_dataframe,
+    requirements_from_records,
+)
+from app.schemas import PreprocessingContract
 
 
 SUPPORTED_METHODS = frozenset(
@@ -65,6 +71,8 @@ class ValidationResult:
     split: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     direct_leakage_detected: bool = False
+    preprocessing_contract: PreprocessingContract | None = None
+    preprocessing_requirements: PreprocessingRequirements | None = None
 
     @property
     def status(self) -> str:
@@ -119,6 +127,12 @@ class ValidationResult:
             "split": self.split,
             "direct_leakage_detected": self.direct_leakage_detected,
             "warnings": self.warnings,
+            "approved_preprocessing": self.preprocessing_contract.model_dump(mode="json")
+            if self.preprocessing_contract is not None
+            else None,
+            "preprocessing_requirements": self.preprocessing_requirements.as_dict()
+            if self.preprocessing_requirements is not None
+            else None,
             "checks": [check.as_dict() for check in self.checks],
             "failures": failures,
         }
@@ -150,6 +164,7 @@ def validate_training_plan(
     test_size: float = 0.2,
     random_state: int = 42,
     feature_columns: Sequence[str] | None = None,
+    preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
 ) -> ValidationResult:
     """Evaluate one complete plan against the actual modeling dataframe.
 
@@ -162,6 +177,17 @@ def validate_training_plan(
         task_type=str(task_type),
         method=str(method),
     )
+    approved_preprocessing: PreprocessingContract | None = None
+    if preprocessing is not None:
+        try:
+            approved_preprocessing = PreprocessingContract.model_validate(preprocessing)
+        except Exception as exc:
+            result.add_failure(
+                "preprocessing_contract_is_supported",
+                "The preprocessing proposal is not a complete supported executable contract.",
+                {"error": str(exc)},
+            )
+            return result
     column_names = [str(column) for column in dataframe.columns]
     duplicate_names = sorted(
         {name for name in column_names if column_names.count(name) > 1}
@@ -407,14 +433,170 @@ def validate_training_plan(
         },
         "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
     )
+    preprocessing_records = records_from_dataframe(
+        dataframe,
+        usable_names,
+        result.excluded_features,
+    )
+    preprocessing_requirements = requirements_from_records(
+        preprocessing_records,
+        str(task_type),
+        str(method),
+    )
+    result.preprocessing_requirements = preprocessing_requirements
+    if approved_preprocessing is None:
+        approved_preprocessing = preprocessing_requirements.expected_contract
+    result.preprocessing_contract = approved_preprocessing
+    result.add_check(
+        "preprocessing_contract_is_supported",
+        True,
+        {
+            "approved_preprocessing": approved_preprocessing.model_dump(mode="json"),
+            "supported_values_are_schema_bound": True,
+        },
+        "The approved preprocessing contract contains only supported executable strategies.",
+    )
+    result.add_check(
+        "preprocessing_is_training_only",
+        approved_preprocessing.fit_inside_pipeline is True,
+        {
+            "fit_inside_pipeline": approved_preprocessing.fit_inside_pipeline,
+            "learned_steps": [
+                "numeric_imputation",
+                "categorical_imputation",
+                "numeric_scaling",
+                "categorical_encoding",
+            ],
+        },
+        "All learned imputation, scaling, and encoding must be fitted inside the scikit-learn pipeline on training folds only.",
+    )
+    numeric_missing = int(preprocessing_requirements.evidence["numeric_missing_values"])
+    categorical_missing = int(preprocessing_requirements.evidence["categorical_missing_values"])
+    infinity_count = int(preprocessing_requirements.evidence["infinity_values"])
+    categorical_features = preprocessing_requirements.evidence["categorical_features"]
+    numeric_features = preprocessing_requirements.evidence["numeric_features"]
+    result.add_check(
+        "numeric_missing_values_are_handled",
+        not numeric_missing or approved_preprocessing.numeric_imputation != "none",
+        {
+            "numeric_missing_values": numeric_missing,
+            "numeric_imputation": approved_preprocessing.numeric_imputation,
+        },
+        "Observed numeric missing or infinite values require a supported numeric imputation strategy.",
+    )
+    result.add_check(
+        "categorical_missing_values_are_handled",
+        not categorical_missing or approved_preprocessing.categorical_imputation != "none",
+        {
+            "categorical_missing_values": categorical_missing,
+            "categorical_imputation": approved_preprocessing.categorical_imputation,
+        },
+        "Observed categorical missing values require a supported categorical imputation strategy.",
+    )
+    result.add_check(
+        "linear_numeric_features_use_approved_scaling_policy",
+        not (method in {"linear", "regularized_linear"} and numeric_features)
+        or approved_preprocessing.numeric_scaling == "standard",
+        {
+            "method": str(method),
+            "numeric_features": numeric_features,
+            "numeric_scaling": approved_preprocessing.numeric_scaling,
+        },
+        "Linear and regularized-linear methods require standard numeric scaling under the project policy.",
+    )
+    result.add_check(
+        "categorical_features_use_safe_encoding",
+        not categorical_features or approved_preprocessing.categorical_encoding != "none",
+        {
+            "categorical_features": categorical_features,
+            "categorical_encoding": approved_preprocessing.categorical_encoding,
+        },
+        "Usable categorical features require a supported categorical encoder; unencoded categories cannot enter the estimator.",
+    )
+    result.add_check(
+        "categorical_unknown_values_are_handled_safely",
+        not categorical_features
+        or approved_preprocessing.categorical_unknown_handling
+        in {"ignore", "use_encoded_value"},
+        {
+            "categorical_features": categorical_features,
+            "categorical_unknown_handling": approved_preprocessing.categorical_unknown_handling,
+        },
+        "Categorical preprocessing must handle categories absent from a training fold without raising or leaking holdout information.",
+    )
+    result.add_check(
+        "boosted_tree_encoding_is_compatible",
+        not (method == "boosted_tree" and categorical_features)
+        or approved_preprocessing.categorical_encoding == "ordinal",
+        {
+            "method": str(method),
+            "categorical_encoding": approved_preprocessing.categorical_encoding,
+        },
+        "Boosted trees use bounded ordinal encoding so the estimator never receives an unsafe dense one-hot matrix.",
+    )
+    result.add_check(
+        "numeric_infinity_values_are_handled",
+        not infinity_count or approved_preprocessing.infinity_handling == "replace_with_missing",
+        {
+            "infinity_values": infinity_count,
+            "infinity_handling": approved_preprocessing.infinity_handling,
+        },
+        "Observed numeric infinities must be replaced with missing values before training-only imputation or the run must fail closed.",
+    )
+    for field_name, names, safe_value, message in (
+        (
+            "identifier_handling",
+            preprocessing_requirements.evidence["identifier_features"],
+            "exclude",
+            "Identifier-like features are mandatory exclusions and cannot be retained by an agent or reconciliation plan.",
+        ),
+        (
+            "high_cardinality_handling",
+            preprocessing_requirements.evidence["high_cardinality_features"],
+            "exclude",
+            "High-cardinality categorical features are mandatory exclusions under the compact safe baseline.",
+        ),
+        (
+            "unsupported_text_handling",
+            preprocessing_requirements.evidence["unsupported_text_features"],
+            "exclude",
+            "Unsupported text features cannot be retained without an implemented safe text transformer.",
+        ),
+        (
+            "datetime_handling",
+            preprocessing_requirements.evidence["datetime_features"],
+            "exclude",
+            "Datetime features cannot be retained without an implemented temporal transformer.",
+        ),
+    ):
+        result.add_check(
+            f"{field_name}_is_safe",
+            not names or getattr(approved_preprocessing, field_name) == safe_value,
+            {"features": names, "approved_policy": getattr(approved_preprocessing, field_name)},
+            message,
+        )
+    estimated_one_hot = int(preprocessing_requirements.evidence["estimated_one_hot_features"])
+    max_one_hot = int(preprocessing_requirements.evidence["max_one_hot_features"])
+    result.add_check(
+        "one_hot_matrix_is_memory_safe",
+        approved_preprocessing.categorical_encoding != "one_hot"
+        or estimated_one_hot <= max_one_hot,
+        {
+            "categorical_encoding": approved_preprocessing.categorical_encoding,
+            "estimated_one_hot_features": estimated_one_hot,
+            "max_one_hot_features": max_one_hot,
+            "representation": "sparse_output=True",
+        },
+        "One-hot encoding is bounded and sparse; an unreasonable encoded matrix fails closed before fitting.",
+    )
     result.add_check(
         "numeric_infinity_policy_is_deterministic",
         True,
         {
             "converted_to_missing": inf_replacements,
-            "policy": "positive and negative infinity become missing values before pipeline imputation",
+            "policy": approved_preprocessing.infinity_handling,
         },
-        "Numeric infinity values are converted to missing values before training-only imputation.",
+        "Numeric infinity handling is fixed by the approved contract before training-only imputation.",
     )
 
     if name_warnings:

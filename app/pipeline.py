@@ -17,8 +17,16 @@ from app.deterministic import (
 )
 from app.llm import OpenAIAgents
 from app.modeling import fit_selected_model
+from app.preprocessing import compare_preprocessing_plans, requirements_from_records
 from app.reporting import render_code, render_report, write_json
-from app.schemas import AgentPlan, CleaningPlan, DeterministicRecommendation, ReportDraft
+from app.schemas import (
+    AgentPlan,
+    CleaningPlan,
+    ConflictResolution,
+    DeterministicRecommendation,
+    PreprocessingContract,
+    ReportDraft,
+)
 from app.validation import (
     InvariantViolation,
     ValidationResult,
@@ -137,6 +145,7 @@ def run_analysis(
             validation["selected_method"],
             test_size=test_size,
             random_state=random_state,
+            preprocessing=validation["approved_preprocessing"],
         )
         post_cleaning_result.raise_if_failed()
         validation["pre_cleaning_deterministic_validation"] = validation[
@@ -181,6 +190,7 @@ def run_analysis(
             target_column=selected_target,
             task_type=validation["selected_task_type"],
             method=validation["selected_method"],
+            preprocessing=validation["approved_preprocessing"],
             output_dir=run_dir / "model",
             test_size=test_size,
             random_state=random_state,
@@ -313,17 +323,45 @@ def _validate_before_training(
     random_state: int = 42,
     reconciliation_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    same = (
+    requirements = None
+    if dataframe is not None:
+        records = [
+            record
+            for record in (reconciliation_profile or profile).get("column_details", [])
+            if str(record.get("name")) not in {
+                agent_plan.target_column,
+                deterministic.target_column,
+            }
+        ]
+        requirements = requirements_from_records(
+            records,
+            deterministic.task_type,
+            deterministic.recommended_method,
+        )
+    preprocessing_comparison = compare_preprocessing_plans(
+        agent_plan.preprocessing,
+        deterministic.preprocessing,
+        requirements,
+    )
+    core_same = (
         agent_plan.target_column == deterministic.target_column
         and agent_plan.task_type == deterministic.task_type
         and agent_plan.recommended_method == deterministic.recommended_method
     )
+    same = core_same and preprocessing_comparison["status"] == "agreement"
+    resolution: ConflictResolution | None = None
     if same:
         selected_target = deterministic.target_column
         selected_task = deterministic.task_type
         selected_method = deterministic.recommended_method
-        justification = "The independent agent and deterministic recommender agreed on target, task type, and method before training."
-        checks: Any = ["target_match", "task_match", "method_match"]
+        selected_preprocessing = deterministic.preprocessing
+        justification = "The independent agent and deterministic recommender agreed on target, task type, method, and material preprocessing behavior before training."
+        checks: Any = [
+            "target_match",
+            "task_match",
+            "method_match",
+            "preprocessing_materially_matches",
+        ]
         status = "agreement"
     else:
         resolution = _call_or_fallback(
@@ -332,7 +370,11 @@ def _validate_before_training(
                 question,
                 reconciliation_profile or profile,
                 agent_plan,
-                deterministic.model_dump(mode="json"),
+                {
+                    **deterministic.model_dump(mode="json"),
+                    "preprocessing_comparison": preprocessing_comparison,
+                    "preprocessing_requirements": requirements.as_dict() if requirements else None,
+                },
             ),
             lambda: _fallback_resolution(agent_plan, deterministic),
             warnings,
@@ -342,6 +384,7 @@ def _validate_before_training(
         selected_method = resolution.selected_method
         selected_target = resolution.selected_target_column
         selected_task = resolution.selected_task_type
+        selected_preprocessing = resolution.selected_preprocessing
         justification = resolution.justification
         checks = resolution.checks
         status = "disagreement_resolved"
@@ -354,7 +397,15 @@ def _validate_before_training(
             selected_method,
             test_size=test_size,
             random_state=random_state,
+            preprocessing=selected_preprocessing,
         )
+        if requirements is not None:
+            deterministic_validation.add_check(
+                "preprocessing_requirements_recorded",
+                True,
+                requirements.as_dict(),
+                "Preprocessing requirements were derived deterministically from the observed feature schema and selected model family.",
+            )
         deterministic_validation.add_check(
             "reconciliation_method_is_proposed",
             same or selected_method in {
@@ -369,6 +420,14 @@ def _validate_before_training(
             },
             "Reconciliation may select only one of the two proposed methods; do not invent or silently substitute a method.",
         )
+        if not same and selected_method not in {
+            agent_plan.recommended_method,
+            deterministic.recommended_method,
+        }:
+            deterministic_validation.checks.insert(
+                0,
+                deterministic_validation.checks.pop(),
+            )
         if not same:
             deterministic_validation.add_check(
                 "reconciliation_target_is_proposed",
@@ -388,6 +447,27 @@ def _validate_before_training(
                 },
                 "Reconciliation must select one of the proposed task types; the selected target/task pair is then validated together.",
             )
+        if not same:
+            deterministic_validation.add_check(
+                "reconciliation_preprocessing_is_complete",
+                isinstance(selected_preprocessing, PreprocessingContract),
+                {
+                    "selected_preprocessing": selected_preprocessing.model_dump(mode="json")
+                    if isinstance(selected_preprocessing, PreprocessingContract)
+                    else str(selected_preprocessing),
+                },
+                "Reconciliation must return one complete schema-bound preprocessing contract; unsupported or invented transformations are rejected.",
+            )
+            if preprocessing_comparison["material_differences"]:
+                deterministic_validation.add_check(
+                    "reconciliation_justification_discusses_preprocessing",
+                    _justification_discusses_preprocessing(justification),
+                    {
+                        "material_differences": preprocessing_comparison["material_differences"],
+                        "justification": justification,
+                    },
+                    "When preprocessing materially disagrees, reconciliation must explicitly discuss the affected preprocessing behavior and evidence.",
+                )
         deterministic_validation.raise_if_failed()
         checks = deterministic_validation.as_dict()["checks"]
     return {
@@ -399,12 +479,34 @@ def _validate_before_training(
         "justification": justification,
         "checks": checks,
         "confidence": 1.0 if same else resolution.confidence,
+        "agent_preprocessing": agent_plan.preprocessing.model_dump(mode="json"),
+        "deterministic_preprocessing": deterministic.preprocessing.model_dump(mode="json"),
+        "approved_preprocessing": selected_preprocessing.model_dump(mode="json"),
+        "preprocessing_comparison": preprocessing_comparison,
+        "reconciliation": resolution.model_dump(mode="json") if resolution is not None else None,
+        "preprocessing_requirements": requirements.as_dict() if requirements else None,
         "deterministic_validation": deterministic_validation.as_dict()
         if dataframe is not None
         else None,
         "agent_method": agent_plan.recommended_method,
         "deterministic_method": deterministic.recommended_method,
     }
+
+
+def _justification_discusses_preprocessing(justification: str) -> bool:
+    text = justification.casefold()
+    terms = (
+        "preprocess",
+        "imput",
+        "scal",
+        "encod",
+        "categor",
+        "missing",
+        "infin",
+        "identifier",
+        "feature exclusion",
+    )
+    return any(term in text for term in terms)
 
 
 def _safe_deterministic_recommendation(
@@ -423,7 +525,7 @@ def _safe_deterministic_recommendation(
             target_column=target,
             task_type=agent_plan.task_type,
             recommended_method=agent_plan.recommended_method,
-            preprocessing=["training_only_imputation"],
+            preprocessing=agent_plan.preprocessing,
             reasoning="The deterministic recommendation was unavailable because the data requires deterministic validation before a recommendation can be completed.",
             evidence=["recommendation_unavailable=true", f"error_type={type(exc).__name__}"],
         )
@@ -474,11 +576,18 @@ def _fallback_agent_plan(
         record["semantic_type"] in {"categorical", "boolean"} for record in features
     )
     method = "tree_ensemble" if has_categories else "regularized_linear"
+    from app.preprocessing import requirements_from_records
+
+    preprocessing = requirements_from_records(
+        features,
+        task,
+        method,
+    ).expected_contract
     return AgentPlan(
         target_column=target,
         task_type=task,
         recommended_method=method,
-        preprocessing=["training_only_imputation", "schema_aware_encoding"],
+        preprocessing=preprocessing,
         reasoning="Offline fallback uses an independent schema heuristic so the workflow remains runnable without an API key.",
         confidence=0.4,
     )
@@ -517,12 +626,13 @@ def _fallback_resolution(
         selected_target_column=deterministic.target_column,
         selected_task_type=deterministic.task_type,
         selected_method=deterministic.recommended_method,
+        selected_preprocessing=deterministic.preprocessing,
         checks=[
             "deterministic_target_exists",
             "deterministic_task_is_feasible",
             "deterministic_method_is_allow_listed",
         ],
-        justification="The offline validation fallback selected the deterministic recommendation because it is tied directly to the observed schema and does not invent a new method.",
+        justification="The offline validation fallback selected the deterministic target, task, method, and preprocessing contract because they are tied directly to the observed schema and do not invent a new executable transformation.",
         confidence=0.5,
     )
 

@@ -41,7 +41,8 @@ The code is deliberately small:
 ```text
 app/
   deterministic.py  # profile, task inference, recommendation, cleaning, EDA, plots
-  validation.py     # fail-closed target, leakage, and split/CV invariants
+  validation.py     # fail-closed target, leakage, preprocessing, and split/CV invariants
+  preprocessing.py  # typed contract, requirement derivation, and canonical builder
   llm.py            # OpenAI Responses API specialist agents
   modeling.py       # training-only preprocessing and approved model evaluation
   pipeline.py       # orchestration and the pre-training gate
@@ -87,6 +88,30 @@ The contract stops training when:
 Target rows are filtered deterministically before classification labels are converted to strings. Numeric feature infinities become missing values before training-only imputation. Imputation, scaling, encoding, and model fitting remain inside the scikit-learn pipeline; the holdout is reserved for the final evaluation and is not used for reconciliation, preprocessing fitting, or cross-validation. Boosted trees use bounded ordinal encoding for categorical features instead of a dense one-hot expansion.
 
 Name-based indicators such as a feature containing the target name are recorded as warnings for domain review. They do not block a run without stronger deterministic evidence. Semantic leakage, post-outcome variables, temporal leakage, proxy variables, and whether a feature was available at prediction time still require subject-matter review. These checks prove that a run meets the workflow's safety and feasibility preconditions; they do not prove that leakage is impossible, that the chosen family is empirically optimal, or that the model is fit for deployment.
+
+## Preprocessing contract and validation gate
+
+Structural cleaning and learned preprocessing are intentionally separate. The cleaning plan may trim strings, coerce numeric strings, remove exact duplicates, drop all-null or constant columns, and remove rows with missing targets. These operations happen before the modeling view is validated. Imputation, scaling, categorical encoding, and any other learned transformation are never cleaning actions; they are fitted inside the scikit-learn pipeline after the train/holdout split and inside every cross-validation fold.
+
+The modeling agent and deterministic recommender independently return the typed `PreprocessingContract` persisted in `decision.json`. Its compact vocabulary includes numeric and categorical imputation, numeric scaling, one-hot or ordinal encoding, safe unknown-category handling, infinity handling, identifier/high-cardinality/text/datetime policies, and the invariant `fit_inside_pipeline=true`. Known legacy names are accepted only as an allow-listed migration and are serialized back to the typed object; arbitrary transformation names and Python code are rejected.
+
+The deterministic validator derives requirements from the observed feature schema, missingness, infinities, cardinality, task, and model family. Some requirements are safety invariants and some are optional preferences. Numeric and categorical missing values require their corresponding imputers; usable categories require a supported encoder with safe unknown handling; linear methods require standard numeric scaling under this project policy; tree ensembles are not forced to scale; boosted trees use bounded ordinal encoding; identifiers, unsupported text, datetimes, and high-cardinality features remain excluded; and oversized one-hot matrices fail closed. No holdout row is used to fit preprocessing.
+
+The gate compares normalized material preprocessing behavior in addition to target, task, and method. Ordering or absent-feature differences are recorded as immaterial. For example, if the agent proposes no imputation but the data contains missing numeric values, the difference is material and reconciliation is required. A reconciliation response must return a complete supported contract and explicitly discuss material preprocessing differences. The selected contract is validated again after structural cleaning; failed invariants stop the run before model fitting regardless of confidence or justification.
+
+Example:
+
+```text
+Agent:       numeric_imputation=none, categorical_encoding=one_hot
+Deterministic: numeric_imputation=median, categorical_imputation=most_frequent,
+               categorical_encoding=one_hot (missing values observed)
+Gate:        preprocessing disagreement -> reconciliation
+Approved:    median + most_frequent imputation, one_hot(handle_unknown=ignore),
+             identifier_handling=exclude, fit_inside_pipeline=true
+Executed:    the approved contract builds the saved ColumnTransformer/Pipeline
+```
+
+The final approved contract, both independent proposals, normalized comparison, deterministic requirements, executed pipeline steps, feature exclusions and reasons, and training-only status appear in `decision.json`, `modeling.json`, and the final report. `reproduce_analysis.py` loads that recorded contract, validates it against the dataset, and passes it to the same canonical pipeline builder; it never asks an agent to make a new preprocessing decision.
 
 ## Setup
 
@@ -165,7 +190,7 @@ Generated run folders are ignored by Git so datasets, models, and reports do not
 
 Supported method families are `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree`. They map to logistic/linear regression, Ridge or regularized logistic regression, random forests, and histogram gradient boosting.
 
-The workflow excludes obvious identifiers, free text, datetime columns, constant features, and extremely high-cardinality features from the compact baseline, recording each exclusion reason. Numeric missing values are median-imputed inside the scikit-learn pipeline, and categories are imputed and encoded inside the pipeline. Cross-validation and preprocessing are fitted only on the training partition. The final holdout is not used to choose the method. These are hard preconditions for safe execution, not a claim that the approved family is the best empirical model.
+The workflow excludes obvious identifiers, free text, datetime columns, constant features, and extremely high-cardinality features from the compact baseline, recording each exclusion reason. The approved contract determines whether observed numeric and categorical missing values are imputed, whether numeric features are scaled, and whether categories use one-hot or bounded ordinal encoding. Cross-validation and preprocessing are fitted only on the training partition. The final holdout is not used to choose the method or fit preprocessing. These are hard preconditions for safe execution, not a claim that the approved family is the best empirical model.
 
 Metrics:
 

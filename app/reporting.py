@@ -41,6 +41,7 @@ cleaning, EDA, and modeling stages.
 import json
 from pathlib import Path
 import pandas as pd
+from app.schemas import PreprocessingContract
 from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary, profile_dataframe
 from app.modeling import fit_selected_model
 from app.validation import prepare_validated_frame, validate_training_plan
@@ -56,6 +57,8 @@ TEST_SIZE = {test_size!r}
 raw = pd.read_csv(DATASET)
 decision = json.loads((RUN_DIR / "decision.json").read_text(encoding="utf-8"))
 approved = decision["validation"]
+APPROVED_PREPROCESSING = approved["approved_preprocessing"]
+PreprocessingContract.model_validate(APPROVED_PREPROCESSING)
 if approved["selected_target_column"] != TARGET:
     raise RuntimeError("Recorded target does not match the reproduction contract.")
 if approved["selected_task_type"] != TASK_TYPE:
@@ -64,10 +67,9 @@ if approved["selected_method"] != METHOD:
     raise RuntimeError("Recorded method does not match the reproduction contract.")
 if decision.get("gate_completed_before_training") is not True:
     raise RuntimeError("The original run did not complete its validation gate.")
+# deterministic_recommendation is recorded for audit; reproduction never makes
+# a new preprocessing decision and uses the recorded approved contract below.
 profile = profile_dataframe(raw)
-deterministic = deterministic_recommendation(raw, QUESTION, TARGET)
-if deterministic.task_type != TASK_TYPE:
-    raise RuntimeError("The deterministic recommendation no longer matches the recorded task.")
 raw_validation = validate_training_plan(
     raw,
     TARGET,
@@ -75,6 +77,7 @@ raw_validation = validate_training_plan(
     METHOD,
     test_size=TEST_SIZE,
     random_state={seed},
+    preprocessing=APPROVED_PREPROCESSING,
 )
 raw_validation.raise_if_failed()
 cleaning = json.loads((RUN_DIR / "cleaning.json").read_text(encoding="utf-8"))
@@ -90,6 +93,7 @@ cleaned_validation = validate_training_plan(
     METHOD,
     test_size=TEST_SIZE,
     random_state={seed},
+    preprocessing=APPROVED_PREPROCESSING,
 )
 cleaned_validation.raise_if_failed()
 cleaned = prepare_validated_frame(cleaned, cleaned_validation)
@@ -99,10 +103,16 @@ result = fit_selected_model(
     target_column=TARGET,
     task_type=TASK_TYPE,
     method=METHOD,
+    preprocessing=APPROVED_PREPROCESSING,
     output_dir=RUN_DIR / "reproduced_model",
     test_size=TEST_SIZE,
     random_state={seed},
 )
+if result["approved_preprocessing"] != APPROVED_PREPROCESSING:
+    raise RuntimeError("The reproduced executable preprocessing does not match the recorded contract.")
+recorded_modeling = json.loads((RUN_DIR / "modeling.json").read_text(encoding="utf-8"))
+if result["excluded_features"] != recorded_modeling["excluded_features"]:
+    raise RuntimeError("The reproduced feature exclusions do not match the recorded plan.")
 print(result)
 '''
 
@@ -134,6 +144,12 @@ def render_report(
     validation_checks = deterministic_validation.get("checks", [])
     passed_checks = sum(1 for check in validation_checks if check.get("passed"))
     excluded_features = deterministic_validation.get("excluded_features", [])
+    preprocessing_comparison = validation.get("preprocessing_comparison", {})
+    approved_preprocessing = validation.get("approved_preprocessing", {})
+    agent_preprocessing = validation.get("agent_preprocessing", {})
+    deterministic_preprocessing = validation.get("deterministic_preprocessing", {})
+    material_differences = preprocessing_comparison.get("material_differences", [])
+    reconciliation = validation.get("reconciliation")
     cv_lines = "\n".join(
         f"- <code>{key}</code>: <code>{value:.4f}</code>"
         for key, value in modeling["cv_metrics"].items()
@@ -166,6 +182,20 @@ Validation decision: {validation.get('justification', 'The recommendations match
 Deterministic contract: <code>{deterministic_validation.get('status', 'not recorded')}</code> ({passed_checks}/{len(validation_checks)} checks passed); target rows removed: <code>{deterministic_validation.get('target_rows_removed', 0)}</code>; direct leakage detected: <code>{deterministic_validation.get('direct_leakage_detected', False)}</code>.
 
 Excluded features and reasons: <code>{', '.join(f"{item.get('column')} ({item.get('reason_code')})" for item in excluded_features) if excluded_features else 'none'}</code>.
+
+### Preprocessing contract
+
+| Source | Contract |
+| --- | --- |
+| Independent agent | <code>{json.dumps(agent_preprocessing, sort_keys=True)}</code> |
+| Deterministic recommender | <code>{json.dumps(deterministic_preprocessing, sort_keys=True)}</code> |
+| Final approved executable plan | <code>{json.dumps(approved_preprocessing, sort_keys=True)}</code> |
+
+Preprocessing comparison: <code>{preprocessing_comparison.get('status', 'not recorded')}</code>; material differences: <code>{json.dumps(material_differences, sort_keys=True) if material_differences else 'none'}</code>.
+
+Reconciliation output: <code>{json.dumps(reconciliation, sort_keys=True) if reconciliation else 'not invoked'}</code>.
+
+The deterministic requirements and checks are persisted with the gate. All learned transformations are fitted inside the training pipeline; the holdout is used only for final evaluation. The executed pipeline components are <code>{json.dumps(modeling.get('executed_preprocessing', {}).get('pipeline_components', {}), sort_keys=True)}</code>.
 
 ## Data profile
 
