@@ -74,26 +74,22 @@ class OpenAIAgents:
     ) -> T:
         client = self._client_or_raise()
         prompt = f"{instructions}\n\nINPUT JSON:\n{json.dumps(payload, default=str)}"
-        response = client.responses.create(
+        response = client.responses.parse(
             model=self.model,
             input=prompt,
             store=False,
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema.model_json_schema(),
-                }
-            },
+            text_format=schema,
         )
+        parsed = getattr(response, "output_parsed", None)
+        if parsed is not None:
+            return parsed
         output_text = getattr(response, "output_text", "")
         if not output_text:
             raise LLMUnavailable(f"The {schema_name} agent returned no structured output.")
         try:
             return schema.model_validate(json.loads(output_text))
         except Exception as exc:
-            raise LLMUnavailable(f"The {schema_name} agent returned invalid JSON.") from exc
+            raise LLMUnavailable(f"The {schema_name} agent returned invalid structured output.") from exc
 
     def modeling_plan(
         self,
