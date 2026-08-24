@@ -1,0 +1,24 @@
+{
+  "run_id": "20260824T172518Z",
+  "dataset": "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_tmp_interaction_final\\test_invalid_formulation_never0\\invalid.csv",
+  "validation_status": "failed",
+  "failure": {
+    "code": "validation_failed",
+    "error_type": "InvariantViolation",
+    "message": "[target_exists] The proposed target must exist in the raw dataset.",
+    "check_codes": [
+      "target_exists",
+      "target_resolves_once",
+      "task_is_supported",
+      "formulation_validation_can_proceed",
+      "formulation_agent_fallback_failed_closed"
+    ]
+  },
+  "api_used": false,
+  "deterministic_policy_version": null,
+  "gate_completed_before_training": false,
+  "formulation_gate_status": "not_completed",
+  "split_frozen_after_formulation_gate": false,
+  "modeling_gate_status": "not_completed",
+  "model_training_occurred": false
+}

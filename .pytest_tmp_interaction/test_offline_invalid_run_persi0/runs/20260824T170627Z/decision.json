@@ -1,0 +1,496 @@
+{
+  "formulation": {
+    "user_target_constraint": {
+      "target_column": "target",
+      "target_source": "user_supplied",
+      "target_is_mutable": false
+    },
+    "agent_initial": {
+      "target_column": "target",
+      "task_type": "classification",
+      "reasoning": "Offline fallback uses the deterministic schema formulation as a local heuristic; this is not evidence of independent LLM reasoning. The target 'target' is treated as classification because its semantic type is categorical, or its numeric values are low-cardinality label-like (2 unique values across 40 valid rows).",
+      "confidence": 0.4
+    },
+    "deterministic": {
+      "target_column": "target",
+      "task_type": "classification",
+      "status": "proposed",
+      "reasoning": "The target 'target' is treated as classification because its semantic type is categorical, or its numeric values are low-cardinality label-like (2 unique values across 40 valid rows).",
+      "evidence": [
+        "target_column=target",
+        "target_source=user_supplied",
+        "target_dtype=object",
+        "target_semantic_type=categorical",
+        "valid_target_rows=40",
+        "unique_values=2",
+        "unique_value_fraction=0.0500",
+        "numeric_or_coercible_fraction=0.0000",
+        "model_selection_diagnostics_not_used"
+      ],
+      "confidence": 0.9,
+      "target_source": "user_supplied"
+    },
+    "comparison": {
+      "target_agreement": true,
+      "task_agreement": true,
+      "overall_agreement": true,
+      "status": "agreement",
+      "differences": []
+    },
+    "reconciliation": null,
+    "final": null,
+    "status": "not_completed"
+  },
+  "modeling_gate": {
+    "agent_initial": null,
+    "deterministic": null,
+    "comparison": null,
+    "reconciliation": null,
+    "final": null,
+    "status": "not_completed"
+  },
+  "agent_plan": null,
+  "deterministic_recommendation": null,
+  "validation": {
+    "status": "rejected",
+    "overall_status": "failed",
+    "selected_target_column": "target",
+    "selected_task_type": "classification",
+    "selected_method": "not_selected",
+    "deterministic_validation": {
+      "status": "failed",
+      "overall_status": "failed",
+      "validated_target_column": "target",
+      "validated_task_type": "classification",
+      "validated_method": "not_selected",
+      "features_used": [],
+      "excluded_features": [],
+      "target_rows_removed": 0,
+      "valid_target_rows": 40,
+      "split": {
+        "strategy": "stratified",
+        "validation_only": true,
+        "evidence": {
+          "test_size": 0.2,
+          "valid_rows": 40,
+          "train_rows": 32,
+          "holdout_rows": 8,
+          "class_count": 2,
+          "class_counts": {
+            "only": 39,
+            "other": 1
+          },
+          "cv_folds": 0,
+          "cv_strategy": "stratified_kfold",
+          "stratification": "required",
+          "checks": [
+            {
+              "code": "split_has_nonempty_partitions",
+              "passed": true,
+              "evidence": {
+                "train_rows": 32,
+                "holdout_rows": 8
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size."
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "passed": false,
+              "evidence": {
+                "class_count": 2,
+                "minimum_class_rows": 1,
+                "train_rows": 32,
+                "holdout_rows": 8
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation."
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "passed": false,
+              "evidence": {
+                "minimum_training_class_rows": 0,
+                "minimum_holdout_class_rows": 0,
+                "cv_folds": 0,
+                "cv_strategy": "stratified_kfold"
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split."
+            }
+          ]
+        }
+      },
+      "direct_leakage_detected": false,
+      "warnings": [],
+      "approved_preprocessing": null,
+      "preprocessing_requirements": null,
+      "checks": [
+        {
+          "code": "columns_have_unique_names",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "duplicate_columns": []
+          },
+          "message": "Column names must be unique before formulation can be approved."
+        },
+        {
+          "code": "target_exists",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "target_column": "target",
+            "matching_columns": 1
+          },
+          "message": "The proposed target must exist in the raw dataset."
+        },
+        {
+          "code": "target_resolves_once",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "target_column": "target",
+            "matching_columns": 1
+          },
+          "message": "The proposed target must resolve to exactly one source column."
+        },
+        {
+          "code": "task_is_supported",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "task_type": "classification",
+            "supported_tasks": [
+              "classification",
+              "regression"
+            ]
+          },
+          "message": "Only classification and regression are supported."
+        },
+        {
+          "code": "user_target_is_immutable",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "user_target": "target",
+            "selected_target": "target"
+          },
+          "message": "An explicit user target is a hard constraint and cannot be overridden."
+        },
+        {
+          "code": "target_has_valid_observations",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "valid_target_rows": 40,
+            "missing_rows": 0,
+            "artificial_null_labels_removed": 0,
+            "invalid_nonnumeric_rows": 0,
+            "coercible_rows": 40,
+            "nonfinite_rows": 0
+          },
+          "message": "The approved target must have enough usable observations for the supervised protocol."
+        },
+        {
+          "code": "classification_has_feasible_classes",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "class_count": 2,
+            "class_counts": {
+              "only": 39,
+              "other": 1
+            }
+          },
+          "message": "Classification requires at least two valid classes."
+        },
+        {
+          "code": "split_strategy_is_feasible",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {
+            "test_size": 0.2,
+            "valid_rows": 40,
+            "train_rows": 32,
+            "holdout_rows": 8,
+            "class_count": 2,
+            "class_counts": {
+              "only": 39,
+              "other": 1
+            },
+            "cv_folds": 0,
+            "cv_strategy": "stratified_kfold",
+            "stratification": "required",
+            "checks": [
+              {
+                "code": "split_has_nonempty_partitions",
+                "passed": true,
+                "evidence": {
+                  "train_rows": 32,
+                  "holdout_rows": 8
+                },
+                "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size."
+              },
+              {
+                "code": "classification_split_and_stratification_feasible",
+                "passed": false,
+                "evidence": {
+                  "class_count": 2,
+                  "minimum_class_rows": 1,
+                  "train_rows": 32,
+                  "holdout_rows": 8
+                },
+                "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation."
+              },
+              {
+                "code": "classification_training_supports_cross_validation",
+                "passed": false,
+                "evidence": {
+                  "minimum_training_class_rows": 0,
+                  "minimum_holdout_class_rows": 0,
+                  "cv_folds": 0,
+                  "cv_strategy": "stratified_kfold"
+                },
+                "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split."
+              }
+            ]
+          },
+          "message": "The final task must support the configured supervised split and CV protocol before the split is frozen."
+        }
+      ],
+      "failures": [
+        {
+          "code": "split_strategy_is_feasible",
+          "message": "The final task must support the configured supervised split and CV protocol before the split is frozen.",
+          "evidence": {
+            "test_size": 0.2,
+            "valid_rows": 40,
+            "train_rows": 32,
+            "holdout_rows": 8,
+            "class_count": 2,
+            "class_counts": {
+              "only": 39,
+              "other": 1
+            },
+            "cv_folds": 0,
+            "cv_strategy": "stratified_kfold",
+            "stratification": "required",
+            "checks": [
+              {
+                "code": "split_has_nonempty_partitions",
+                "passed": true,
+                "evidence": {
+                  "train_rows": 32,
+                  "holdout_rows": 8
+                },
+                "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size."
+              },
+              {
+                "code": "classification_split_and_stratification_feasible",
+                "passed": false,
+                "evidence": {
+                  "class_count": 2,
+                  "minimum_class_rows": 1,
+                  "train_rows": 32,
+                  "holdout_rows": 8
+                },
+                "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation."
+              },
+              {
+                "code": "classification_training_supports_cross_validation",
+                "passed": false,
+                "evidence": {
+                  "minimum_training_class_rows": 0,
+                  "minimum_holdout_class_rows": 0,
+                  "cv_folds": 0,
+                  "cv_strategy": "stratified_kfold"
+                },
+                "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "checks": [
+      {
+        "code": "columns_have_unique_names",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "duplicate_columns": []
+        },
+        "message": "Column names must be unique before formulation can be approved."
+      },
+      {
+        "code": "target_exists",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "target_column": "target",
+          "matching_columns": 1
+        },
+        "message": "The proposed target must exist in the raw dataset."
+      },
+      {
+        "code": "target_resolves_once",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "target_column": "target",
+          "matching_columns": 1
+        },
+        "message": "The proposed target must resolve to exactly one source column."
+      },
+      {
+        "code": "task_is_supported",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "task_type": "classification",
+          "supported_tasks": [
+            "classification",
+            "regression"
+          ]
+        },
+        "message": "Only classification and regression are supported."
+      },
+      {
+        "code": "user_target_is_immutable",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "user_target": "target",
+          "selected_target": "target"
+        },
+        "message": "An explicit user target is a hard constraint and cannot be overridden."
+      },
+      {
+        "code": "target_has_valid_observations",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "valid_target_rows": 40,
+          "missing_rows": 0,
+          "artificial_null_labels_removed": 0,
+          "invalid_nonnumeric_rows": 0,
+          "coercible_rows": 40,
+          "nonfinite_rows": 0
+        },
+        "message": "The approved target must have enough usable observations for the supervised protocol."
+      },
+      {
+        "code": "classification_has_feasible_classes",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "class_count": 2,
+          "class_counts": {
+            "only": 39,
+            "other": 1
+          }
+        },
+        "message": "Classification requires at least two valid classes."
+      },
+      {
+        "code": "split_strategy_is_feasible",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {
+          "test_size": 0.2,
+          "valid_rows": 40,
+          "train_rows": 32,
+          "holdout_rows": 8,
+          "class_count": 2,
+          "class_counts": {
+            "only": 39,
+            "other": 1
+          },
+          "cv_folds": 0,
+          "cv_strategy": "stratified_kfold",
+          "stratification": "required",
+          "checks": [
+            {
+              "code": "split_has_nonempty_partitions",
+              "passed": true,
+              "evidence": {
+                "train_rows": 32,
+                "holdout_rows": 8
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size."
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "passed": false,
+              "evidence": {
+                "class_count": 2,
+                "minimum_class_rows": 1,
+                "train_rows": 32,
+                "holdout_rows": 8
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation."
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "passed": false,
+              "evidence": {
+                "minimum_training_class_rows": 0,
+                "minimum_holdout_class_rows": 0,
+                "cv_folds": 0,
+                "cv_strategy": "stratified_kfold"
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split."
+            }
+          ]
+        },
+        "message": "The final task must support the configured supervised split and CV protocol before the split is frozen."
+      }
+    ],
+    "justification": "Deterministic validation rejected the approved plan before model fitting.",
+    "confidence": 0.0
+  },
+  "warnings": [],
+  "agent_sources": {
+    "formulation": "offline_fallback"
+  },
+  "gate_completed_before_training": false,
+  "formulation_gate_status": "not_completed",
+  "split_frozen_after_formulation_gate": false,
+  "modeling_gate_status": "not_completed",
+  "validation_gate_status": "failed",
+  "model_training_occurred": false,
+  "holdout_policy": {
+    "frozen_before_modeling_recommendations": true,
+    "planning_data": "training_partition_only",
+    "holdout_used_for": "final_evaluation_only"
+  },
+  "cleaning_policy": {
+    "decision_evidence": "training_partition_only",
+    "structural_actions": "fitted_on_training_and_transformed_per_partition_with_original_row_positions_preserved",
+    "duplicate_policy": "within_partition_only_keep_first",
+    "holdout_used_for_cleaning_decisions": false,
+    "learned_preprocessing": "fit_inside_training_pipeline_only"
+  },
+  "failure": {
+    "code": "validation_failed",
+    "error_type": "InvariantViolation",
+    "message": "[split_strategy_is_feasible] The final task must support the configured supervised split and CV protocol before the split is frozen.",
+    "check_codes": [
+      "split_strategy_is_feasible"
+    ]
+  }
+}

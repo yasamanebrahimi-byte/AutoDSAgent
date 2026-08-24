@@ -336,7 +336,9 @@ def deterministic_recommendation(
     else:
         relationship_summary = (
             f"{diagnostics.nonlinearity_signal} numeric-target nonlinearity and "
-            f"{diagnostics.association_measure}"
+            f"{diagnostics.association_measure}; "
+            f"{diagnostics.interaction_signals.interaction_strength} interaction evidence "
+            f"({diagnostics.interaction_signals.interaction_score:.2f})"
         )
     reason = (
         f"The training-only deterministic policy ranked {method} highest with "
@@ -370,8 +372,17 @@ def deterministic_recommendation(
             f"structural_complexity={diagnostics.structural_complexity_signal}"
             f"({diagnostics.structural_complexity_score:.3f})"
         ),
-        f"selected_score={top_score if top_score is not None else 'ineligible'}",
-        f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}",
+        (
+            f"interaction_strength={diagnostics.interaction_signals.interaction_strength}; "
+            f"interaction_score={diagnostics.interaction_signals.interaction_score:.3f}; "
+            f"pairs_evaluated={diagnostics.interaction_signals.interaction_pairs_evaluated}; "
+            f"strong_pair_count={diagnostics.interaction_signals.strong_interaction_pair_count}; "
+            f"strong_pair_fraction={diagnostics.interaction_signals.strong_interaction_pair_fraction:.3f}"
+        ),
+        (
+            f"selected_score={top_score if top_score is not None else 'ineligible'}; "
+            f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}"
+        ),
     ]
     return DeterministicRecommendation(
         target_column=target_column,

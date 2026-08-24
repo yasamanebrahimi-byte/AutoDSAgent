@@ -1,0 +1,2272 @@
+{
+  "{\"candidate_methods\": [\"linear\", \"regularized_linear\", \"tree_ensemble\", \"boosted_tree\"], \"case\": \"reproducibility\", \"prompt_schema_version\": \"2026-08-23.formulation-modeling-gates.v2\", \"split\": {\"dataset_fingerprint\": \"c44c928cb466954f1bedab609c17a75b950219053a427fea79b300dec5c5e08a\", \"holdout_positions_digest\": \"5efaacdd9eeaaf4e516a1910dcd71dfa62cc8c6c11771b048030556e9dd676d0\", \"holdout_rows\": 10, \"random_state\": 75, \"row_index_policy\": \"zero_based_row_position\", \"strategy\": \"stratified\", \"target_column\": \"target\", \"task_type\": \"classification\", \"test_size\": 0.2, \"train_positions_digest\": \"deb6ef1abc1ff454313a1de3267c23c282a6ecd79b6012ca2c8afdca0310ad9a\", \"train_rows\": 38, \"valid_positions_digest\": \"852c80a269cfde9f6b8cc6c4f19f4e92c636218d0620fedda0d379e77abc224b\", \"valid_rows\": 48}, \"target_column\": \"target\", \"task_type\": \"classification\", \"training_frame_digest\": \"8f96f41774bf86bacf14ab79a03dff98bb9a30f3006a46a91c60fabd5d8c5b80\"}": {
+    "best_method": "linear",
+    "best_primary_mean": 0.9746031746031747,
+    "best_primary_std": 0.050793650793650794,
+    "candidate_metrics": {
+      "boosted_tree": {
+        "cv_folds": 5,
+        "cv_strategy": "stratified_kfold",
+        "data_used": "frozen_training_partition_only",
+        "holdout_used": false,
+        "metrics": {
+          "accuracy": {
+            "folds": [
+              0.5,
+              0.5,
+              0.625,
+              0.5714285714285714,
+              0.5714285714285714
+            ],
+            "mean": 0.5535714285714285,
+            "std": 0.04791574237499549
+          },
+          "balanced_accuracy": {
+            "folds": [
+              0.5,
+              0.5,
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mean": 0.5,
+            "std": 0.0
+          },
+          "macro_f1": {
+            "folds": [
+              0.3333333333333333,
+              0.3333333333333333,
+              0.38461538461538464,
+              0.36363636363636365,
+              0.36363636363636365
+            ],
+            "mean": 0.35571095571095573,
+            "std": 0.01981214858822918
+          }
+        },
+        "primary_mean": 0.35571095571095573,
+        "primary_metric": "macro_f1",
+        "primary_std": 0.01981214858822918,
+        "status": "evaluated",
+        "validation": {
+          "approved_preprocessing": {
+            "categorical_encoding": "none",
+            "categorical_imputation": "none",
+            "categorical_unknown_handling": "ignore",
+            "datetime_handling": "exclude",
+            "fit_inside_pipeline": true,
+            "high_cardinality_handling": "exclude",
+            "identifier_handling": "exclude",
+            "infinity_handling": "replace_with_missing",
+            "numeric_imputation": "none",
+            "numeric_scaling": "none",
+            "unsupported_text_handling": "exclude"
+          },
+          "checks": [
+            {
+              "code": "columns_have_unique_names",
+              "evidence": {
+                "duplicate_columns": []
+              },
+              "message": "Column names must be unique so the approved target and feature matrix resolve unambiguously.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_exists",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target column 'target' must exist; choose an existing target column.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_resolves_once",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target name 'target' must resolve to exactly one column; remove duplicate or ambiguous names.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "task_is_supported",
+              "evidence": {
+                "supported_tasks": [
+                  "classification",
+                  "regression"
+                ],
+                "task_type": "classification"
+              },
+              "message": "Use one of the supported task types: classification or regression.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "method_is_supported",
+              "evidence": {
+                "method": "boosted_tree",
+                "supported_methods": [
+                  "boosted_tree",
+                  "linear",
+                  "regularized_linear",
+                  "tree_ensemble"
+                ]
+              },
+              "message": "Use one of the methods proposed by the workflow: linear, regularized_linear, tree_ensemble, or boosted_tree.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "test_size_is_supported",
+              "evidence": {
+                "supported_range": [
+                  0.1,
+                  0.5
+                ],
+                "test_size": 0.2
+              },
+              "message": "test_size must be finite and between 0.10 and 0.50; choose a supported holdout fraction.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_missing_values_filtered_before_encoding",
+              "evidence": {
+                "artificial_null_labels_removed": 0,
+                "missing_rows": 0,
+                "rows_removed": 0
+              },
+              "message": "Missing target values are removed deterministically before target encoding; they cannot become artificial classes.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_numeric_or_coercible",
+              "evidence": {
+                "coercible_rows": 38,
+                "invalid_nonnumeric_rows": 0
+              },
+              "message": "Regression targets may contain numeric strings, but nonnumeric values must be corrected rather than silently discarded.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_finite",
+              "evidence": {
+                "nonfinite_rows": 0
+              },
+              "message": "Regression targets must contain finite numeric values; replace infinity or invalid measurements before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_two_classes",
+              "evidence": {
+                "class_count": 2,
+                "class_counts": {
+                  "no": 21,
+                  "yes": 17
+                }
+              },
+              "message": "Classification requires at least two valid classes after deterministic target filtering.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_feasible_class_count",
+              "evidence": {
+                "class_count": 2,
+                "valid_rows": 38
+              },
+              "message": "The number of classes must leave enough rows for both a holdout and cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_task_is_compatible",
+              "evidence": {
+                "target_semantic_type": "categorical",
+                "task_type": "classification"
+              },
+              "message": "The approved task type must match the validated target representation; choose classification for labels or a numeric regression target.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_absent_from_feature_matrix",
+              "evidence": {
+                "duplicate_requested_features": [],
+                "missing_requested_features": [],
+                "target_in_features": false
+              },
+              "message": "The target must not be supplied as a feature; pass an explicit feature list without the target and use existing unique columns.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "no_direct_target_copy_features",
+              "evidence": {
+                "direct_target_copy_features": []
+              },
+              "message": "Direct copies of the target are excluded deterministically; remove them or verify the feature definition before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "usable_feature_remains",
+              "evidence": {
+                "excluded_feature_count": 0,
+                "features_used": [
+                  "signal",
+                  "noise"
+                ]
+              },
+              "message": "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_contract_is_supported",
+              "evidence": {
+                "approved_preprocessing": {
+                  "categorical_encoding": "none",
+                  "categorical_imputation": "none",
+                  "categorical_unknown_handling": "ignore",
+                  "datetime_handling": "exclude",
+                  "fit_inside_pipeline": true,
+                  "high_cardinality_handling": "exclude",
+                  "identifier_handling": "exclude",
+                  "infinity_handling": "replace_with_missing",
+                  "numeric_imputation": "none",
+                  "numeric_scaling": "none",
+                  "unsupported_text_handling": "exclude"
+                },
+                "supported_values_are_schema_bound": true
+              },
+              "message": "The approved preprocessing contract contains only supported executable strategies.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_is_training_only",
+              "evidence": {
+                "fit_inside_pipeline": true,
+                "learned_steps": [
+                  "numeric_imputation",
+                  "categorical_imputation",
+                  "numeric_scaling",
+                  "categorical_encoding"
+                ]
+              },
+              "message": "All learned imputation, scaling, and encoding must be fitted inside the scikit-learn pipeline on training folds only.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_missing_values_are_handled",
+              "evidence": {
+                "numeric_imputation": "none",
+                "numeric_missing_values": 0
+              },
+              "message": "Observed numeric missing or infinite values require a supported numeric imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_missing_values_are_handled",
+              "evidence": {
+                "categorical_imputation": "none",
+                "categorical_missing_values": 0
+              },
+              "message": "Observed categorical missing values require a supported categorical imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "linear_numeric_features_use_approved_scaling_policy",
+              "evidence": {
+                "method": "boosted_tree",
+                "numeric_features": [
+                  "signal",
+                  "noise"
+                ],
+                "numeric_scaling": "none"
+              },
+              "message": "Linear and regularized-linear methods require standard numeric scaling under the project policy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_features_use_safe_encoding",
+              "evidence": {
+                "categorical_encoding": "none",
+                "categorical_features": []
+              },
+              "message": "Usable categorical features require a supported categorical encoder; unencoded categories cannot enter the estimator.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_unknown_values_are_handled_safely",
+              "evidence": {
+                "categorical_features": [],
+                "categorical_unknown_handling": "ignore"
+              },
+              "message": "Categorical preprocessing must handle categories absent from a training fold without raising or leaking holdout information.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "boosted_tree_encoding_is_compatible",
+              "evidence": {
+                "categorical_encoding": "none",
+                "method": "boosted_tree"
+              },
+              "message": "Boosted trees use bounded ordinal encoding so the estimator never receives an unsafe dense one-hot matrix.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_values_are_handled",
+              "evidence": {
+                "infinity_handling": "replace_with_missing",
+                "infinity_values": 0
+              },
+              "message": "Observed numeric infinities must be replaced with missing values before training-only imputation or the run must fail closed.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identifier_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Identifier-like features are mandatory exclusions and cannot be retained by an agent or reconciliation plan.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "high_cardinality_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "High-cardinality categorical features are mandatory exclusions under the compact safe baseline.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "unsupported_text_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Unsupported text features cannot be retained without an implemented safe text transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "datetime_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Datetime features cannot be retained without an implemented temporal transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "one_hot_matrix_is_memory_safe",
+              "evidence": {
+                "categorical_encoding": "none",
+                "estimated_one_hot_features": 2,
+                "max_one_hot_features": 4000,
+                "representation": "sparse_output=True"
+              },
+              "message": "One-hot encoding is bounded and sparse; an unreasonable encoded matrix fails closed before fitting.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_policy_is_deterministic",
+              "evidence": {
+                "converted_to_missing": {},
+                "policy": "replace_with_missing"
+              },
+              "message": "Numeric infinity handling is fixed by the approved contract before training-only imputation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identical_feature_rows_have_consistent_targets",
+              "evidence": {
+                "conflicting_groups": 0,
+                "conflicting_rows": 0
+              },
+              "message": "Identical usable feature rows cannot map to conflicting targets; inspect duplicates or correct the source data.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "split_has_nonempty_partitions",
+              "evidence": {
+                "holdout_rows": 8,
+                "train_rows": 30
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "evidence": {
+                "class_count": 2,
+                "holdout_rows": 8,
+                "minimum_class_rows": 17,
+                "train_rows": 30
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "evidence": {
+                "cv_folds": 5,
+                "cv_strategy": "stratified_kfold",
+                "minimum_holdout_class_rows": 4,
+                "minimum_training_class_rows": 13
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "boosted_tree_encoding_is_memory_safe",
+              "evidence": {
+                "categorical_encoding": "ordinal_encoding_for_boosted_tree",
+                "dense_one_hot_path": "not used",
+                "estimated_one_hot_columns": 2
+              },
+              "message": "Boosted trees use bounded ordinal categorical encoding instead of a dense one-hot expansion.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            }
+          ],
+          "direct_leakage_detected": false,
+          "excluded_features": [],
+          "failures": [],
+          "features_used": [
+            "signal",
+            "noise"
+          ],
+          "overall_status": "passed",
+          "preprocessing_requirements": {
+            "evidence": {
+              "categorical_features": [],
+              "categorical_missing_values": 0,
+              "datetime_features": [],
+              "estimated_one_hot_features": 2,
+              "excluded_features": [],
+              "high_cardinality_features": [],
+              "identifier_features": [],
+              "infinity_values": 0,
+              "max_one_hot_features": 4000,
+              "method": "boosted_tree",
+              "numeric_features": [
+                "signal",
+                "noise"
+              ],
+              "numeric_missing_values": 0,
+              "task_type": "classification",
+              "unsupported_text_features": []
+            },
+            "expected_contract": {
+              "categorical_encoding": "none",
+              "categorical_imputation": "none",
+              "categorical_unknown_handling": "ignore",
+              "datetime_handling": "exclude",
+              "fit_inside_pipeline": true,
+              "high_cardinality_handling": "exclude",
+              "identifier_handling": "exclude",
+              "infinity_handling": "replace_with_missing",
+              "numeric_imputation": "none",
+              "numeric_scaling": "none",
+              "unsupported_text_handling": "exclude"
+            },
+            "irrelevant_steps": [
+              "categorical_imputation",
+              "categorical_encoding",
+              "categorical_unknown_handling",
+              "infinity_handling",
+              "identifier_handling",
+              "high_cardinality_handling",
+              "unsupported_text_handling",
+              "datetime_handling"
+            ],
+            "optional_steps": [
+              "numeric_imputation",
+              "numeric_scaling"
+            ],
+            "prohibited_steps": [],
+            "required_steps": [
+              "fit_inside_pipeline"
+            ]
+          },
+          "split": {
+            "class_count": 2,
+            "class_counts": {
+              "no": 21,
+              "yes": 17
+            },
+            "cv_folds": 5,
+            "cv_strategy": "stratified_kfold",
+            "holdout_rows": 8,
+            "stratification": "required",
+            "test_size": 0.2,
+            "train_rows": 30,
+            "valid_rows": 38
+          },
+          "status": "passed",
+          "target_rows_removed": 0,
+          "valid_target_rows": 38,
+          "validated_method": "boosted_tree",
+          "validated_target_column": "target",
+          "validated_task_type": "classification",
+          "warnings": []
+        }
+      },
+      "linear": {
+        "cv_folds": 5,
+        "cv_strategy": "stratified_kfold",
+        "data_used": "frozen_training_partition_only",
+        "holdout_used": false,
+        "metrics": {
+          "accuracy": {
+            "folds": [
+              0.875,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "balanced_accuracy": {
+            "folds": [
+              0.875,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "macro_f1": {
+            "folds": [
+              0.873015873015873,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.9746031746031747,
+            "std": 0.050793650793650794
+          }
+        },
+        "primary_mean": 0.9746031746031747,
+        "primary_metric": "macro_f1",
+        "primary_std": 0.050793650793650794,
+        "status": "evaluated",
+        "validation": {
+          "approved_preprocessing": {
+            "categorical_encoding": "none",
+            "categorical_imputation": "none",
+            "categorical_unknown_handling": "ignore",
+            "datetime_handling": "exclude",
+            "fit_inside_pipeline": true,
+            "high_cardinality_handling": "exclude",
+            "identifier_handling": "exclude",
+            "infinity_handling": "replace_with_missing",
+            "numeric_imputation": "none",
+            "numeric_scaling": "standard",
+            "unsupported_text_handling": "exclude"
+          },
+          "checks": [
+            {
+              "code": "columns_have_unique_names",
+              "evidence": {
+                "duplicate_columns": []
+              },
+              "message": "Column names must be unique so the approved target and feature matrix resolve unambiguously.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_exists",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target column 'target' must exist; choose an existing target column.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_resolves_once",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target name 'target' must resolve to exactly one column; remove duplicate or ambiguous names.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "task_is_supported",
+              "evidence": {
+                "supported_tasks": [
+                  "classification",
+                  "regression"
+                ],
+                "task_type": "classification"
+              },
+              "message": "Use one of the supported task types: classification or regression.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "method_is_supported",
+              "evidence": {
+                "method": "linear",
+                "supported_methods": [
+                  "boosted_tree",
+                  "linear",
+                  "regularized_linear",
+                  "tree_ensemble"
+                ]
+              },
+              "message": "Use one of the methods proposed by the workflow: linear, regularized_linear, tree_ensemble, or boosted_tree.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "test_size_is_supported",
+              "evidence": {
+                "supported_range": [
+                  0.1,
+                  0.5
+                ],
+                "test_size": 0.2
+              },
+              "message": "test_size must be finite and between 0.10 and 0.50; choose a supported holdout fraction.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_missing_values_filtered_before_encoding",
+              "evidence": {
+                "artificial_null_labels_removed": 0,
+                "missing_rows": 0,
+                "rows_removed": 0
+              },
+              "message": "Missing target values are removed deterministically before target encoding; they cannot become artificial classes.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_numeric_or_coercible",
+              "evidence": {
+                "coercible_rows": 38,
+                "invalid_nonnumeric_rows": 0
+              },
+              "message": "Regression targets may contain numeric strings, but nonnumeric values must be corrected rather than silently discarded.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_finite",
+              "evidence": {
+                "nonfinite_rows": 0
+              },
+              "message": "Regression targets must contain finite numeric values; replace infinity or invalid measurements before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_two_classes",
+              "evidence": {
+                "class_count": 2,
+                "class_counts": {
+                  "no": 21,
+                  "yes": 17
+                }
+              },
+              "message": "Classification requires at least two valid classes after deterministic target filtering.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_feasible_class_count",
+              "evidence": {
+                "class_count": 2,
+                "valid_rows": 38
+              },
+              "message": "The number of classes must leave enough rows for both a holdout and cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_task_is_compatible",
+              "evidence": {
+                "target_semantic_type": "categorical",
+                "task_type": "classification"
+              },
+              "message": "The approved task type must match the validated target representation; choose classification for labels or a numeric regression target.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_absent_from_feature_matrix",
+              "evidence": {
+                "duplicate_requested_features": [],
+                "missing_requested_features": [],
+                "target_in_features": false
+              },
+              "message": "The target must not be supplied as a feature; pass an explicit feature list without the target and use existing unique columns.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "no_direct_target_copy_features",
+              "evidence": {
+                "direct_target_copy_features": []
+              },
+              "message": "Direct copies of the target are excluded deterministically; remove them or verify the feature definition before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "usable_feature_remains",
+              "evidence": {
+                "excluded_feature_count": 0,
+                "features_used": [
+                  "signal",
+                  "noise"
+                ]
+              },
+              "message": "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_contract_is_supported",
+              "evidence": {
+                "approved_preprocessing": {
+                  "categorical_encoding": "none",
+                  "categorical_imputation": "none",
+                  "categorical_unknown_handling": "ignore",
+                  "datetime_handling": "exclude",
+                  "fit_inside_pipeline": true,
+                  "high_cardinality_handling": "exclude",
+                  "identifier_handling": "exclude",
+                  "infinity_handling": "replace_with_missing",
+                  "numeric_imputation": "none",
+                  "numeric_scaling": "standard",
+                  "unsupported_text_handling": "exclude"
+                },
+                "supported_values_are_schema_bound": true
+              },
+              "message": "The approved preprocessing contract contains only supported executable strategies.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_is_training_only",
+              "evidence": {
+                "fit_inside_pipeline": true,
+                "learned_steps": [
+                  "numeric_imputation",
+                  "categorical_imputation",
+                  "numeric_scaling",
+                  "categorical_encoding"
+                ]
+              },
+              "message": "All learned imputation, scaling, and encoding must be fitted inside the scikit-learn pipeline on training folds only.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_missing_values_are_handled",
+              "evidence": {
+                "numeric_imputation": "none",
+                "numeric_missing_values": 0
+              },
+              "message": "Observed numeric missing or infinite values require a supported numeric imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_missing_values_are_handled",
+              "evidence": {
+                "categorical_imputation": "none",
+                "categorical_missing_values": 0
+              },
+              "message": "Observed categorical missing values require a supported categorical imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "linear_numeric_features_use_approved_scaling_policy",
+              "evidence": {
+                "method": "linear",
+                "numeric_features": [
+                  "signal",
+                  "noise"
+                ],
+                "numeric_scaling": "standard"
+              },
+              "message": "Linear and regularized-linear methods require standard numeric scaling under the project policy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_features_use_safe_encoding",
+              "evidence": {
+                "categorical_encoding": "none",
+                "categorical_features": []
+              },
+              "message": "Usable categorical features require a supported categorical encoder; unencoded categories cannot enter the estimator.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_unknown_values_are_handled_safely",
+              "evidence": {
+                "categorical_features": [],
+                "categorical_unknown_handling": "ignore"
+              },
+              "message": "Categorical preprocessing must handle categories absent from a training fold without raising or leaking holdout information.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "boosted_tree_encoding_is_compatible",
+              "evidence": {
+                "categorical_encoding": "none",
+                "method": "linear"
+              },
+              "message": "Boosted trees use bounded ordinal encoding so the estimator never receives an unsafe dense one-hot matrix.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_values_are_handled",
+              "evidence": {
+                "infinity_handling": "replace_with_missing",
+                "infinity_values": 0
+              },
+              "message": "Observed numeric infinities must be replaced with missing values before training-only imputation or the run must fail closed.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identifier_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Identifier-like features are mandatory exclusions and cannot be retained by an agent or reconciliation plan.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "high_cardinality_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "High-cardinality categorical features are mandatory exclusions under the compact safe baseline.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "unsupported_text_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Unsupported text features cannot be retained without an implemented safe text transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "datetime_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Datetime features cannot be retained without an implemented temporal transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "one_hot_matrix_is_memory_safe",
+              "evidence": {
+                "categorical_encoding": "none",
+                "estimated_one_hot_features": 2,
+                "max_one_hot_features": 4000,
+                "representation": "sparse_output=True"
+              },
+              "message": "One-hot encoding is bounded and sparse; an unreasonable encoded matrix fails closed before fitting.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_policy_is_deterministic",
+              "evidence": {
+                "converted_to_missing": {},
+                "policy": "replace_with_missing"
+              },
+              "message": "Numeric infinity handling is fixed by the approved contract before training-only imputation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identical_feature_rows_have_consistent_targets",
+              "evidence": {
+                "conflicting_groups": 0,
+                "conflicting_rows": 0
+              },
+              "message": "Identical usable feature rows cannot map to conflicting targets; inspect duplicates or correct the source data.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "split_has_nonempty_partitions",
+              "evidence": {
+                "holdout_rows": 8,
+                "train_rows": 30
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "evidence": {
+                "class_count": 2,
+                "holdout_rows": 8,
+                "minimum_class_rows": 17,
+                "train_rows": 30
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "evidence": {
+                "cv_folds": 5,
+                "cv_strategy": "stratified_kfold",
+                "minimum_holdout_class_rows": 4,
+                "minimum_training_class_rows": 13
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            }
+          ],
+          "direct_leakage_detected": false,
+          "excluded_features": [],
+          "failures": [],
+          "features_used": [
+            "signal",
+            "noise"
+          ],
+          "overall_status": "passed",
+          "preprocessing_requirements": {
+            "evidence": {
+              "categorical_features": [],
+              "categorical_missing_values": 0,
+              "datetime_features": [],
+              "estimated_one_hot_features": 2,
+              "excluded_features": [],
+              "high_cardinality_features": [],
+              "identifier_features": [],
+              "infinity_values": 0,
+              "max_one_hot_features": 4000,
+              "method": "linear",
+              "numeric_features": [
+                "signal",
+                "noise"
+              ],
+              "numeric_missing_values": 0,
+              "task_type": "classification",
+              "unsupported_text_features": []
+            },
+            "expected_contract": {
+              "categorical_encoding": "none",
+              "categorical_imputation": "none",
+              "categorical_unknown_handling": "ignore",
+              "datetime_handling": "exclude",
+              "fit_inside_pipeline": true,
+              "high_cardinality_handling": "exclude",
+              "identifier_handling": "exclude",
+              "infinity_handling": "replace_with_missing",
+              "numeric_imputation": "none",
+              "numeric_scaling": "standard",
+              "unsupported_text_handling": "exclude"
+            },
+            "irrelevant_steps": [
+              "categorical_imputation",
+              "categorical_encoding",
+              "categorical_unknown_handling",
+              "infinity_handling",
+              "identifier_handling",
+              "high_cardinality_handling",
+              "unsupported_text_handling",
+              "datetime_handling"
+            ],
+            "optional_steps": [
+              "numeric_imputation"
+            ],
+            "prohibited_steps": [],
+            "required_steps": [
+              "fit_inside_pipeline",
+              "numeric_scaling"
+            ]
+          },
+          "split": {
+            "class_count": 2,
+            "class_counts": {
+              "no": 21,
+              "yes": 17
+            },
+            "cv_folds": 5,
+            "cv_strategy": "stratified_kfold",
+            "holdout_rows": 8,
+            "stratification": "required",
+            "test_size": 0.2,
+            "train_rows": 30,
+            "valid_rows": 38
+          },
+          "status": "passed",
+          "target_rows_removed": 0,
+          "valid_target_rows": 38,
+          "validated_method": "linear",
+          "validated_target_column": "target",
+          "validated_task_type": "classification",
+          "warnings": []
+        }
+      },
+      "regularized_linear": {
+        "cv_folds": 5,
+        "cv_strategy": "stratified_kfold",
+        "data_used": "frozen_training_partition_only",
+        "holdout_used": false,
+        "metrics": {
+          "accuracy": {
+            "folds": [
+              0.875,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "balanced_accuracy": {
+            "folds": [
+              0.875,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "macro_f1": {
+            "folds": [
+              0.873015873015873,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.9746031746031747,
+            "std": 0.050793650793650794
+          }
+        },
+        "primary_mean": 0.9746031746031747,
+        "primary_metric": "macro_f1",
+        "primary_std": 0.050793650793650794,
+        "status": "evaluated",
+        "validation": {
+          "approved_preprocessing": {
+            "categorical_encoding": "none",
+            "categorical_imputation": "none",
+            "categorical_unknown_handling": "ignore",
+            "datetime_handling": "exclude",
+            "fit_inside_pipeline": true,
+            "high_cardinality_handling": "exclude",
+            "identifier_handling": "exclude",
+            "infinity_handling": "replace_with_missing",
+            "numeric_imputation": "none",
+            "numeric_scaling": "standard",
+            "unsupported_text_handling": "exclude"
+          },
+          "checks": [
+            {
+              "code": "columns_have_unique_names",
+              "evidence": {
+                "duplicate_columns": []
+              },
+              "message": "Column names must be unique so the approved target and feature matrix resolve unambiguously.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_exists",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target column 'target' must exist; choose an existing target column.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_resolves_once",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target name 'target' must resolve to exactly one column; remove duplicate or ambiguous names.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "task_is_supported",
+              "evidence": {
+                "supported_tasks": [
+                  "classification",
+                  "regression"
+                ],
+                "task_type": "classification"
+              },
+              "message": "Use one of the supported task types: classification or regression.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "method_is_supported",
+              "evidence": {
+                "method": "regularized_linear",
+                "supported_methods": [
+                  "boosted_tree",
+                  "linear",
+                  "regularized_linear",
+                  "tree_ensemble"
+                ]
+              },
+              "message": "Use one of the methods proposed by the workflow: linear, regularized_linear, tree_ensemble, or boosted_tree.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "test_size_is_supported",
+              "evidence": {
+                "supported_range": [
+                  0.1,
+                  0.5
+                ],
+                "test_size": 0.2
+              },
+              "message": "test_size must be finite and between 0.10 and 0.50; choose a supported holdout fraction.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_missing_values_filtered_before_encoding",
+              "evidence": {
+                "artificial_null_labels_removed": 0,
+                "missing_rows": 0,
+                "rows_removed": 0
+              },
+              "message": "Missing target values are removed deterministically before target encoding; they cannot become artificial classes.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_numeric_or_coercible",
+              "evidence": {
+                "coercible_rows": 38,
+                "invalid_nonnumeric_rows": 0
+              },
+              "message": "Regression targets may contain numeric strings, but nonnumeric values must be corrected rather than silently discarded.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_finite",
+              "evidence": {
+                "nonfinite_rows": 0
+              },
+              "message": "Regression targets must contain finite numeric values; replace infinity or invalid measurements before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_two_classes",
+              "evidence": {
+                "class_count": 2,
+                "class_counts": {
+                  "no": 21,
+                  "yes": 17
+                }
+              },
+              "message": "Classification requires at least two valid classes after deterministic target filtering.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_feasible_class_count",
+              "evidence": {
+                "class_count": 2,
+                "valid_rows": 38
+              },
+              "message": "The number of classes must leave enough rows for both a holdout and cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_task_is_compatible",
+              "evidence": {
+                "target_semantic_type": "categorical",
+                "task_type": "classification"
+              },
+              "message": "The approved task type must match the validated target representation; choose classification for labels or a numeric regression target.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_absent_from_feature_matrix",
+              "evidence": {
+                "duplicate_requested_features": [],
+                "missing_requested_features": [],
+                "target_in_features": false
+              },
+              "message": "The target must not be supplied as a feature; pass an explicit feature list without the target and use existing unique columns.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "no_direct_target_copy_features",
+              "evidence": {
+                "direct_target_copy_features": []
+              },
+              "message": "Direct copies of the target are excluded deterministically; remove them or verify the feature definition before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "usable_feature_remains",
+              "evidence": {
+                "excluded_feature_count": 0,
+                "features_used": [
+                  "signal",
+                  "noise"
+                ]
+              },
+              "message": "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_contract_is_supported",
+              "evidence": {
+                "approved_preprocessing": {
+                  "categorical_encoding": "none",
+                  "categorical_imputation": "none",
+                  "categorical_unknown_handling": "ignore",
+                  "datetime_handling": "exclude",
+                  "fit_inside_pipeline": true,
+                  "high_cardinality_handling": "exclude",
+                  "identifier_handling": "exclude",
+                  "infinity_handling": "replace_with_missing",
+                  "numeric_imputation": "none",
+                  "numeric_scaling": "standard",
+                  "unsupported_text_handling": "exclude"
+                },
+                "supported_values_are_schema_bound": true
+              },
+              "message": "The approved preprocessing contract contains only supported executable strategies.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_is_training_only",
+              "evidence": {
+                "fit_inside_pipeline": true,
+                "learned_steps": [
+                  "numeric_imputation",
+                  "categorical_imputation",
+                  "numeric_scaling",
+                  "categorical_encoding"
+                ]
+              },
+              "message": "All learned imputation, scaling, and encoding must be fitted inside the scikit-learn pipeline on training folds only.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_missing_values_are_handled",
+              "evidence": {
+                "numeric_imputation": "none",
+                "numeric_missing_values": 0
+              },
+              "message": "Observed numeric missing or infinite values require a supported numeric imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_missing_values_are_handled",
+              "evidence": {
+                "categorical_imputation": "none",
+                "categorical_missing_values": 0
+              },
+              "message": "Observed categorical missing values require a supported categorical imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "linear_numeric_features_use_approved_scaling_policy",
+              "evidence": {
+                "method": "regularized_linear",
+                "numeric_features": [
+                  "signal",
+                  "noise"
+                ],
+                "numeric_scaling": "standard"
+              },
+              "message": "Linear and regularized-linear methods require standard numeric scaling under the project policy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_features_use_safe_encoding",
+              "evidence": {
+                "categorical_encoding": "none",
+                "categorical_features": []
+              },
+              "message": "Usable categorical features require a supported categorical encoder; unencoded categories cannot enter the estimator.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_unknown_values_are_handled_safely",
+              "evidence": {
+                "categorical_features": [],
+                "categorical_unknown_handling": "ignore"
+              },
+              "message": "Categorical preprocessing must handle categories absent from a training fold without raising or leaking holdout information.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "boosted_tree_encoding_is_compatible",
+              "evidence": {
+                "categorical_encoding": "none",
+                "method": "regularized_linear"
+              },
+              "message": "Boosted trees use bounded ordinal encoding so the estimator never receives an unsafe dense one-hot matrix.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_values_are_handled",
+              "evidence": {
+                "infinity_handling": "replace_with_missing",
+                "infinity_values": 0
+              },
+              "message": "Observed numeric infinities must be replaced with missing values before training-only imputation or the run must fail closed.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identifier_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Identifier-like features are mandatory exclusions and cannot be retained by an agent or reconciliation plan.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "high_cardinality_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "High-cardinality categorical features are mandatory exclusions under the compact safe baseline.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "unsupported_text_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Unsupported text features cannot be retained without an implemented safe text transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "datetime_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Datetime features cannot be retained without an implemented temporal transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "one_hot_matrix_is_memory_safe",
+              "evidence": {
+                "categorical_encoding": "none",
+                "estimated_one_hot_features": 2,
+                "max_one_hot_features": 4000,
+                "representation": "sparse_output=True"
+              },
+              "message": "One-hot encoding is bounded and sparse; an unreasonable encoded matrix fails closed before fitting.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_policy_is_deterministic",
+              "evidence": {
+                "converted_to_missing": {},
+                "policy": "replace_with_missing"
+              },
+              "message": "Numeric infinity handling is fixed by the approved contract before training-only imputation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identical_feature_rows_have_consistent_targets",
+              "evidence": {
+                "conflicting_groups": 0,
+                "conflicting_rows": 0
+              },
+              "message": "Identical usable feature rows cannot map to conflicting targets; inspect duplicates or correct the source data.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "split_has_nonempty_partitions",
+              "evidence": {
+                "holdout_rows": 8,
+                "train_rows": 30
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "evidence": {
+                "class_count": 2,
+                "holdout_rows": 8,
+                "minimum_class_rows": 17,
+                "train_rows": 30
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "evidence": {
+                "cv_folds": 5,
+                "cv_strategy": "stratified_kfold",
+                "minimum_holdout_class_rows": 4,
+                "minimum_training_class_rows": 13
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            }
+          ],
+          "direct_leakage_detected": false,
+          "excluded_features": [],
+          "failures": [],
+          "features_used": [
+            "signal",
+            "noise"
+          ],
+          "overall_status": "passed",
+          "preprocessing_requirements": {
+            "evidence": {
+              "categorical_features": [],
+              "categorical_missing_values": 0,
+              "datetime_features": [],
+              "estimated_one_hot_features": 2,
+              "excluded_features": [],
+              "high_cardinality_features": [],
+              "identifier_features": [],
+              "infinity_values": 0,
+              "max_one_hot_features": 4000,
+              "method": "regularized_linear",
+              "numeric_features": [
+                "signal",
+                "noise"
+              ],
+              "numeric_missing_values": 0,
+              "task_type": "classification",
+              "unsupported_text_features": []
+            },
+            "expected_contract": {
+              "categorical_encoding": "none",
+              "categorical_imputation": "none",
+              "categorical_unknown_handling": "ignore",
+              "datetime_handling": "exclude",
+              "fit_inside_pipeline": true,
+              "high_cardinality_handling": "exclude",
+              "identifier_handling": "exclude",
+              "infinity_handling": "replace_with_missing",
+              "numeric_imputation": "none",
+              "numeric_scaling": "standard",
+              "unsupported_text_handling": "exclude"
+            },
+            "irrelevant_steps": [
+              "categorical_imputation",
+              "categorical_encoding",
+              "categorical_unknown_handling",
+              "infinity_handling",
+              "identifier_handling",
+              "high_cardinality_handling",
+              "unsupported_text_handling",
+              "datetime_handling"
+            ],
+            "optional_steps": [
+              "numeric_imputation"
+            ],
+            "prohibited_steps": [],
+            "required_steps": [
+              "fit_inside_pipeline",
+              "numeric_scaling"
+            ]
+          },
+          "split": {
+            "class_count": 2,
+            "class_counts": {
+              "no": 21,
+              "yes": 17
+            },
+            "cv_folds": 5,
+            "cv_strategy": "stratified_kfold",
+            "holdout_rows": 8,
+            "stratification": "required",
+            "test_size": 0.2,
+            "train_rows": 30,
+            "valid_rows": 38
+          },
+          "status": "passed",
+          "target_rows_removed": 0,
+          "valid_target_rows": 38,
+          "validated_method": "regularized_linear",
+          "validated_target_column": "target",
+          "validated_task_type": "classification",
+          "warnings": []
+        }
+      },
+      "tree_ensemble": {
+        "cv_folds": 5,
+        "cv_strategy": "stratified_kfold",
+        "data_used": "frozen_training_partition_only",
+        "holdout_used": false,
+        "metrics": {
+          "accuracy": {
+            "folds": [
+              1.0,
+              0.875,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "balanced_accuracy": {
+            "folds": [
+              1.0,
+              0.875,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.975,
+            "std": 0.049999999999999996
+          },
+          "macro_f1": {
+            "folds": [
+              1.0,
+              0.873015873015873,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "mean": 0.9746031746031747,
+            "std": 0.050793650793650794
+          }
+        },
+        "primary_mean": 0.9746031746031747,
+        "primary_metric": "macro_f1",
+        "primary_std": 0.050793650793650794,
+        "status": "evaluated",
+        "validation": {
+          "approved_preprocessing": {
+            "categorical_encoding": "none",
+            "categorical_imputation": "none",
+            "categorical_unknown_handling": "ignore",
+            "datetime_handling": "exclude",
+            "fit_inside_pipeline": true,
+            "high_cardinality_handling": "exclude",
+            "identifier_handling": "exclude",
+            "infinity_handling": "replace_with_missing",
+            "numeric_imputation": "none",
+            "numeric_scaling": "none",
+            "unsupported_text_handling": "exclude"
+          },
+          "checks": [
+            {
+              "code": "columns_have_unique_names",
+              "evidence": {
+                "duplicate_columns": []
+              },
+              "message": "Column names must be unique so the approved target and feature matrix resolve unambiguously.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_exists",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target column 'target' must exist; choose an existing target column.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_resolves_once",
+              "evidence": {
+                "matching_columns": 1,
+                "target_column": "target"
+              },
+              "message": "Target name 'target' must resolve to exactly one column; remove duplicate or ambiguous names.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "task_is_supported",
+              "evidence": {
+                "supported_tasks": [
+                  "classification",
+                  "regression"
+                ],
+                "task_type": "classification"
+              },
+              "message": "Use one of the supported task types: classification or regression.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "method_is_supported",
+              "evidence": {
+                "method": "tree_ensemble",
+                "supported_methods": [
+                  "boosted_tree",
+                  "linear",
+                  "regularized_linear",
+                  "tree_ensemble"
+                ]
+              },
+              "message": "Use one of the methods proposed by the workflow: linear, regularized_linear, tree_ensemble, or boosted_tree.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "test_size_is_supported",
+              "evidence": {
+                "supported_range": [
+                  0.1,
+                  0.5
+                ],
+                "test_size": 0.2
+              },
+              "message": "test_size must be finite and between 0.10 and 0.50; choose a supported holdout fraction.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_missing_values_filtered_before_encoding",
+              "evidence": {
+                "artificial_null_labels_removed": 0,
+                "missing_rows": 0,
+                "rows_removed": 0
+              },
+              "message": "Missing target values are removed deterministically before target encoding; they cannot become artificial classes.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_numeric_or_coercible",
+              "evidence": {
+                "coercible_rows": 38,
+                "invalid_nonnumeric_rows": 0
+              },
+              "message": "Regression targets may contain numeric strings, but nonnumeric values must be corrected rather than silently discarded.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "regression_target_is_finite",
+              "evidence": {
+                "nonfinite_rows": 0
+              },
+              "message": "Regression targets must contain finite numeric values; replace infinity or invalid measurements before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_two_classes",
+              "evidence": {
+                "class_count": 2,
+                "class_counts": {
+                  "no": 21,
+                  "yes": 17
+                }
+              },
+              "message": "Classification requires at least two valid classes after deterministic target filtering.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_target_has_feasible_class_count",
+              "evidence": {
+                "class_count": 2,
+                "valid_rows": 38
+              },
+              "message": "The number of classes must leave enough rows for both a holdout and cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_task_is_compatible",
+              "evidence": {
+                "target_semantic_type": "categorical",
+                "task_type": "classification"
+              },
+              "message": "The approved task type must match the validated target representation; choose classification for labels or a numeric regression target.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "target_absent_from_feature_matrix",
+              "evidence": {
+                "duplicate_requested_features": [],
+                "missing_requested_features": [],
+                "target_in_features": false
+              },
+              "message": "The target must not be supplied as a feature; pass an explicit feature list without the target and use existing unique columns.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "no_direct_target_copy_features",
+              "evidence": {
+                "direct_target_copy_features": []
+              },
+              "message": "Direct copies of the target are excluded deterministically; remove them or verify the feature definition before training.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "usable_feature_remains",
+              "evidence": {
+                "excluded_feature_count": 0,
+                "features_used": [
+                  "signal",
+                  "noise"
+                ]
+              },
+              "message": "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_contract_is_supported",
+              "evidence": {
+                "approved_preprocessing": {
+                  "categorical_encoding": "none",
+                  "categorical_imputation": "none",
+                  "categorical_unknown_handling": "ignore",
+                  "datetime_handling": "exclude",
+                  "fit_inside_pipeline": true,
+                  "high_cardinality_handling": "exclude",
+                  "identifier_handling": "exclude",
+                  "infinity_handling": "replace_with_missing",
+                  "numeric_imputation": "none",
+                  "numeric_scaling": "none",
+                  "unsupported_text_handling": "exclude"
+                },
+                "supported_values_are_schema_bound": true
+              },
+              "message": "The approved preprocessing contract contains only supported executable strategies.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "preprocessing_is_training_only",
+              "evidence": {
+                "fit_inside_pipeline": true,
+                "learned_steps": [
+                  "numeric_imputation",
+                  "categorical_imputation",
+                  "numeric_scaling",
+                  "categorical_encoding"
+                ]
+              },
+              "message": "All learned imputation, scaling, and encoding must be fitted inside the scikit-learn pipeline on training folds only.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_missing_values_are_handled",
+              "evidence": {
+                "numeric_imputation": "none",
+                "numeric_missing_values": 0
+              },
+              "message": "Observed numeric missing or infinite values require a supported numeric imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_missing_values_are_handled",
+              "evidence": {
+                "categorical_imputation": "none",
+                "categorical_missing_values": 0
+              },
+              "message": "Observed categorical missing values require a supported categorical imputation strategy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "linear_numeric_features_use_approved_scaling_policy",
+              "evidence": {
+                "method": "tree_ensemble",
+                "numeric_features": [
+                  "signal",
+                  "noise"
+                ],
+                "numeric_scaling": "none"
+              },
+              "message": "Linear and regularized-linear methods require standard numeric scaling under the project policy.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_features_use_safe_encoding",
+              "evidence": {
+                "categorical_encoding": "none",
+                "categorical_features": []
+              },
+              "message": "Usable categorical features require a supported categorical encoder; unencoded categories cannot enter the estimator.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "categorical_unknown_values_are_handled_safely",
+              "evidence": {
+                "categorical_features": [],
+                "categorical_unknown_handling": "ignore"
+              },
+              "message": "Categorical preprocessing must handle categories absent from a training fold without raising or leaking holdout information.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "boosted_tree_encoding_is_compatible",
+              "evidence": {
+                "categorical_encoding": "none",
+                "method": "tree_ensemble"
+              },
+              "message": "Boosted trees use bounded ordinal encoding so the estimator never receives an unsafe dense one-hot matrix.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_values_are_handled",
+              "evidence": {
+                "infinity_handling": "replace_with_missing",
+                "infinity_values": 0
+              },
+              "message": "Observed numeric infinities must be replaced with missing values before training-only imputation or the run must fail closed.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identifier_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Identifier-like features are mandatory exclusions and cannot be retained by an agent or reconciliation plan.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "high_cardinality_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "High-cardinality categorical features are mandatory exclusions under the compact safe baseline.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "unsupported_text_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Unsupported text features cannot be retained without an implemented safe text transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "datetime_handling_is_safe",
+              "evidence": {
+                "approved_policy": "exclude",
+                "features": []
+              },
+              "message": "Datetime features cannot be retained without an implemented temporal transformer.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "one_hot_matrix_is_memory_safe",
+              "evidence": {
+                "categorical_encoding": "none",
+                "estimated_one_hot_features": 2,
+                "max_one_hot_features": 4000,
+                "representation": "sparse_output=True"
+              },
+              "message": "One-hot encoding is bounded and sparse; an unreasonable encoded matrix fails closed before fitting.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "numeric_infinity_policy_is_deterministic",
+              "evidence": {
+                "converted_to_missing": {},
+                "policy": "replace_with_missing"
+              },
+              "message": "Numeric infinity handling is fixed by the approved contract before training-only imputation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "identical_feature_rows_have_consistent_targets",
+              "evidence": {
+                "conflicting_groups": 0,
+                "conflicting_rows": 0
+              },
+              "message": "Identical usable feature rows cannot map to conflicting targets; inspect duplicates or correct the source data.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "split_has_nonempty_partitions",
+              "evidence": {
+                "holdout_rows": 8,
+                "train_rows": 30
+              },
+              "message": "The split must leave at least one training row and one holdout row; increase the dataset or adjust test_size.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_split_and_stratification_feasible",
+              "evidence": {
+                "class_count": 2,
+                "holdout_rows": 8,
+                "minimum_class_rows": 17,
+                "train_rows": 30
+              },
+              "message": "Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            },
+            {
+              "code": "classification_training_supports_cross_validation",
+              "evidence": {
+                "cv_folds": 5,
+                "cv_strategy": "stratified_kfold",
+                "minimum_holdout_class_rows": 4,
+                "minimum_training_class_rows": 13
+              },
+              "message": "Every training fold must contain every class; provide at least two rows per class after the holdout split.",
+              "passed": true,
+              "severity": "error",
+              "status": "passed"
+            }
+          ],
+          "direct_leakage_detected": false,
+          "excluded_features": [],
+          "failures": [],
+          "features_used": [
+            "signal",
+            "noise"
+          ],
+          "overall_status": "passed",
+          "preprocessing_requirements": {
+            "evidence": {
+              "categorical_features": [],
+              "categorical_missing_values": 0,
+              "datetime_features": [],
+              "estimated_one_hot_features": 2,
+              "excluded_features": [],
+              "high_cardinality_features": [],
+              "identifier_features": [],
+              "infinity_values": 0,
+              "max_one_hot_features": 4000,
+              "method": "tree_ensemble",
+              "numeric_features": [
+                "signal",
+                "noise"
+              ],
+              "numeric_missing_values": 0,
+              "task_type": "classification",
+              "unsupported_text_features": []
+            },
+            "expected_contract": {
+              "categorical_encoding": "none",
+              "categorical_imputation": "none",
+              "categorical_unknown_handling": "ignore",
+              "datetime_handling": "exclude",
+              "fit_inside_pipeline": true,
+              "high_cardinality_handling": "exclude",
+              "identifier_handling": "exclude",
+              "infinity_handling": "replace_with_missing",
+              "numeric_imputation": "none",
+              "numeric_scaling": "none",
+              "unsupported_text_handling": "exclude"
+            },
+            "irrelevant_steps": [
+              "categorical_imputation",
+              "categorical_encoding",
+              "categorical_unknown_handling",
+              "infinity_handling",
+              "identifier_handling",
+              "high_cardinality_handling",
+              "unsupported_text_handling",
+              "datetime_handling"
+            ],
+            "optional_steps": [
+              "numeric_imputation",
+              "numeric_scaling"
+            ],
+            "prohibited_steps": [],
+            "required_steps": [
+              "fit_inside_pipeline"
+            ]
+          },
+          "split": {
+            "class_count": 2,
+            "class_counts": {
+              "no": 21,
+              "yes": 17
+            },
+            "cv_folds": 5,
+            "cv_strategy": "stratified_kfold",
+            "holdout_rows": 8,
+            "stratification": "required",
+            "test_size": 0.2,
+            "train_rows": 30,
+            "valid_rows": 38
+          },
+          "status": "passed",
+          "target_rows_removed": 0,
+          "valid_target_rows": 38,
+          "validated_method": "tree_ensemble",
+          "validated_target_column": "target",
+          "validated_task_type": "classification",
+          "warnings": []
+        }
+      }
+    },
+    "data_used": "frozen_training_partition_only",
+    "holdout_used": false,
+    "primary_metric": "macro_f1",
+    "ranking": [
+      "linear",
+      "regularized_linear",
+      "tree_ensemble",
+      "boosted_tree"
+    ],
+    "selection_rule": "highest_mean_cv_macro_f1",
+    "status": "evaluated"
+  }
+}

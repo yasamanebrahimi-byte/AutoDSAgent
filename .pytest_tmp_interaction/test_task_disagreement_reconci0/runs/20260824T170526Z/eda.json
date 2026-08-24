@@ -1,0 +1,27 @@
+{
+  "data_scope": "training_partition_only",
+  "training_rows": 51,
+  "holdout_rows_included": 0,
+  "train_positions_digest": "a2bb44c46b06bcae00b4101bc52565ea257b98525fad06ae9ab33a2e9355e84c",
+  "computed": {
+    "rows": 51,
+    "columns": 3,
+    "missing_by_column": {},
+    "numeric_summary": {},
+    "target": {
+      "column": "diagnosis",
+      "unique": 2,
+      "value_counts": {
+        "positive": 26,
+        "negative": 25
+      }
+    },
+    "strongest_numeric_relationships": []
+  },
+  "agent_findings": [
+    "The training-only summary was inspected."
+  ],
+  "plots": [
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_tmp_interaction\\test_task_disagreement_reconci0\\runs\\20260824T170526Z\\plots\\target_distribution.png"
+  ]
+}

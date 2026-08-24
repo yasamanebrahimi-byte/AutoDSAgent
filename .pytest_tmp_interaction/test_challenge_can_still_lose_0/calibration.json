@@ -1,0 +1,1 @@
+{"calibration_artifact_version": "test-v1", "regimes": {"classification/low/low/high": {"support": 20, "challenge_win_rate": 0.9, "challenge_loss_rate": 0.09999999999999998}}}

@@ -1,0 +1,69 @@
+{
+  "agent_mode": "live_or_fallback",
+  "agent_model_requested": "gpt-4.1-mini",
+  "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
+  "benchmark_cases": [
+    {
+      "benchmark_suite_version": "2",
+      "category": "sklearn_local",
+      "columns": 3,
+      "dataset_source": "in-memory test fixture",
+      "expected_task_type": "classification",
+      "name": "research_fixture",
+      "notes": "",
+      "question": "Classify target from the supplied features.",
+      "random_seed": 42,
+      "role": "policy_development",
+      "rows": 48,
+      "target_column": "target"
+    }
+  ],
+  "config_version": "2026-08-23.evaluation.v3-hard-soft-gate",
+  "created_at_utc": "2026-08-24T17:25:09.788549+00:00",
+  "deterministic_policy_version": "4",
+  "evaluation_id": "20260824T172509Z",
+  "evaluation_settings": {
+    "candidate_methods": [
+      "linear",
+      "regularized_linear",
+      "tree_ensemble",
+      "boosted_tree"
+    ],
+    "candidate_selection_data": "frozen training partition only",
+    "holdout_data": "final evaluation only",
+    "primary_metrics": {
+      "classification": "macro_f1",
+      "regression": "rmse"
+    },
+    "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor"
+  },
+  "gate_mode": "always_reconcile",
+  "gate_mode_definitions": {
+    "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
+    "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
+    "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge"
+  },
+  "generation_settings": {
+    "seed": null,
+    "temperature": null
+  },
+  "limitations": [
+    "Small local benchmark suite.",
+    "Empirical reference compares only supported families under this CV procedure.",
+    "Offline/mock rows are not evidence about live LLM behavior."
+  ],
+  "perturbations": [],
+  "prompt_schema_version": "2026-08-23.formulation-modeling-gates.v2",
+  "repetitions": 2,
+  "repository_commit": "90a09f252022755a592157f2b37ef812703b57d5",
+  "seed": 42,
+  "soft_challenge_calibration_artifact_version": "soft-challenge-calibration-v1-v1",
+  "soft_challenge_policy_version": "v1",
+  "test_size": 0.2,
+  "thresholds": {
+    "catastrophic_regret_threshold": 0.1,
+    "classification_regret": 0.01,
+    "paired_normalized_regret": 0.02,
+    "regression_normalized_regret": 0.02
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "data_scope": "training_partition_only",
+  "training_rows": 79,
+  "holdout_rows_included": 0,
+  "train_positions_digest": "3c2ae9a1256f4e10f039a9306b043369ef7a05dcbcd5b2b58742f7c6358ed369",
+  "computed": {
+    "rows": 79,
+    "columns": 3,
+    "missing_by_column": {
+      "signal": 2,
+      "segment": 2
+    },
+    "numeric_summary": {
+      "signal": {
+        "mean": -0.09515,
+        "std": 0.80908,
+        "min": -1.95104,
+        "25%": -0.66551,
+        "50%": -0.04993,
+        "75%": 0.49716,
+        "max": 2.14165
+      }
+    },
+    "target": {
+      "column": "target",
+      "unique": 2,
+      "value_counts": {
+        "yes": 40,
+        "no": 39
+      }
+    },
+    "strongest_numeric_relationships": []
+  },
+  "agent_findings": [
+    "The cleaned analysis frame contains 79 rows and 3 columns.",
+    "Missing values remain visible to the modeling pipeline, where imputation is learned from training folds only."
+  ],
+  "plots": [
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_tmp_interaction\\test_offline_artifacts_persist0\\runs\\20260824T170621Z\\plots\\target_distribution.png"
+  ]
+}

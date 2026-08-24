@@ -77,16 +77,33 @@ def render_final_report(artifact: dict[str, Any]) -> str:
         "",
         "## Per-dataset final results",
         "",
-        "| Dataset | Seeds | Mean regret | Catastrophic rate | Top-2 rate | Selected families |",
-        "|---|---:|---:|---:|---:|---|",
+        "| Dataset | Seeds | Interaction | Score | Mean regret | Catastrophic rate | Top-2 rate | Selected families |",
+        "|---|---:|---|---:|---:|---:|---:|---|",
     ]
     for row in aggregate["per_dataset"]:
+        interaction = row["interaction_diagnostics"]
         lines.append(
-            f"| `{row['dataset_id']}` | {row['seed_count']} | {row['mean_normalized_regret']!s} | "
+            f"| `{row['dataset_id']}` | {row['seed_count']} | {interaction['modal_strength']} | "
+            f"{interaction['mean_score']!s} | {row['mean_normalized_regret']!s} | "
             f"{row['catastrophic_regret_rate']!s} | {row['top2_compatibility_rate']!s} | "
             f"{', '.join(row['selected_families'])} |"
         )
-    lines.extend(["", "## Final holdout metrics", ""])
+    interaction = aggregate["interaction_diagnostics"]
+    lines.extend(
+        [
+            "",
+            "## Interaction diagnostics",
+            "",
+            f"- Mean interaction score: `{interaction['mean_score']}`; median: `{interaction['median_score']}`",
+            f"- Strength distribution: `{json.dumps(interaction['strength_distribution'], sort_keys=True)}`",
+            f"- Mean evaluated pairs: `{interaction['mean_pairs_evaluated']}`; mean strong-pair fraction: `{interaction['mean_strong_pair_fraction']}`",
+            f"- Regime metrics: `{json.dumps(aggregate['interaction_regime_metrics'], sort_keys=True)}`",
+            f"- Top interaction evidence: `{json.dumps(interaction['top_interaction_evidence'], sort_keys=True)}`",
+            "",
+            "## Final holdout metrics",
+            "",
+        ]
+    )
     for row in artifact["holdout_metrics"]["per_dataset"]:
         lines.append(f"- `{row['dataset_id']}`: `{row['mean_holdout_metrics']}`")
     lines.extend(["", "## Largest policy failure cases", ""])

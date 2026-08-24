@@ -1,0 +1,559 @@
+{
+  "decision_scope": "training_partition_only",
+  "holdout_used_for_cleaning_decisions": false,
+  "requested_actions": [
+    "trim_strings",
+    "drop_exact_duplicates",
+    "drop_all_null_columns",
+    "drop_constant_features",
+    "drop_rows_missing_target",
+    "coerce_numeric_strings"
+  ],
+  "plan": {
+    "actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target",
+      "coerce_numeric_strings"
+    ],
+    "reasoning": "The offline cleaning fallback applies only structural operations and leaves learned imputation inside the model pipeline."
+  },
+  "fitted_specification": {
+    "schema_version": "1",
+    "target_column": "disease_progression",
+    "row_position_column": "__autods_row_position__",
+    "requested_actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target",
+      "coerce_numeric_strings"
+    ],
+    "trim_columns": [
+      "age",
+      "sex",
+      "bmi",
+      "bp",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "disease_progression"
+    ],
+    "numeric_coercion_columns": [
+      "age",
+      "sex",
+      "bmi",
+      "bp",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6"
+    ],
+    "all_null_columns": [],
+    "constant_columns": [],
+    "drop_rows_missing_target": true,
+    "duplicate_policy": "within_partition_keep_first",
+    "training_duplicate_row_positions": [],
+    "training_only_evidence": {
+      "rows": 353,
+      "columns": [
+        "age",
+        "sex",
+        "bmi",
+        "bp",
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "disease_progression"
+      ],
+      "string_columns_considered": [
+        "age",
+        "sex",
+        "bmi",
+        "bp",
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "disease_progression"
+      ],
+      "numeric_coercion_ratios": {
+        "age": 1.0,
+        "sex": 1.0,
+        "bmi": 1.0,
+        "bp": 1.0,
+        "s1": 1.0,
+        "s2": 1.0,
+        "s3": 1.0,
+        "s4": 1.0,
+        "s5": 1.0,
+        "s6": 1.0
+      },
+      "all_null_columns": [],
+      "constant_columns": {},
+      "training_duplicate_row_positions": [],
+      "training_missing_target_rows": 0
+    }
+  },
+  "training_only_evidence": {
+    "rows": 353,
+    "columns": [
+      "age",
+      "sex",
+      "bmi",
+      "bp",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "disease_progression"
+    ],
+    "string_columns_considered": [
+      "age",
+      "sex",
+      "bmi",
+      "bp",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "disease_progression"
+    ],
+    "numeric_coercion_ratios": {
+      "age": 1.0,
+      "sex": 1.0,
+      "bmi": 1.0,
+      "bp": 1.0,
+      "s1": 1.0,
+      "s2": 1.0,
+      "s3": 1.0,
+      "s4": 1.0,
+      "s5": 1.0,
+      "s6": 1.0
+    },
+    "all_null_columns": [],
+    "constant_columns": {},
+    "training_duplicate_row_positions": [],
+    "training_missing_target_rows": 0
+  },
+  "applied_transformations": {
+    "training": {
+      "partition": "training",
+      "original_shape": [
+        353,
+        12
+      ],
+      "cleaned_shape": [
+        353,
+        12
+      ],
+      "requested_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "applied_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "removed_rows": 0,
+      "removed_row_positions": [],
+      "removed_columns": [],
+      "frozen_columns_used": {
+        "trim_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6",
+          "disease_progression"
+        ],
+        "numeric_coercion_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6"
+        ],
+        "all_null_columns": [],
+        "constant_columns": []
+      },
+      "duplicate_scope": "within_partition_only"
+    },
+    "holdout": {
+      "partition": "holdout",
+      "original_shape": [
+        89,
+        12
+      ],
+      "cleaned_shape": [
+        89,
+        12
+      ],
+      "requested_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "applied_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "removed_rows": 0,
+      "removed_row_positions": [],
+      "removed_columns": [],
+      "frozen_columns_used": {
+        "trim_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6",
+          "disease_progression"
+        ],
+        "numeric_coercion_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6"
+        ],
+        "all_null_columns": [],
+        "constant_columns": []
+      },
+      "duplicate_scope": "within_partition_only"
+    },
+    "unassigned": {
+      "partition": "unassigned",
+      "original_shape": [
+        0,
+        12
+      ],
+      "cleaned_shape": [
+        0,
+        12
+      ],
+      "requested_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "applied_actions": [
+        "trim_strings",
+        "drop_exact_duplicates",
+        "drop_all_null_columns",
+        "drop_constant_features",
+        "drop_rows_missing_target",
+        "coerce_numeric_strings"
+      ],
+      "removed_rows": 0,
+      "removed_row_positions": [],
+      "removed_columns": [],
+      "frozen_columns_used": {
+        "trim_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6",
+          "disease_progression"
+        ],
+        "numeric_coercion_columns": [
+          "age",
+          "sex",
+          "bmi",
+          "bp",
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6"
+        ],
+        "all_null_columns": [],
+        "constant_columns": []
+      },
+      "duplicate_scope": "within_partition_only"
+    }
+  },
+  "rows_removed": {
+    "training": 0,
+    "holdout": 0,
+    "unassigned": 0,
+    "total_before_validation": 0
+  },
+  "columns_removed": [],
+  "log": {
+    "original_shape": [
+      442,
+      11
+    ],
+    "cleaned_shape": [
+      442,
+      11
+    ],
+    "requested_actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target",
+      "coerce_numeric_strings"
+    ],
+    "applied_actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target",
+      "coerce_numeric_strings"
+    ],
+    "removed_rows": 0,
+    "removed_columns": [],
+    "partition_logs": {
+      "training": {
+        "partition": "training",
+        "original_shape": [
+          353,
+          12
+        ],
+        "cleaned_shape": [
+          353,
+          12
+        ],
+        "requested_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "applied_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "removed_rows": 0,
+        "removed_row_positions": [],
+        "removed_columns": [],
+        "frozen_columns_used": {
+          "trim_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6",
+            "disease_progression"
+          ],
+          "numeric_coercion_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6"
+          ],
+          "all_null_columns": [],
+          "constant_columns": []
+        },
+        "duplicate_scope": "within_partition_only"
+      },
+      "holdout": {
+        "partition": "holdout",
+        "original_shape": [
+          89,
+          12
+        ],
+        "cleaned_shape": [
+          89,
+          12
+        ],
+        "requested_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "applied_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "removed_rows": 0,
+        "removed_row_positions": [],
+        "removed_columns": [],
+        "frozen_columns_used": {
+          "trim_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6",
+            "disease_progression"
+          ],
+          "numeric_coercion_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6"
+          ],
+          "all_null_columns": [],
+          "constant_columns": []
+        },
+        "duplicate_scope": "within_partition_only"
+      },
+      "unassigned": {
+        "partition": "unassigned",
+        "original_shape": [
+          0,
+          12
+        ],
+        "cleaned_shape": [
+          0,
+          12
+        ],
+        "requested_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "applied_actions": [
+          "trim_strings",
+          "drop_exact_duplicates",
+          "drop_all_null_columns",
+          "drop_constant_features",
+          "drop_rows_missing_target",
+          "coerce_numeric_strings"
+        ],
+        "removed_rows": 0,
+        "removed_row_positions": [],
+        "removed_columns": [],
+        "frozen_columns_used": {
+          "trim_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6",
+            "disease_progression"
+          ],
+          "numeric_coercion_columns": [
+            "age",
+            "sex",
+            "bmi",
+            "bp",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6"
+          ],
+          "all_null_columns": [],
+          "constant_columns": []
+        },
+        "duplicate_scope": "within_partition_only"
+      }
+    },
+    "decision_scope": "training_partition_only",
+    "holdout_used_for_cleaning_decisions": false,
+    "duplicate_policy": "within_partition_only_keep_first",
+    "deterministic_target_rows_removed": 0
+  }
+}

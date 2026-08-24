@@ -1,0 +1,161 @@
+{
+  "rows": 353,
+  "columns": 11,
+  "duplicate_rows": 0,
+  "column_details": [
+    {
+      "name": "age",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 56,
+      "identifier_like": false,
+      "sample_values": [
+        "48",
+        "72",
+        "24"
+      ]
+    },
+    {
+      "name": "sex",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "1",
+        "2",
+        "1"
+      ]
+    },
+    {
+      "name": "bmi",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 153,
+      "identifier_like": false,
+      "sample_values": [
+        "21.6",
+        "30.5",
+        "25.3"
+      ]
+    },
+    {
+      "name": "bp",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 91,
+      "identifier_like": false,
+      "sample_values": [
+        "87",
+        "93",
+        "84"
+      ]
+    },
+    {
+      "name": "s1",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 132,
+      "identifier_like": false,
+      "sample_values": [
+        "183",
+        "156",
+        "198"
+      ]
+    },
+    {
+      "name": "s2",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 259,
+      "identifier_like": false,
+      "sample_values": [
+        "103.2",
+        "93.6",
+        "131.4"
+      ]
+    },
+    {
+      "name": "s3",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 60,
+      "identifier_like": false,
+      "sample_values": [
+        "70",
+        "41",
+        "40"
+      ]
+    },
+    {
+      "name": "s4",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 54,
+      "identifier_like": false,
+      "sample_values": [
+        "3",
+        "4",
+        "5"
+      ]
+    },
+    {
+      "name": "s5",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 163,
+      "identifier_like": false,
+      "sample_values": [
+        "3.8918",
+        "4.6728",
+        "4.8903"
+      ]
+    },
+    {
+      "name": "s6",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 56,
+      "identifier_like": false,
+      "sample_values": [
+        "69",
+        "85",
+        "89"
+      ]
+    },
+    {
+      "name": "disease_progression",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 199,
+      "identifier_like": false,
+      "sample_values": [
+        "75",
+        "141",
+        "206"
+      ]
+    }
+  ]
+}

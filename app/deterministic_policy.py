@@ -105,6 +105,14 @@ DEFAULT_COMPATIBILITY_POINTS = _freeze_points(
         "nonlinearity:5": {"regularized_linear": 5},
         "nonlinearity:1": {"tree_ensemble": 1},
         "nonlinearity:-2": {"boosted_tree": -2},
+        "interaction:-8": {"linear": -8},
+        "interaction:-4": {"regularized_linear": -4},
+        "interaction:10": {"tree_ensemble": 10},
+        "interaction:12": {"boosted_tree": 12},
+        "interaction:-3": {"linear": -3},
+        "interaction:-1": {"regularized_linear": -1},
+        "interaction:5": {"tree_ensemble": 5},
+        "interaction:6": {"boosted_tree": 6},
         "structural_complexity:-5": {"linear": -5},
         "structural_complexity:-2": {"regularized_linear": -2, "linear": -2},
         "structural_complexity:8": {"tree_ensemble": 8, "boosted_tree": 8},
@@ -158,26 +166,38 @@ class DeterministicPolicy:
     widespread_missing_feature_fraction: float = 0.40
     nonlinear_moderate_threshold: float = 0.15
     nonlinear_high_threshold: float = 0.35
+    interaction_moderate_threshold: float = 0.18
+    interaction_high_threshold: float = 0.38
+    interaction_strong_pair_threshold: float = 0.30
+    interaction_report_threshold: float = 0.10
+    max_interaction_features: int = 12
+    max_interaction_pairs: int = 48
+    interaction_min_pair_rows: int = 48
+    max_interaction_rows: int = 5000
+    top_interaction_pairs_to_report: int = 5
     severe_correlation_pair_fraction: float = 0.25
     concentrated_missing_feature_fraction: float = 0.25
     # These thresholds are explicit by task because eta-squared/Cramer's V
     # and regression correlation evidence are bounded but not interchangeable.
     regression_weak_association_threshold: float = 0.20
     classification_weak_association_threshold: float = 0.20
-    # The structural-complexity score is normalized by weights that sum to
-    # one, so these coarse low/moderate/high bands remain interpretable.
+    # The legacy structural-complexity terms sum to one.  Interaction evidence
+    # is a separate bounded, modest term so the revised formula remains easy
+    # to audit without pretending the factors are independent probabilities.
     structural_complexity_moderate_threshold: float = 0.30
     structural_complexity_high_threshold: float = 0.60
     # Explicit policy weights keep the heuristic auditable and easy to revise.
     # Mixed types and categorical structure are modest priors; nonlinearity is
     # the strongest signal; heterogeneity and weak marginal evidence are
-    # supporting signals rather than proof of interactions.
+    # supporting signals rather than proof of interactions.  The interaction
+    # term is the only direct evidence of pairwise joint structure.
     structural_complexity_mixed_weight: float = 0.15
     structural_complexity_categorical_weight: float = 0.15
     structural_complexity_nonlinear_fraction_weight: float = 0.20
     structural_complexity_nonlinearity_strength_weight: float = 0.25
     structural_complexity_heterogeneity_weight: float = 0.15
     structural_complexity_weak_marginal_weight: float = 0.10
+    structural_complexity_interaction_weight: float = 0.20
     outlier_moderate_fraction: float = 0.05
     boosted_tree_min_samples: int = 300
     boosted_tree_preferred_samples: int = 600
@@ -365,6 +385,59 @@ def score_model_families(
             add("tree_ensemble", "nonlinearity", 1, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
             add("boosted_tree", "nonlinearity", -2, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
 
+    interaction = diagnostics.interaction_signals
+    if interaction.interaction_applicable:
+        if interaction.interaction_strength == "high":
+            add(
+                "linear",
+                "interaction",
+                -8,
+                f"high incremental interaction score {interaction.interaction_score:.2f} exposes joint structure beyond marginal features",
+            )
+            add(
+                "regularized_linear",
+                "interaction",
+                -4,
+                f"high incremental interaction score {interaction.interaction_score:.2f} is cautionary for additive families",
+            )
+            add(
+                "tree_ensemble",
+                "interaction",
+                10,
+                f"high incremental interaction score {interaction.interaction_score:.2f} supports split-based joint structure",
+            )
+            add(
+                "boosted_tree",
+                "interaction",
+                12,
+                f"high incremental interaction score {interaction.interaction_score:.2f} supports a flexible joint fit",
+            )
+        elif interaction.interaction_strength == "moderate":
+            add(
+                "linear",
+                "interaction",
+                -3,
+                f"moderate incremental interaction score {interaction.interaction_score:.2f} adds caution for additive families",
+            )
+            add(
+                "regularized_linear",
+                "interaction",
+                -1,
+                f"moderate incremental interaction score {interaction.interaction_score:.2f} is mildly cautionary",
+            )
+            add(
+                "tree_ensemble",
+                "interaction",
+                5,
+                f"moderate incremental interaction score {interaction.interaction_score:.2f} supports joint structure",
+            )
+            add(
+                "boosted_tree",
+                "interaction",
+                6,
+                f"moderate incremental interaction score {interaction.interaction_score:.2f} supports flexible joint structure",
+            )
+
     complexity = diagnostics.structural_complexity_score
     if complexity >= policy.structural_complexity_high_threshold:
         points = {"linear": -5, "regularized_linear": -2, "tree_ensemble": 8, "boosted_tree": 8}
@@ -382,6 +455,11 @@ def score_model_families(
             f"structural complexity score {complexity:.2f} suggests heterogeneous or nonlinear "
             "feature relationships"
         )
+        if interaction.interaction_strength in {"moderate", "high"}:
+            complexity_observation += (
+                f"; {interaction.interaction_strength} interaction evidence is included as a bounded "
+                "joint-structure term"
+            )
     for method, points_for_method in points.items():
         add(
             method,

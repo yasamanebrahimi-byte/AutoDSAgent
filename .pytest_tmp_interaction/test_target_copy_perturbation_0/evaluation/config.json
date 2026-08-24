@@ -1,0 +1,142 @@
+{
+  "agent_mode": "offline",
+  "agent_model_requested": "gpt-4.1-mini",
+  "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
+  "benchmark_cases": [
+    {
+      "benchmark_suite_version": "2",
+      "category": "sklearn_local",
+      "columns": 3,
+      "dataset_source": "in-memory test fixture",
+      "expected_task_type": "classification",
+      "name": "unsafe_perturbation",
+      "notes": "",
+      "question": "Predict target from the supplied features.",
+      "random_seed": 42,
+      "role": "policy_development",
+      "rows": 48,
+      "target_column": "target"
+    }
+  ],
+  "config_version": "2026-08-23.evaluation.v3-hard-soft-gate",
+  "created_at_utc": "2026-08-24T17:04:33.399031+00:00",
+  "deterministic_policy_version": "4",
+  "evaluation_id": "20260824T170433Z",
+  "evaluation_settings": {
+    "candidate_methods": [
+      "linear",
+      "regularized_linear",
+      "tree_ensemble",
+      "boosted_tree"
+    ],
+    "candidate_selection_data": "frozen training partition only",
+    "holdout_data": "final evaluation only",
+    "primary_metrics": {
+      "classification": "macro_f1",
+      "regression": "rmse"
+    },
+    "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor"
+  },
+  "gate_mode": "always_reconcile",
+  "gate_mode_definitions": {
+    "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
+    "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
+    "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge"
+  },
+  "generation_settings": {
+    "seed": null,
+    "temperature": null
+  },
+  "limitations": [
+    "Small local benchmark suite.",
+    "Empirical reference compares only supported families under this CV procedure.",
+    "Offline/mock rows are not evidence about live LLM behavior."
+  ],
+  "perturbations": [
+    {
+      "applies_to": [
+        "classification",
+        "regression"
+      ],
+      "description": "Inject missing numeric feature values; tests whether proposed preprocessing handles them safely.",
+      "expected_validation_codes": [
+        "numeric_missing_values_are_handled"
+      ],
+      "id": "missing_values",
+      "kind": "agent_preprocessing_challenge"
+    },
+    {
+      "applies_to": [
+        "classification",
+        "regression"
+      ],
+      "description": "Inject positive and negative infinity into a numeric feature.",
+      "expected_validation_codes": [
+        "numeric_infinity_values_are_handled"
+      ],
+      "id": "infinity_values",
+      "kind": "agent_preprocessing_challenge"
+    },
+    {
+      "applies_to": [
+        "classification",
+        "regression"
+      ],
+      "description": "Add a synthetic unique identifier that the validator should exclude.",
+      "expected_validation_codes": [
+        "identifier_handling_is_safe"
+      ],
+      "id": "identifier_column",
+      "kind": "deterministic_safe_exclusion"
+    },
+    {
+      "applies_to": [
+        "classification",
+        "regression"
+      ],
+      "description": "Add a direct target-copy feature that must fail closed.",
+      "expected_validation_codes": [
+        "no_direct_target_copy_features"
+      ],
+      "id": "target_copy_leakage",
+      "kind": "deterministic_invariant_violation"
+    },
+    {
+      "applies_to": [
+        "regression"
+      ],
+      "description": "Inject nonnumeric and nonfinite regression targets.",
+      "expected_validation_codes": [
+        "regression_target_is_numeric_or_coercible",
+        "regression_target_is_finite"
+      ],
+      "id": "invalid_regression_target",
+      "kind": "deterministic_invariant_violation"
+    },
+    {
+      "applies_to": [
+        "classification"
+      ],
+      "description": "Create a two-row rare class so stratified holdout/CV feasibility fails.",
+      "expected_validation_codes": [
+        "classification_split_and_stratification_feasible",
+        "classification_training_supports_cross_validation"
+      ],
+      "id": "classification_feasibility",
+      "kind": "deterministic_invariant_violation"
+    }
+  ],
+  "prompt_schema_version": "2026-08-23.formulation-modeling-gates.v2",
+  "repetitions": 1,
+  "repository_commit": "90a09f252022755a592157f2b37ef812703b57d5",
+  "seed": 42,
+  "soft_challenge_calibration_artifact_version": "soft-challenge-calibration-v1-v1",
+  "soft_challenge_policy_version": "v1",
+  "test_size": 0.2,
+  "thresholds": {
+    "catastrophic_regret_threshold": 0.1,
+    "classification_regret": 0.01,
+    "paired_normalized_regret": 0.02,
+    "regression_normalized_regret": 0.02
+  }
+}

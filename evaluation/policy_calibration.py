@@ -175,6 +175,48 @@ def _median(values: Iterable[float]) -> float | None:
     return float(median(values)) if values else None
 
 
+def _interaction_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize the bounded interaction artifact without re-evaluating data."""
+
+    entries: list[tuple[float, dict[str, Any]]] = []
+    for record in records:
+        diagnostics = record.get("diagnostics") or {}
+        interaction = diagnostics.get("interaction_signals") or {}
+        score = interaction.get("interaction_score")
+        if score is None:
+            continue
+        entries.append((float(score), interaction))
+    strength_order = {"low": 0, "moderate": 1, "high": 2}
+    strengths = Counter(
+        str(interaction.get("interaction_strength", "low")) for _, interaction in entries
+    )
+    modal_strength = (
+        sorted(
+            strengths,
+            key=lambda value: (-strengths[value], strength_order.get(value, -1), value),
+        )[0]
+        if strengths
+        else "low"
+    )
+    strongest_interaction = max(entries, key=lambda item: item[0])[1] if entries else {}
+    top_pairs = list(strongest_interaction.get("top_interaction_pairs") or [])[:5]
+    return {
+        "mean_score": _mean(score for score, _ in entries),
+        "median_score": _median(score for score, _ in entries),
+        "modal_strength": modal_strength,
+        "strength_distribution": dict(sorted(strengths.items())),
+        "mean_pairs_evaluated": _mean(
+            float(interaction.get("interaction_pairs_evaluated", 0))
+            for _, interaction in entries
+        ),
+        "mean_strong_pair_fraction": _mean(
+            float(interaction.get("strong_interaction_pair_fraction", 0.0))
+            for _, interaction in entries
+        ),
+        "top_interaction_evidence": top_pairs,
+    }
+
+
 def _repository_commit() -> str | None:
     try:
         return subprocess.check_output(
@@ -427,6 +469,7 @@ def aggregate_candidate_records(
                     method: {"count": count, "rate": count / max(len(selections), 1)}
                     for method, count in sorted(counts.items())
                 },
+                "interaction_diagnostics": _interaction_summary(dataset_records),
                 "selected_family_modal_rate": modal_count / max(len(selections), 1),
                 "selected_families": sorted(counts),
             }
@@ -441,6 +484,39 @@ def aggregate_candidate_records(
         method: {"count": count, "rate": count / max(len(all_methods), 1)}
         for method, count in sorted(selection_counts.items())
     }
+    interaction_by_strength: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for dataset in per_dataset:
+        interaction_by_strength[dataset["interaction_diagnostics"]["modal_strength"]].append(dataset)
+    interaction_regime_metrics = {}
+    for strength, datasets in sorted(interaction_by_strength.items()):
+        interaction_regime_metrics[strength] = {
+            "dataset_count": len(datasets),
+            "mean_normalized_regret": _mean(
+                float(dataset["mean_normalized_regret"])
+                for dataset in datasets
+                if dataset.get("mean_normalized_regret") is not None
+            ),
+            "median_normalized_regret": _median(
+                float(dataset["mean_normalized_regret"])
+                for dataset in datasets
+                if dataset.get("mean_normalized_regret") is not None
+            ),
+            "exact_reference_match_rate": _mean(
+                float(dataset["exact_reference_match_rate"])
+                for dataset in datasets
+                if dataset.get("exact_reference_match_rate") is not None
+            ),
+            "top2_compatibility_rate": _mean(
+                float(dataset["top2_compatibility_rate"])
+                for dataset in datasets
+                if dataset.get("top2_compatibility_rate") is not None
+            ),
+            "catastrophic_regret_rate": _mean(
+                float(dataset["catastrophic_regret_rate"])
+                for dataset in datasets
+                if dataset.get("catastrophic_regret_rate") is not None
+            ),
+        }
     return {
         "policy_candidate": candidate.name,
         "policy_version": candidate.policy.version,
@@ -463,6 +539,8 @@ def aggregate_candidate_records(
             "dataset_count": dataset_count,
         },
         "family_selection_distribution": family_distribution,
+        "interaction_diagnostics": _interaction_summary(candidate_records),
+        "interaction_regime_metrics": interaction_regime_metrics,
         "family_collapse_warning": bool(
             max((item["rate"] for item in family_distribution.values()), default=0.0) > 0.80
         ),
@@ -563,6 +641,11 @@ def _sensitivity_rows(aggregates: dict[str, dict[str, Any]], candidates: Sequenc
             "thresholds": {
                 "nonlinear_moderate_threshold": candidate.policy.nonlinear_moderate_threshold,
                 "nonlinear_high_threshold": candidate.policy.nonlinear_high_threshold,
+                "interaction_moderate_threshold": candidate.policy.interaction_moderate_threshold,
+                "interaction_high_threshold": candidate.policy.interaction_high_threshold,
+                "interaction_strong_pair_threshold": candidate.policy.interaction_strong_pair_threshold,
+                "max_interaction_features": candidate.policy.max_interaction_features,
+                "max_interaction_pairs": candidate.policy.max_interaction_pairs,
                 "sample_feature_ratio": [
                     candidate.policy.low_sample_feature_ratio,
                     candidate.policy.moderate_sample_feature_ratio,
@@ -790,6 +873,8 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         lines.append(
             f"- `{row['candidate']}`: nonlinear thresholds "
             f"{row['thresholds']['nonlinear_moderate_threshold']}/{row['thresholds']['nonlinear_high_threshold']}; "
+            f"interaction thresholds {row['thresholds']['interaction_moderate_threshold']}/{row['thresholds']['interaction_high_threshold']}; "
+            f"interaction limits {row['thresholds']['max_interaction_features']} features/{row['thresholds']['max_interaction_pairs']} pairs; "
             f"sample-feature bands `{row['thresholds']['sample_feature_ratio']}`; "
             f"missingness bands `{row['thresholds']['missing_fraction']}`; "
             f"mean regret `{row['mean_normalized_regret']}`."
@@ -804,14 +889,29 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         ]
     )
     current = aggregates["current"]
-    lines.append("| Dataset | Seeds | Mean regret | Catastrophic rate | Top-2 rate | Selected families |")
-    lines.append("|---|---:|---:|---:|---:|---|")
+    lines.append("| Dataset | Seeds | Interaction | Score | Mean regret | Catastrophic rate | Top-2 rate | Selected families |")
+    lines.append("|---|---:|---|---:|---:|---:|---:|---|")
     for row in current["per_dataset"]:
+        interaction = row["interaction_diagnostics"]
         lines.append(
-            f"| `{row['dataset_id']}` | {row['seed_count']} | {row['mean_normalized_regret']!s} | "
+            f"| `{row['dataset_id']}` | {row['seed_count']} | {interaction['modal_strength']} | "
+            f"{interaction['mean_score']!s} | {row['mean_normalized_regret']!s} | "
             f"{row['catastrophic_regret_rate']!s} | {row['top2_compatibility_rate']!s} | "
             f"{', '.join(row['selected_families'])} |"
         )
+    current_interaction = current["interaction_diagnostics"]
+    lines.extend(
+        [
+            "",
+            "## Interaction diagnostics",
+            "",
+            f"- Mean interaction score: `{current_interaction['mean_score']}`; median: `{current_interaction['median_score']}`",
+            f"- Strength distribution: `{json.dumps(current_interaction['strength_distribution'], sort_keys=True)}`",
+            f"- Mean evaluated pairs: `{current_interaction['mean_pairs_evaluated']}`; mean strong-pair fraction: `{current_interaction['mean_strong_pair_fraction']}`",
+            f"- Regime metrics: `{json.dumps(current['interaction_regime_metrics'], sort_keys=True)}`",
+            f"- Top interaction evidence: `{json.dumps(current_interaction['top_interaction_evidence'], sort_keys=True)}`",
+        ]
+    )
     lines.extend(["", "Largest current-policy regret cases:", ""])
     for failure in artifact["current_policy_failure_cases"]:
         lines.append(

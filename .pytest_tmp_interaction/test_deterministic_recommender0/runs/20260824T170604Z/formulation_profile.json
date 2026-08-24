@@ -1,0 +1,35 @@
+{
+  "rows": 40,
+  "columns": 2,
+  "duplicate_rows": 0,
+  "column_details": [
+    {
+      "name": "signal",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 40,
+      "identifier_like": true,
+      "sample_values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "name": "target",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "yes",
+        "no",
+        "yes"
+      ]
+    }
+  ]
+}

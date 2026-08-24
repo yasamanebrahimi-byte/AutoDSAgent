@@ -257,6 +257,34 @@ class TargetDiagnostics(StrictModel):
     regression: Optional[RegressionTargetDiagnostics] = None
 
 
+class InteractionPairEvidence(StrictModel):
+    """Auditable evidence for one training-only numeric feature pair."""
+
+    features: list[str] = Field(min_length=2, max_length=2)
+    transform: str = Field(min_length=1, max_length=32)
+    sample_count: int = Field(ge=0)
+    marginal_strength: float = Field(ge=0, le=1)
+    joint_strength: float = Field(ge=0, le=1)
+    incremental_strength: float = Field(ge=0, le=1)
+    interaction_strength: float = Field(ge=0, le=1)
+
+
+class InteractionDiagnostics(StrictModel):
+    """Bounded regression interaction evidence derived from training rows."""
+
+    interaction_score: float = Field(default=0.0, ge=0, le=1)
+    interaction_strength: Literal["low", "moderate", "high"] = "low"
+    interaction_applicable: StrictBool = False
+    interaction_pairs_evaluated: int = Field(default=0, ge=0)
+    strong_interaction_pair_count: int = Field(default=0, ge=0)
+    strong_interaction_pair_fraction: float = Field(default=0.0, ge=0, le=1)
+    candidate_feature_count: int = Field(default=0, ge=0)
+    candidate_features: list[str] = Field(default_factory=list, max_length=32)
+    skipped_pair_count: int = Field(default=0, ge=0)
+    skipped_pair_reasons: dict[str, int] = Field(default_factory=dict)
+    top_interaction_pairs: list[InteractionPairEvidence] = Field(default_factory=list, max_length=5)
+
+
 class DeterministicDiagnostics(StrictModel):
     """Compact, training-only facts used by the deterministic policy."""
 
@@ -305,6 +333,7 @@ class DeterministicDiagnostics(StrictModel):
     class_separation_strength: float = Field(default=0.0, ge=0, le=1)
     association_measure: str = Field(default="unspecified", min_length=1)
     nonlinearity_applicable: bool = True
+    interaction_signals: InteractionDiagnostics = Field(default_factory=InteractionDiagnostics)
 
 
 class DeterministicScoreContribution(StrictModel):

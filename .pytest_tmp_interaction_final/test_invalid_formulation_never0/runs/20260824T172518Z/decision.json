@@ -1,0 +1,285 @@
+{
+  "formulation": {
+    "user_target_constraint": {
+      "target_column": "not_a_column",
+      "target_source": "user_supplied",
+      "target_is_mutable": false
+    },
+    "agent_initial": null,
+    "deterministic": null,
+    "comparison": null,
+    "reconciliation": null,
+    "final": null,
+    "status": "not_completed"
+  },
+  "modeling_gate": {
+    "agent_initial": null,
+    "deterministic": null,
+    "comparison": null,
+    "reconciliation": null,
+    "final": null,
+    "status": "not_completed"
+  },
+  "agent_plan": null,
+  "deterministic_recommendation": null,
+  "validation": {
+    "status": "rejected",
+    "overall_status": "failed",
+    "selected_target_column": "not_a_column",
+    "selected_task_type": "unsupported",
+    "selected_method": "not_selected",
+    "deterministic_validation": {
+      "status": "failed",
+      "overall_status": "failed",
+      "validated_target_column": "not_a_column",
+      "validated_task_type": "unsupported",
+      "validated_method": "not_selected",
+      "features_used": [],
+      "excluded_features": [],
+      "target_rows_removed": 0,
+      "valid_target_rows": 0,
+      "split": {},
+      "direct_leakage_detected": false,
+      "warnings": [],
+      "approved_preprocessing": null,
+      "preprocessing_requirements": null,
+      "checks": [
+        {
+          "code": "columns_have_unique_names",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "duplicate_columns": []
+          },
+          "message": "Column names must be unique before formulation can be approved."
+        },
+        {
+          "code": "target_exists",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {
+            "target_column": "not_a_column",
+            "matching_columns": 0
+          },
+          "message": "The proposed target must exist in the raw dataset."
+        },
+        {
+          "code": "target_resolves_once",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {
+            "target_column": "not_a_column",
+            "matching_columns": 0
+          },
+          "message": "The proposed target must resolve to exactly one source column."
+        },
+        {
+          "code": "task_is_supported",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {
+            "task_type": "unsupported",
+            "supported_tasks": [
+              "classification",
+              "regression"
+            ]
+          },
+          "message": "Only classification and regression are supported."
+        },
+        {
+          "code": "user_target_is_immutable",
+          "status": "passed",
+          "passed": true,
+          "severity": "error",
+          "evidence": {
+            "user_target": "not_a_column",
+            "selected_target": "not_a_column"
+          },
+          "message": "An explicit user target is a hard constraint and cannot be overridden."
+        },
+        {
+          "code": "formulation_validation_can_proceed",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {},
+          "message": "Formulation cannot be validated until the target and task are supported and unambiguous."
+        },
+        {
+          "code": "formulation_agent_fallback_failed_closed",
+          "status": "failed",
+          "passed": false,
+          "severity": "error",
+          "evidence": {
+            "evidence": [
+              "no_arbitrary_last_column_fallback"
+            ]
+          },
+          "message": "Deterministic formulation failed closed: Target column 'not_a_column' is not present in the dataset."
+        }
+      ],
+      "failures": [
+        {
+          "code": "target_exists",
+          "message": "The proposed target must exist in the raw dataset.",
+          "evidence": {
+            "target_column": "not_a_column",
+            "matching_columns": 0
+          }
+        },
+        {
+          "code": "target_resolves_once",
+          "message": "The proposed target must resolve to exactly one source column.",
+          "evidence": {
+            "target_column": "not_a_column",
+            "matching_columns": 0
+          }
+        },
+        {
+          "code": "task_is_supported",
+          "message": "Only classification and regression are supported.",
+          "evidence": {
+            "task_type": "unsupported",
+            "supported_tasks": [
+              "classification",
+              "regression"
+            ]
+          }
+        },
+        {
+          "code": "formulation_validation_can_proceed",
+          "message": "Formulation cannot be validated until the target and task are supported and unambiguous.",
+          "evidence": {}
+        },
+        {
+          "code": "formulation_agent_fallback_failed_closed",
+          "message": "Deterministic formulation failed closed: Target column 'not_a_column' is not present in the dataset.",
+          "evidence": {
+            "evidence": [
+              "no_arbitrary_last_column_fallback"
+            ]
+          }
+        }
+      ]
+    },
+    "checks": [
+      {
+        "code": "columns_have_unique_names",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "duplicate_columns": []
+        },
+        "message": "Column names must be unique before formulation can be approved."
+      },
+      {
+        "code": "target_exists",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {
+          "target_column": "not_a_column",
+          "matching_columns": 0
+        },
+        "message": "The proposed target must exist in the raw dataset."
+      },
+      {
+        "code": "target_resolves_once",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {
+          "target_column": "not_a_column",
+          "matching_columns": 0
+        },
+        "message": "The proposed target must resolve to exactly one source column."
+      },
+      {
+        "code": "task_is_supported",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {
+          "task_type": "unsupported",
+          "supported_tasks": [
+            "classification",
+            "regression"
+          ]
+        },
+        "message": "Only classification and regression are supported."
+      },
+      {
+        "code": "user_target_is_immutable",
+        "status": "passed",
+        "passed": true,
+        "severity": "error",
+        "evidence": {
+          "user_target": "not_a_column",
+          "selected_target": "not_a_column"
+        },
+        "message": "An explicit user target is a hard constraint and cannot be overridden."
+      },
+      {
+        "code": "formulation_validation_can_proceed",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {},
+        "message": "Formulation cannot be validated until the target and task are supported and unambiguous."
+      },
+      {
+        "code": "formulation_agent_fallback_failed_closed",
+        "status": "failed",
+        "passed": false,
+        "severity": "error",
+        "evidence": {
+          "evidence": [
+            "no_arbitrary_last_column_fallback"
+          ]
+        },
+        "message": "Deterministic formulation failed closed: Target column 'not_a_column' is not present in the dataset."
+      }
+    ],
+    "justification": "Deterministic validation rejected the approved plan before model fitting.",
+    "confidence": 0.0
+  },
+  "warnings": [],
+  "agent_sources": {
+    "formulation": "offline_fallback"
+  },
+  "gate_completed_before_training": false,
+  "formulation_gate_status": "not_completed",
+  "split_frozen_after_formulation_gate": false,
+  "modeling_gate_status": "not_completed",
+  "validation_gate_status": "failed",
+  "model_training_occurred": false,
+  "holdout_policy": {
+    "frozen_before_modeling_recommendations": true,
+    "planning_data": "training_partition_only",
+    "holdout_used_for": "final_evaluation_only"
+  },
+  "cleaning_policy": {
+    "decision_evidence": "training_partition_only",
+    "structural_actions": "fitted_on_training_and_transformed_per_partition_with_original_row_positions_preserved",
+    "duplicate_policy": "within_partition_only_keep_first",
+    "holdout_used_for_cleaning_decisions": false,
+    "learned_preprocessing": "fit_inside_training_pipeline_only"
+  },
+  "failure": {
+    "code": "validation_failed",
+    "error_type": "InvariantViolation",
+    "message": "[target_exists] The proposed target must exist in the raw dataset.",
+    "check_codes": [
+      "target_exists",
+      "target_resolves_once",
+      "task_is_supported",
+      "formulation_validation_can_proceed",
+      "formulation_agent_fallback_failed_closed"
+    ]
+  }
+}

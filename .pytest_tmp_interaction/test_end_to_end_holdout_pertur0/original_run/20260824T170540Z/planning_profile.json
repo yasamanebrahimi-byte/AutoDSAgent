@@ -1,0 +1,101 @@
+{
+  "rows": 80,
+  "columns": 7,
+  "duplicate_rows": 0,
+  "column_details": [
+    {
+      "name": "signal",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 80,
+      "identifier_like": false,
+      "sample_values": [
+        "0.0",
+        "1.0",
+        "2.0"
+      ]
+    },
+    {
+      "name": "segment",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "a",
+        "b",
+        "a"
+      ]
+    },
+    {
+      "name": "region",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "east",
+        "west",
+        "west"
+      ]
+    },
+    {
+      "name": "target",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "no",
+        "yes",
+        "no"
+      ]
+    },
+    {
+      "name": "constant_feature",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 1,
+      "identifier_like": false,
+      "sample_values": [
+        "constant",
+        "constant",
+        "constant"
+      ]
+    },
+    {
+      "name": "numeric_text",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 80,
+      "identifier_like": true,
+      "sample_values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "name": "null_only_feature",
+      "dtype": "object",
+      "semantic_type": "unknown",
+      "missing": 80,
+      "missing_fraction": 1.0,
+      "unique": 0,
+      "identifier_like": false,
+      "sample_values": []
+    }
+  ]
+}

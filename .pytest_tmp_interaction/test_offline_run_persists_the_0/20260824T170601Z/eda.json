@@ -1,0 +1,169 @@
+{
+  "data_scope": "training_partition_only",
+  "training_rows": 353,
+  "holdout_rows_included": 0,
+  "train_positions_digest": "2e066bdb5b62aa9b563bc6a6217dad738250f5023e3de56368854f9043a6c1a9",
+  "computed": {
+    "rows": 353,
+    "columns": 11,
+    "missing_by_column": {},
+    "numeric_summary": {
+      "age": {
+        "mean": 48.91501,
+        "std": 12.75529,
+        "min": 19.0,
+        "25%": 40.0,
+        "50%": 51.0,
+        "75%": 59.0,
+        "max": 79.0
+      },
+      "sex": {
+        "mean": 1.47025,
+        "std": 0.49982,
+        "min": 1.0,
+        "25%": 1.0,
+        "50%": 1.0,
+        "75%": 2.0,
+        "max": 2.0
+      },
+      "bmi": {
+        "mean": 26.53683,
+        "std": 4.38623,
+        "min": 18.1,
+        "25%": 23.4,
+        "50%": 25.9,
+        "75%": 29.4,
+        "max": 41.3
+      },
+      "bp": {
+        "mean": 94.98958,
+        "std": 14.07808,
+        "min": 62.0,
+        "25%": 84.0,
+        "50%": 93.0,
+        "75%": 105.0,
+        "max": 133.0
+      },
+      "s1": {
+        "mean": 188.73654,
+        "std": 34.72925,
+        "min": 110.0,
+        "25%": 163.0,
+        "50%": 186.0,
+        "75%": 208.0,
+        "max": 301.0
+      },
+      "s2": {
+        "mean": 114.92436,
+        "std": 30.42085,
+        "min": 41.6,
+        "25%": 94.6,
+        "50%": 112.8,
+        "75%": 132.8,
+        "max": 242.4
+      },
+      "s3": {
+        "mean": 49.51983,
+        "std": 12.77792,
+        "min": 22.0,
+        "25%": 41.0,
+        "50%": 48.0,
+        "75%": 57.0,
+        "max": 99.0
+      },
+      "s4": {
+        "mean": 4.08045,
+        "std": 1.29508,
+        "min": 2.0,
+        "25%": 3.0,
+        "50%": 4.0,
+        "75%": 5.0,
+        "max": 9.09
+      },
+      "s5": {
+        "mean": 4.65475,
+        "std": 0.52469,
+        "min": 3.2581,
+        "25%": 4.2767,
+        "50%": 4.6347,
+        "75%": 5.0106,
+        "max": 6.107
+      },
+      "s6": {
+        "mean": 91.71671,
+        "std": 11.68012,
+        "min": 58.0,
+        "25%": 84.0,
+        "50%": 92.0,
+        "75%": 99.0,
+        "max": 124.0
+      },
+      "disease_progression": {
+        "mean": 153.73654,
+        "std": 78.0619,
+        "min": 25.0,
+        "25%": 86.0,
+        "50%": 142.0,
+        "75%": 214.0,
+        "max": 346.0
+      }
+    },
+    "target": {
+      "column": "disease_progression",
+      "unique": 199,
+      "mean": 153.73654,
+      "std": 78.0619
+    },
+    "strongest_numeric_relationships": [
+      {
+        "feature_a": "s1",
+        "feature_b": "s2",
+        "abs_correlation": 0.8911
+      },
+      {
+        "feature_a": "s3",
+        "feature_b": "s4",
+        "abs_correlation": 0.7367
+      },
+      {
+        "feature_a": "s2",
+        "feature_b": "s4",
+        "abs_correlation": 0.6547
+      },
+      {
+        "feature_a": "s4",
+        "feature_b": "s5",
+        "abs_correlation": 0.6135
+      },
+      {
+        "feature_a": "bmi",
+        "feature_b": "disease_progression",
+        "abs_correlation": 0.6048
+      },
+      {
+        "feature_a": "s5",
+        "feature_b": "disease_progression",
+        "abs_correlation": 0.5522
+      },
+      {
+        "feature_a": "s1",
+        "feature_b": "s4",
+        "abs_correlation": 0.5468
+      },
+      {
+        "feature_a": "s1",
+        "feature_b": "s5",
+        "abs_correlation": 0.5285
+      }
+    ]
+  },
+  "agent_findings": [
+    "The cleaned analysis frame contains 353 rows and 11 columns.",
+    "No missing values were present in the cleaned frame.",
+    "The strongest absolute numeric relationship observed was s1 with s2 (absolute r=0.891)."
+  ],
+  "plots": [
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_tmp_interaction\\test_offline_run_persists_the_0\\20260824T170601Z\\plots\\target_distribution.png",
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_tmp_interaction\\test_offline_run_persists_the_0\\20260824T170601Z\\plots\\correlation_heatmap.png"
+  ]
+}

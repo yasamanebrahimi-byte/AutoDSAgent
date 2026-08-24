@@ -1,0 +1,49 @@
+{
+  "rows": 51,
+  "columns": 3,
+  "duplicate_rows": 0,
+  "column_details": [
+    {
+      "name": "signal",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 51,
+      "identifier_like": false,
+      "sample_values": [
+        "0.0",
+        "1.0",
+        "2.0"
+      ]
+    },
+    {
+      "name": "noise",
+      "dtype": "object",
+      "semantic_type": "numeric_like",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 11,
+      "identifier_like": false,
+      "sample_values": [
+        "0.0",
+        "7.0",
+        "3.0"
+      ]
+    },
+    {
+      "name": "diagnosis",
+      "dtype": "object",
+      "semantic_type": "categorical",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        "negative",
+        "positive",
+        "negative"
+      ]
+    }
+  ]
+}
