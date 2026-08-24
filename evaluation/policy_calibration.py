@@ -28,7 +28,15 @@ from evaluation.benchmarks import (
     default_benchmark_cases,
 )
 from evaluation.empirical_reference import evaluate_empirical_reference, evaluate_holdout_plan
-from evaluation.metrics import normalized_regret
+from evaluation.metrics import (
+    DEFAULT_GATE_UTILITY_WEIGHTS,
+    DEFAULT_THRESHOLDS,
+    GATE_OBJECTIVE_VERSION,
+    catastrophic_transition,
+    classify_intervention_outcome,
+    normalized_regret,
+    summarize_gate_health,
+)
 from app.soft_challenge import (
     SOFT_CHALLENGE_CALIBRATION_SCHEMA_VERSION,
     SoftChallengePolicy,
@@ -36,17 +44,20 @@ from app.soft_challenge import (
 )
 
 
-CALIBRATION_SCHEMA_VERSION = "1"
+CALIBRATION_SCHEMA_VERSION = "2"
 DEFAULT_SPLIT_SEEDS: tuple[int, ...] = (42, 123, 2027)
-CATASTROPHIC_REGRET_THRESHOLD = 0.10
-SOFT_CHALLENGE_OUTCOME_TOLERANCE = 0.02
+CATASTROPHIC_REGRET_THRESHOLD = DEFAULT_THRESHOLDS["catastrophic_regret_threshold"]
+SOFT_CHALLENGE_OUTCOME_TOLERANCE = DEFAULT_THRESHOLDS["neutral_tolerance"]
 PROMOTION_MIN_REGRET_IMPROVEMENT = 0.005
 PROMOTION_MIN_CATASTROPHIC_IMPROVEMENT = 0.02
+PROMOTION_MIN_UTILITY_IMPROVEMENT = 0.50
+GATE_UTILITY_WEIGHTS = DEFAULT_GATE_UTILITY_WEIGHTS
 POLICY_SELECTION_RULE = (
-    "rank by lowest dataset-level mean normalized regret, then lowest "
-    "dataset-level catastrophic-regret rate, then highest dataset-level top-2 "
-    "reference inclusion, then lowest policy complexity; retain the current "
-    "policy unless the selected candidate clears the predefined promotion margin"
+    "rank development candidates first by lower catastrophic-regret introduction, "
+    "then lower harmful-intervention rate, higher catastrophic prevention, higher "
+    "intervention precision, higher challenge recall, higher transparent utility "
+    "and median regret reduction, and lower unnecessary-intervention rate; exact "
+    "family match is diagnostic only and is used only as a final tie-breaker"
 )
 
 
@@ -365,16 +376,25 @@ def _evaluate_case_seed(
         if method_disagreement and agent_regret is not None and regret is not None
         else None
     )
-    if regret_delta is None:
-        challenge_outcome = "not_comparable"
-    elif regret_delta > SOFT_CHALLENGE_OUTCOME_TOLERANCE:
-        challenge_outcome = "improved"
-    elif regret_delta < -SOFT_CHALLENGE_OUTCOME_TOLERANCE:
-        challenge_outcome = "worsened"
-    else:
-        challenge_outcome = "tie"
+    challenge_outcome = classify_intervention_outcome(
+        regret_delta, SOFT_CHALLENGE_OUTCOME_TOLERANCE
+    )
     agent_catastrophic = bool(agent_regret is not None and agent_regret >= CATASTROPHIC_REGRET_THRESHOLD)
     deterministic_catastrophic = bool(regret is not None and regret >= CATASTROPHIC_REGRET_THRESHOLD)
+    transition = catastrophic_transition(agent_regret, regret, CATASTROPHIC_REGRET_THRESHOLD)
+    gate_outcome_details = {
+        "intervention_occurred": method_disagreement,
+        "soft_challenge_decision": "challenge" if method_disagreement else "agree",
+        "outcome": challenge_outcome if method_disagreement else "neutral",
+        "initial_regret": agent_regret,
+        "final_regret": regret,
+        "deterministic_regret": regret,
+        "regret_reduction": regret_delta if method_disagreement else 0.0,
+        **transition,
+        "unnecessary_intervention": False,
+        "evaluation_only": True,
+        "objective_version": GATE_OBJECTIVE_VERSION,
+    }
     empirical_ranking = list(reference.get("ranking", []))
     deterministic_ranking = [
         method for method in recommendation.ranked_methods if method in empirical_ranking
@@ -423,11 +443,25 @@ def _evaluate_case_seed(
         "selected_primary_mean": selected_score,
         "normalized_regret": regret,
         "agent_normalized_regret": agent_regret,
+        "gated_normalized_regret": regret,
+        "deterministic_normalized_regret": regret,
         "challenge_regret_delta": regret_delta,
         "challenge_outcome": challenge_outcome,
+        "gate_outcome": gate_outcome_details["outcome"],
+        "gate_outcome_details": gate_outcome_details,
+        "normalized_gate_delta": regret_delta if method_disagreement else 0.0,
+        "regret_reduction": regret_delta if method_disagreement else 0.0,
+        "soft_challenge": {
+            "status": "disagreement" if method_disagreement else "agreement",
+            "decision": "challenge" if method_disagreement else "agree",
+            "status_detail": "challenged" if method_disagreement else "agreement",
+        },
         "agent_catastrophic_regret": agent_catastrophic,
         "deterministic_catastrophic_regret": deterministic_catastrophic,
         "catastrophic_regret_prevented": bool(agent_catastrophic and not deterministic_catastrophic),
+        "initial_catastrophic": transition["initial_catastrophic"],
+        "final_catastrophic": transition["final_catastrophic"],
+        "catastrophic_introduced": transition["catastrophic_introduced"],
         "exact_reference_match": bool(selected_method == reference.get("best_method"))
         if reference.get("best_method") is not None
         else False,
@@ -504,6 +538,12 @@ def aggregate_candidate_records(
     all_methods: list[str] = []
     for dataset_id in sorted(by_dataset):
         dataset_records = by_dataset[dataset_id]
+        dataset_health = summarize_gate_health(
+            dataset_records,
+            neutral_tolerance=SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+            catastrophic_threshold=CATASTROPHIC_REGRET_THRESHOLD,
+            weights=GATE_UTILITY_WEIGHTS,
+        )
         regrets = [
             float(record["normalized_regret"])
             for record in dataset_records
@@ -533,6 +573,7 @@ def aggregate_candidate_records(
                 "boundary_diagnostics": _boundary_summary(dataset_records),
                 "selected_family_modal_rate": modal_count / max(len(selections), 1),
                 "selected_families": sorted(counts),
+                "gate_health": dataset_health,
             }
         )
 
@@ -545,6 +586,12 @@ def aggregate_candidate_records(
         method: {"count": count, "rate": count / max(len(all_methods), 1)}
         for method, count in sorted(selection_counts.items())
     }
+    gate_health = summarize_gate_health(
+        candidate_records,
+        neutral_tolerance=SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+        catastrophic_threshold=CATASTROPHIC_REGRET_THRESHOLD,
+        weights=GATE_UTILITY_WEIGHTS,
+    )
     interaction_by_strength: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for dataset in per_dataset:
         interaction_by_strength[dataset["interaction_diagnostics"]["modal_strength"]].append(dataset)
@@ -623,6 +670,21 @@ def aggregate_candidate_records(
         "exact_reference_match_rate": _mean(dataset_metric("exact_reference_match_rate")),
         "catastrophic_regret_rate": _mean(dataset_metric("catastrophic_regret_rate")),
         "top2_compatibility_rate": _mean(dataset_metric("top2_compatibility_rate")),
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
+        "gate_health": gate_health,
+        "utility": gate_health["utility"]["total_utility"],
+        "gate_utility": gate_health["utility"],
+        "intervention_precision": gate_health["intervention_precision"],
+        "challenge_yield": gate_health["challenge_yield"],
+        "harmful_intervention_rate": gate_health["harmful_intervention_rate"],
+        "unnecessary_intervention_rate": gate_health["unnecessary_intervention_rate"],
+        "challenge_recall": gate_health["challenge_recall"],
+        "mean_regret_reduction": gate_health["mean_regret_reduction"],
+        "median_regret_reduction": gate_health["median_regret_reduction"],
+        "catastrophic_prevented_count": gate_health["catastrophic_prevented_count"],
+        "catastrophic_introduced_count": gate_health["catastrophic_introduced_count"],
+        "net_catastrophic_prevention": gate_health["net_catastrophic_prevention"],
+        "missed_rescue_count": gate_health["missed_rescue_count"],
         "policy_stability": {
             "mean_dataset_modal_family_rate": _mean(
                 item["selected_family_modal_rate"] for item in per_dataset
@@ -644,8 +706,52 @@ def aggregate_candidate_records(
     }
 
 
-def policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, float, float, int]:
-    """The predeclared lexicographic objective used for candidate selection."""
+def _aggregate_utility(aggregate: dict[str, Any]) -> float | None:
+    value = aggregate.get("utility")
+    if isinstance(value, dict):
+        value = value.get("total_utility")
+    if value is None and isinstance(aggregate.get("gate_utility"), dict):
+        value = aggregate["gate_utility"].get("total_utility")
+    return float(value) if value is not None else None
+
+
+def policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, ...]:
+    """Rank by intervention quality; retain a legacy fallback for old artifacts/tests."""
+
+    utility = _aggregate_utility(aggregate)
+    if utility is not None:
+        def numeric(key: str, default: float) -> float:
+            value = aggregate.get(key)
+            return float(value) if value is not None else default
+
+        return (
+            numeric("catastrophic_introduced_count", math.inf),
+            numeric("harmful_intervention_rate", math.inf),
+            -numeric("catastrophic_prevented_count", 0.0),
+            -numeric("intervention_precision", -math.inf),
+            -numeric("challenge_recall", -math.inf),
+            -utility,
+            -numeric("median_regret_reduction", -math.inf),
+            numeric("unnecessary_intervention_rate", math.inf),
+            int(aggregate.get("policy_complexity", 0)),
+            -numeric("exact_reference_match_rate", 0.0),
+        )
+    return (
+        float(aggregate["mean_normalized_regret"])
+        if aggregate.get("mean_normalized_regret") is not None
+        else math.inf,
+        float(aggregate["catastrophic_regret_rate"])
+        if aggregate.get("catastrophic_regret_rate") is not None
+        else math.inf,
+        -float(aggregate["top2_compatibility_rate"])
+        if aggregate.get("top2_compatibility_rate") is not None
+        else math.inf,
+        int(aggregate.get("policy_complexity", 0)),
+    )
+
+
+def legacy_policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, ...]:
+    """Reproduce the pre-intervention-quality ranking for audit comparison only."""
 
     return (
         float(aggregate["mean_normalized_regret"])
@@ -657,7 +763,7 @@ def policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, float, float, int
         -float(aggregate["top2_compatibility_rate"])
         if aggregate.get("top2_compatibility_rate") is not None
         else math.inf,
-        int(aggregate["policy_complexity"]),
+        int(aggregate.get("policy_complexity", 0)),
     )
 
 
@@ -665,7 +771,7 @@ def select_policy_candidate(
     aggregates: dict[str, dict[str, Any]],
     candidates: Sequence[PolicyCandidate],
 ) -> dict[str, Any]:
-    """Select by the fixed objective and decide whether promotion is justified."""
+    """Select by the intervention-quality objective and explain the decision."""
 
     ordered = sorted(aggregates.values(), key=policy_rank_key)
     if not ordered:
@@ -677,24 +783,55 @@ def select_policy_candidate(
     candidate_by_name = {candidate.name: candidate for candidate in candidates}
     regret_improvement = None
     catastrophic_improvement = None
+    utility_improvement = None
+    if _aggregate_utility(current) is not None and _aggregate_utility(best) is not None:
+        utility_improvement = float(_aggregate_utility(best) - _aggregate_utility(current))
     if current.get("mean_normalized_regret") is not None and best.get("mean_normalized_regret") is not None:
         regret_improvement = float(current["mean_normalized_regret"] - best["mean_normalized_regret"])
     if current.get("catastrophic_regret_rate") is not None and best.get("catastrophic_regret_rate") is not None:
         catastrophic_improvement = float(current["catastrophic_regret_rate"] - best["catastrophic_regret_rate"])
-    materially_better = bool(
-        best["policy_candidate"] != "current"
-        and (
-            (regret_improvement is not None and regret_improvement >= PROMOTION_MIN_REGRET_IMPROVEMENT)
-            or (
-                regret_improvement is not None
-                and abs(regret_improvement) < PROMOTION_MIN_REGRET_IMPROVEMENT
-                and catastrophic_improvement is not None
-                and catastrophic_improvement >= PROMOTION_MIN_CATASTROPHIC_IMPROVEMENT
+    if utility_improvement is not None:
+        materially_better = bool(
+            best["policy_candidate"] != "current"
+            and utility_improvement >= PROMOTION_MIN_UTILITY_IMPROVEMENT
+        )
+    else:
+        materially_better = bool(
+            best["policy_candidate"] != "current"
+            and (
+                (regret_improvement is not None and regret_improvement >= PROMOTION_MIN_REGRET_IMPROVEMENT)
+                or (
+                    regret_improvement is not None
+                    and abs(regret_improvement) < PROMOTION_MIN_REGRET_IMPROVEMENT
+                    and catastrophic_improvement is not None
+                    and catastrophic_improvement >= PROMOTION_MIN_CATASTROPHIC_IMPROVEMENT
+                )
             )
         )
-    )
+    rationale: list[str] = []
+    for label, key, better_when_lower in (
+        ("harmful-intervention rate", "harmful_intervention_rate", True),
+        ("catastrophic-regret introductions", "catastrophic_introduced_count", True),
+        ("unnecessary-intervention rate", "unnecessary_intervention_rate", True),
+        ("median regret reduction", "median_regret_reduction", False),
+        ("intervention precision", "intervention_precision", False),
+    ):
+        best_value = best.get(key)
+        current_value = current.get(key)
+        if best_value is None or current_value is None or best_value == current_value:
+            continue
+        if (better_when_lower and best_value < current_value) or (
+            not better_when_lower and best_value > current_value
+        ):
+            rationale.append(f"lower {label}" if better_when_lower else f"higher {label}")
+    if not rationale and best["policy_candidate"] == "current":
+        rationale.append("the current policy remained the most robust development candidate")
+    if best.get("exact_reference_match_rate") is not None and current.get("exact_reference_match_rate") is not None:
+        if best["exact_reference_match_rate"] < current["exact_reference_match_rate"]:
+            rationale.append("selected despite a lower exact-reference match, because intervention quality is primary")
     return {
         "selection_rule": POLICY_SELECTION_RULE,
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "ranked_candidates": [item["policy_candidate"] for item in ordered],
         "selected_candidate": best["policy_candidate"],
         "baseline_candidate": "current",
@@ -702,10 +839,13 @@ def select_policy_candidate(
         "promotion_margins": {
             "minimum_mean_regret_improvement": PROMOTION_MIN_REGRET_IMPROVEMENT,
             "minimum_catastrophic_rate_improvement": PROMOTION_MIN_CATASTROPHIC_IMPROVEMENT,
+            "minimum_utility_improvement": PROMOTION_MIN_UTILITY_IMPROVEMENT,
             "observed_mean_regret_improvement_vs_current": regret_improvement,
             "observed_catastrophic_rate_improvement_vs_current": catastrophic_improvement,
+            "observed_utility_improvement_vs_current": utility_improvement,
         },
         "selected_policy_version": candidate_by_name[best["policy_candidate"]].policy.version,
+        "selection_rationale": rationale,
     }
 
 
@@ -761,6 +901,13 @@ def _sensitivity_rows(aggregates: dict[str, dict[str, Any]], candidates: Sequenc
             },
             "mean_normalized_regret": aggregates[candidate.name].get("mean_normalized_regret"),
             "median_normalized_regret": aggregates[candidate.name].get("median_normalized_regret"),
+            "utility": aggregates[candidate.name].get("utility"),
+            "intervention_precision": aggregates[candidate.name].get("intervention_precision"),
+            "harmful_intervention_rate": aggregates[candidate.name].get("harmful_intervention_rate"),
+            "challenge_recall": aggregates[candidate.name].get("challenge_recall"),
+            "mean_regret_reduction": aggregates[candidate.name].get("mean_regret_reduction"),
+            "catastrophic_prevented_count": aggregates[candidate.name].get("catastrophic_prevented_count"),
+            "catastrophic_introduced_count": aggregates[candidate.name].get("catastrophic_introduced_count"),
             "catastrophic_regret_rate": aggregates[candidate.name].get("catastrophic_regret_rate"),
             "exact_reference_match_rate": aggregates[candidate.name].get("exact_reference_match_rate"),
             "top2_compatibility_rate": aggregates[candidate.name].get("top2_compatibility_rate"),
@@ -828,7 +975,7 @@ def build_soft_challenge_calibration(
     for key, group in sorted(grouped.items()):
         wins = sum(record.get("challenge_outcome") == "improved" for record in group)
         losses = sum(record.get("challenge_outcome") == "worsened" for record in group)
-        ties = sum(record.get("challenge_outcome") == "tie" for record in group)
+        ties = sum(record.get("challenge_outcome") in {"tie", "neutral"} for record in group)
         non_tied = wins + losses
         catastrophic_support = sum(bool(record.get("agent_catastrophic_regret")) for record in group)
         prevented = sum(bool(record.get("catastrophic_regret_prevented")) for record in group)
@@ -837,6 +984,12 @@ def build_soft_challenge_calibration(
             for record in group
             if record.get("challenge_regret_delta") is not None
         ]
+        regime_utility = summarize_gate_health(
+            group,
+            neutral_tolerance=SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+            catastrophic_threshold=CATASTROPHIC_REGRET_THRESHOLD,
+            weights=GATE_UTILITY_WEIGHTS,
+        )
         regimes[key] = {
             "regime": key,
             "support": len(group),
@@ -845,6 +998,10 @@ def build_soft_challenge_calibration(
             "challenge_tie_count": ties,
             "challenge_win_rate": float(wins / non_tied) if non_tied else None,
             "challenge_loss_rate": float(losses / non_tied) if non_tied else None,
+            "intervention_precision": float(wins / non_tied) if non_tied else None,
+            "challenge_yield": float(wins / len(group)) if group else None,
+            "harmful_intervention_rate": float(losses / len(group)) if group else None,
+            "unnecessary_intervention_rate": float(ties / len(group)) if group else None,
             "empirical_reliability": float(wins / non_tied) if non_tied else None,
             "mean_regret_delta": float(sum(regret_deltas) / len(regret_deltas)) if regret_deltas else None,
             "catastrophic_regret_support": catastrophic_support,
@@ -854,6 +1011,7 @@ def build_soft_challenge_calibration(
             ),
             "dataset_count": len({str(record.get("dataset_id", record.get("benchmark_case"))) for record in group}),
             "task_types": sorted({str(record.get("task_type")) for record in group}),
+            "gate_utility": regime_utility["utility"],
         }
     return {
         "calibration_schema_version": SOFT_CHALLENGE_CALIBRATION_SCHEMA_VERSION,
@@ -861,6 +1019,8 @@ def build_soft_challenge_calibration(
         "source_role": BenchmarkRole.POLICY_DEVELOPMENT.value,
         "agent_source": "existing_offline_modeling_fallback_proxy",
         "outcome_tolerance": SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
+        "utility_weights": GATE_UTILITY_WEIGHTS.as_dict(),
         "policy": {
             "version": policy.version,
             "min_calibration_support": policy.min_calibration_support,
@@ -871,6 +1031,12 @@ def build_soft_challenge_calibration(
             "min_catastrophic_support": policy.min_catastrophic_support,
         },
         "record_count": len(eligible),
+        "gate_health": summarize_gate_health(
+            [record for record in eligible],
+            neutral_tolerance=SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+            catastrophic_threshold=CATASTROPHIC_REGRET_THRESHOLD,
+            weights=GATE_UTILITY_WEIGHTS,
+        ),
         "dataset_ids": sorted({str(record.get("dataset_id", record.get("benchmark_case"))) for record in eligible}),
         "regimes": regimes,
     }
@@ -887,6 +1053,8 @@ def build_calibration_artifact(
         candidate.name: aggregate_candidate_records(records, candidate) for candidate in candidates
     }
     selection = select_policy_candidate(aggregates, candidates)
+    legacy_ordered = sorted(aggregates.values(), key=legacy_policy_rank_key)
+    legacy_selected = legacy_ordered[0]["policy_candidate"] if legacy_ordered else None
     selected_name = str(selection["selected_candidate"])
     current_records = [record for record in records if record["policy_candidate"] == "current"]
     selected_records = [record for record in records if record["policy_candidate"] == selected_name]
@@ -904,16 +1072,31 @@ def build_calibration_artifact(
         "record_count": len(records),
         "dataset_ids": [case.name for case in cases],
         "random_seeds": [int(seed) for seed in seeds],
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
+        "gate_utility_weights": GATE_UTILITY_WEIGHTS.as_dict(),
         "metric_definitions": {
             "classification_primary_metric": "macro_f1; larger is better",
             "regression_primary_metric": "rmse; smaller is better",
             "normalized_regret": "classification=max(0,best-selected); regression=max(0,selected-best)/max(abs(best),1e-12)",
             "catastrophic_regret_threshold": CATASTROPHIC_REGRET_THRESHOLD,
+            "neutral_tolerance": SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+            "intervention_precision": "improved interventions / (improved + worsened interventions); neutral excluded",
+            "challenge_yield": "improved interventions / total challenges",
+            "harmful_intervention_rate": "worsened interventions / total challenges",
+            "unnecessary_intervention_rate": "neutral interventions / total challenges",
+            "challenge_recall": "beneficial challenges made / all disagreements where deterministic alternative would materially help",
             "aggregation": "average repeated seeds within each unique dataset, then summarize across datasets",
         },
         "candidate_policies": [candidate.as_dict() for candidate in candidates],
         "selection_rule": POLICY_SELECTION_RULE,
         "selection": selection,
+        "historical_objective_comparison": {
+            "legacy_objective": "lowest mean normalized regret, then catastrophic rate, then top-2 compatibility, then complexity",
+            "legacy_ranked_candidates": [item["policy_candidate"] for item in legacy_ordered],
+            "legacy_selected_candidate": legacy_selected,
+            "intervention_quality_selected_candidate": selected_name,
+            "selection_changed": legacy_selected != selected_name,
+        },
         "selected_candidate": selected_name,
         "recommendation": selection["recommendation"],
         "aggregate_metrics": aggregates,
@@ -938,6 +1121,7 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         f"- Policy version under test: `{artifact['policy_version_under_test']}`",
         f"- Benchmark suite: `{artifact['benchmark_suite_version']}`",
         f"- Role: `{artifact['evaluation_role']}`",
+        f"- Gate objective: `{artifact.get('gate_objective_version', GATE_OBJECTIVE_VERSION)}`",
         f"- Unique datasets: **{artifact['dataset_count']}**; repeated seeds are not treated as independent datasets",
         f"- Split seeds: `{artifact['random_seeds']}`",
         f"- Git commit: `{artifact.get('git_commit') or 'unavailable'}`",
@@ -952,19 +1136,31 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         "",
         f"{artifact['selection_rule']}.",
         "",
-        "| Candidate | Mean regret | Catastrophic rate | Exact match | Top-2 rate | Collapse warning |",
-        "|---|---:|---:|---:|---:|---|",
+        "| Candidate | Utility | Precision | Harm rate | Recall | Mean regret reduction | Catastrophic prevented | Catastrophic introduced | Unnecessary rate | Exact match (diagnostic) |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, aggregate in aggregates.items():
         lines.append(
-            f"| `{name}` | {aggregate['mean_normalized_regret']!s} | "
-            f"{aggregate['catastrophic_regret_rate']!s} | {aggregate['exact_reference_match_rate']!s} | "
-            f"{aggregate['top2_compatibility_rate']!s} | "
-            f"{'yes' if aggregate['family_collapse_warning'] else 'no'} |"
+            f"| `{name}` | {aggregate.get('utility')!s} | {aggregate.get('intervention_precision')!s} | "
+            f"{aggregate.get('harmful_intervention_rate')!s} | {aggregate.get('challenge_recall')!s} | "
+            f"{aggregate.get('mean_regret_reduction')!s} | {aggregate.get('catastrophic_prevented_count', 0)} | "
+            f"{aggregate.get('catastrophic_introduced_count', 0)} | {aggregate.get('unnecessary_intervention_rate')!s} | "
+            f"{aggregate['exact_reference_match_rate']!s} |"
         )
     lines.extend(
         [
             "",
+            "## Gate Health Objective",
+            "",
+            "Calibration ranks candidates by selective intervention quality. Exact family match and top-2 compatibility remain secondary diagnostics.",
+            f"Utility weights: `{json.dumps(artifact.get('gate_utility_weights', {}), sort_keys=True)}`.",
+            f"Selected candidate: **{artifact['selected_candidate']}**; utility contribution breakdown: `{json.dumps(aggregates[artifact['selected_candidate']].get('gate_utility', {}), sort_keys=True)}`.",
+            f"Selection rationale: {'; '.join(artifact.get('selection', {}).get('selection_rationale', [])) or 'no additional rationale recorded'}.",
+            f"Historical-objective comparison: legacy would select **{artifact.get('historical_objective_comparison', {}).get('legacy_selected_candidate', 'n/a')}**; intervention-quality selection changed: **{artifact.get('historical_objective_comparison', {}).get('selection_changed', 'n/a')}**.",
+        ]
+    )
+    lines.extend(
+        [
             "## Sensitivity analysis",
             "",
             "The four candidates are a deliberately small neighborhood around the current interpretable thresholds; no continuous optimizer or LLM is used.",

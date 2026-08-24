@@ -3,16 +3,132 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import asdict, dataclass
+import random
 from statistics import median, pstdev
 from typing import Any
+
+
+GATE_OBJECTIVE_VERSION = "intervention-quality-v1"
 
 
 DEFAULT_THRESHOLDS = {
     "classification_regret": 0.01,
     "regression_normalized_regret": 0.02,
     "paired_normalized_regret": 0.02,
+    # This is the single tolerance used to classify an evaluation-only
+    # intervention outcome.  It is expressed in normalized-regret units so
+    # it is comparable across the supported task metrics.
+    "neutral_tolerance": 0.02,
     "catastrophic_regret_threshold": 0.10,
 }
+
+
+@dataclass(frozen=True)
+class GateUtilityWeights:
+    """Small, explicit, asymmetric weights used by development calibration."""
+
+    improvement: float = 1.0
+    worsening: float = 2.0
+    neutral_intervention: float = 0.25
+    catastrophic_prevention: float = 3.0
+    catastrophic_introduction: float = 5.0
+    missed_rescue: float = 1.0
+
+    def as_dict(self) -> dict[str, float]:
+        return {key: float(value) for key, value in asdict(self).items()}
+
+
+DEFAULT_GATE_UTILITY_WEIGHTS = GateUtilityWeights()
+
+
+def normalized_performance_delta(
+    task_type: str,
+    initial_score: float | None,
+    final_score: float | None,
+) -> float | None:
+    """Return a direction-normalized score delta where positive means better."""
+
+    if initial_score is None or final_score is None:
+        return None
+    if task_type == "classification":
+        return float(final_score - initial_score)
+    if task_type == "regression":
+        return float(initial_score - final_score)
+    raise ValueError(f"Unsupported task type: {task_type!r}")
+
+
+def classify_intervention_outcome(
+    normalized_delta: float | None,
+    neutral_tolerance: float,
+) -> str:
+    """Classify a direction-normalized delta without treating microscopic noise as harm."""
+
+    if normalized_delta is None:
+        return "not_comparable"
+    if abs(float(normalized_delta)) <= float(neutral_tolerance):
+        return "neutral"
+    return "improved" if normalized_delta > 0 else "worsened"
+
+
+def regret_reduction(
+    initial_regret: float | None,
+    final_regret: float | None,
+) -> float | None:
+    """Return positive regret reduction when the gated choice is better."""
+
+    if initial_regret is None or final_regret is None:
+        return None
+    return float(initial_regret - final_regret)
+
+
+def catastrophic_transition(
+    initial_regret: float | None,
+    final_regret: float | None,
+    threshold: float,
+) -> dict[str, bool]:
+    """Classify catastrophic-regret status and its transition direction."""
+
+    initial = bool(initial_regret is not None and initial_regret >= threshold)
+    final = bool(final_regret is not None and final_regret >= threshold)
+    return {
+        "initial_catastrophic": initial,
+        "final_catastrophic": final,
+        "catastrophic_prevented": initial and not final,
+        "catastrophic_introduced": not initial and final,
+    }
+
+
+def gate_utility(
+    *,
+    improved_count: int,
+    worsened_count: int,
+    neutral_count: int,
+    catastrophic_prevented_count: int,
+    catastrophic_introduced_count: int,
+    missed_rescue_count: int = 0,
+    weights: GateUtilityWeights = DEFAULT_GATE_UTILITY_WEIGHTS,
+) -> dict[str, float | dict[str, float]]:
+    """Compute a decomposable utility from counts; no hidden normalization is used."""
+
+    contributions = {
+        "improvement_reward": float(improved_count * weights.improvement),
+        "worsening_penalty": float(-worsened_count * weights.worsening),
+        "unnecessary_intervention_penalty": float(-neutral_count * weights.neutral_intervention),
+        "catastrophic_prevention_reward": float(
+            catastrophic_prevented_count * weights.catastrophic_prevention
+        ),
+        "catastrophic_introduction_penalty": float(
+            -catastrophic_introduced_count * weights.catastrophic_introduction
+        ),
+        "missed_rescue_penalty": float(-missed_rescue_count * weights.missed_rescue),
+    }
+    total = float(sum(contributions.values()))
+    return {
+        **contributions,
+        "total_utility": total,
+        "weights": weights.as_dict(),
+    }
 
 
 def regret(task_type: str, best_score: float | None, selected_score: float | None) -> float | None:
@@ -50,15 +166,18 @@ def approximate_match(task_type: str, normalized_value: float | None, thresholds
     return float(normalized_value) <= float(thresholds[key])
 
 
-def _mean(values: list[float]) -> float | None:
+def _mean(values: list[float] | Any) -> float | None:
+    values = list(values)
     return float(sum(values) / len(values)) if values else None
 
 
-def _median(values: list[float]) -> float | None:
+def _median(values: list[float] | Any) -> float | None:
+    values = list(values)
     return float(median(values)) if values else None
 
 
-def _std(values: list[float]) -> float | None:
+def _std(values: list[float] | Any) -> float | None:
+    values = list(values)
     return float(pstdev(values)) if values else None
 
 
@@ -93,17 +212,17 @@ def _stability(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _outcome(record: dict[str, Any], tolerance: float) -> str:
-    if record.get("gate_outcome") in {"improved", "worsened", "tie"}:
-        return str(record["gate_outcome"])
+    details = record.get("gate_outcome_details") or {}
+    stored = details.get("outcome") or record.get("gate_outcome")
+    if stored in {"improved", "worsened", "neutral", "tie"}:
+        return "neutral" if stored == "tie" else str(stored)
     initial = record.get("agent_normalized_regret")
     gated = record.get("gated_normalized_regret")
     if initial is None or gated is None:
         return "not_comparable"
-    if gated < initial - tolerance:
-        return "improved"
-    if gated > initial + tolerance:
-        return "worsened"
-    return "tie"
+    return classify_intervention_outcome(
+        regret_reduction(float(initial), float(gated)), tolerance
+    )
 
 
 def _validation_failure_codes(record: dict[str, Any]) -> set[str]:
@@ -229,6 +348,8 @@ def _soft_status(record: dict[str, Any]) -> str | None:
         return str(record["soft_challenge_status"])
     if record.get("agreement_status") in {"agreement", "disagreement"}:
         return str(record["agreement_status"])
+    if record.get("agreement_status") == "llm_only":
+        return "disagreement" if record.get("method_disagreement") is True else "agreement"
     return None
 
 
@@ -276,9 +397,409 @@ def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dic
     return {
         "improved": outcomes.get("improved", 0),
         "worsened": outcomes.get("worsened", 0),
-        "neutral": outcomes.get("tie", 0),
+        "neutral": outcomes.get("neutral", 0),
         "not_comparable": outcomes.get("not_comparable", 0),
     }
+
+
+def _bootstrap_interval(values: list[float], seed: int = 20260824, samples: int = 1000) -> dict[str, Any]:
+    """Return a deterministic percentile bootstrap interval, or an explicit small-sample result."""
+
+    if not values:
+        return {"lower": None, "upper": None, "support": 0, "stable": False}
+    if len(values) < 2:
+        value = float(values[0])
+        return {"lower": value, "upper": value, "support": len(values), "stable": False}
+    rng = random.Random(seed)
+    estimates = []
+    for _ in range(samples):
+        draw = [values[rng.randrange(len(values))] for _ in values]
+        estimates.append(sum(draw) / len(draw))
+    estimates.sort()
+    low_index = int(0.025 * (len(estimates) - 1))
+    high_index = int(0.975 * (len(estimates) - 1))
+    return {
+        "lower": float(estimates[low_index]),
+        "upper": float(estimates[high_index]),
+        "support": len(values),
+        "stable": len(values) >= 20,
+    }
+
+
+def _decision_path(record: dict[str, Any]) -> str:
+    decision = _soft_decision(record)
+    if decision in {None, "agree"} or _soft_status(record) == "agreement":
+        return "agreement"
+    if decision == "abstain":
+        return "abstention"
+    if decision != "challenge":
+        return "unavailable"
+    probe = record.get("empirical_probe") or {}
+    if record.get("empirical_probe_invoked") is not True or probe.get("status") != "completed":
+        return "challenge_without_successful_probe"
+    strength = str(probe.get("evidence_strength") or "unknown")
+    return f"challenge_plus_{strength}_probe"
+
+
+def _confidence_bucket(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, str) and value.lower() in {"low", "medium", "high"}:
+        return value.lower()
+    value = float(value)
+    if value < 0.4:
+        return "low"
+    if value < 0.7:
+        return "medium"
+    return "high"
+
+
+def _record_regret_reduction(record: dict[str, Any]) -> float | None:
+    details = record.get("gate_outcome_details") or {}
+    if details.get("regret_reduction") is not None:
+        return float(details["regret_reduction"])
+    return regret_reduction(
+        record.get("agent_normalized_regret"), record.get("gated_normalized_regret")
+    )
+
+
+def _alternative_delta(record: dict[str, Any]) -> float | None:
+    initial = record.get("agent_normalized_regret")
+    deterministic = record.get("deterministic_normalized_regret")
+    return regret_reduction(initial, deterministic)
+
+
+def _gate_health(
+    records: list[dict[str, Any]],
+    *,
+    tolerance: float,
+    catastrophic_threshold: float,
+    weights: GateUtilityWeights,
+) -> dict[str, Any]:
+    """Summarize intervention quality without relying on family-name correctness."""
+
+    valid = [record for record in records if record.get("trial_status") != "failed"]
+    paired = [record for record in valid if _record_regret_reduction(record) is not None]
+    challenges = _soft_decision_records(valid, "challenge")
+    abstentions = _soft_decision_records(valid, "abstain")
+    challenge_outcomes = [
+        _outcome(record, tolerance)
+        for record in challenges
+        if _record_regret_reduction(record) is not None
+    ]
+    improved = challenge_outcomes.count("improved")
+    worsened = challenge_outcomes.count("worsened")
+    neutral = challenge_outcomes.count("neutral")
+    comparable_challenges = improved + worsened + neutral
+    deltas = [float(_record_regret_reduction(record)) for record in paired]
+    challenge_deltas = [
+        float(_record_regret_reduction(record))
+        for record in challenges
+        if _record_regret_reduction(record) is not None
+    ]
+    positive = [delta for delta in challenge_deltas if delta > tolerance]
+    negative = [delta for delta in challenge_deltas if delta < -tolerance]
+    initial_catastrophic = sum(
+        bool(
+            record.get("agent_normalized_regret") is not None
+            and float(record["agent_normalized_regret"]) >= catastrophic_threshold
+        )
+        for record in paired
+    )
+    final_catastrophic = sum(
+        bool(
+            record.get("gated_normalized_regret") is not None
+            and float(record["gated_normalized_regret"]) >= catastrophic_threshold
+        )
+        for record in paired
+    )
+    prevented = sum(
+        bool(
+            record.get("agent_normalized_regret") is not None
+            and record.get("gated_normalized_regret") is not None
+            and float(record["agent_normalized_regret"]) >= catastrophic_threshold
+            and float(record["gated_normalized_regret"]) < catastrophic_threshold
+        )
+        for record in paired
+    )
+    introduced = sum(
+        bool(
+            record.get("agent_normalized_regret") is not None
+            and record.get("gated_normalized_regret") is not None
+            and float(record["agent_normalized_regret"]) < catastrophic_threshold
+            and float(record["gated_normalized_regret"]) >= catastrophic_threshold
+        )
+        for record in paired
+    )
+    missed_rescue = 0
+    good_abstention = 0
+    avoided_harm = 0
+    neutral_abstention = 0
+    for record in abstentions:
+        alternative_delta = _alternative_delta(record)
+        if alternative_delta is None:
+            continue
+        outcome = classify_intervention_outcome(alternative_delta, tolerance)
+        if outcome == "improved":
+            missed_rescue += 1
+        elif outcome == "worsened":
+            good_abstention += 1
+            avoided_harm += 1
+        else:
+            neutral_abstention += 1
+    beneficial_opportunities = sum(
+        _alternative_delta(record) is not None
+        and _alternative_delta(record) > tolerance
+        for record in valid
+        if _soft_status(record) == "disagreement"
+    )
+    beneficial_challenges = sum(outcome == "improved" for outcome in challenge_outcomes)
+    utility = gate_utility(
+        improved_count=improved,
+        worsened_count=worsened,
+        neutral_count=neutral,
+        catastrophic_prevented_count=prevented,
+        catastrophic_introduced_count=introduced,
+        missed_rescue_count=missed_rescue,
+        weights=weights,
+    )
+    outcome_counts = {
+        "improved": improved,
+        "worsened": worsened,
+        "neutral": neutral,
+        # Legacy aliases remain in the serialized summary for historical data.
+        "tie": neutral,
+        "not_comparable": len(challenges) - comparable_challenges,
+    }
+    path_metrics: dict[str, dict[str, Any]] = {}
+    for path in sorted({_decision_path(record) for record in valid}):
+        path_records = [record for record in valid if _decision_path(record) == path]
+        path_deltas = [
+            float(_record_regret_reduction(record))
+            for record in path_records
+            if _record_regret_reduction(record) is not None
+        ]
+        path_outcomes = Counter(
+            _outcome(record, tolerance)
+            for record in path_records
+            if _record_regret_reduction(record) is not None
+        )
+        path_metrics[path] = {
+            "count": len(path_records),
+            "mean_gate_delta": _mean(path_deltas),
+            "median_gate_delta": _median(path_deltas),
+            "improved": path_outcomes.get("improved", 0),
+            "worsened": path_outcomes.get("worsened", 0),
+            "neutral": path_outcomes.get("neutral", 0),
+            "mean_regret_reduction": _mean(path_deltas),
+        }
+    confidence_metrics: dict[str, dict[str, Any]] = {}
+    for bucket in sorted({_confidence_bucket(record.get("deterministic_confidence")) for record in valid}):
+        bucket_records = [
+            record
+            for record in challenges
+            if _confidence_bucket(record.get("deterministic_confidence")) == bucket
+        ]
+        bucket_outcomes = Counter(
+            _outcome(record, tolerance)
+            for record in bucket_records
+            if _record_regret_reduction(record) is not None
+        )
+        bucket_deltas = [
+            float(_record_regret_reduction(record))
+            for record in bucket_records
+            if _record_regret_reduction(record) is not None
+        ]
+        confidence_metrics[bucket] = {
+            "challenge_count": len(bucket_records),
+            "improvement_rate": _rate(bucket_outcomes.get("improved", 0), len(bucket_records)),
+            "harm_rate": _rate(bucket_outcomes.get("worsened", 0), len(bucket_records)),
+            "mean_regret_reduction": _mean(bucket_deltas),
+            "catastrophic_prevention_count": sum(
+                bool((record.get("gate_outcome_details") or {}).get("catastrophic_prevented"))
+                for record in bucket_records
+            ),
+        }
+    probe_metrics: dict[str, dict[str, Any]] = {}
+    for strength in sorted({
+        str((record.get("empirical_probe") or {}).get("evidence_strength"))
+        for record in challenges
+        if (record.get("empirical_probe") or {}).get("evidence_strength")
+    }):
+        probe_records = [
+            record for record in challenges
+            if (record.get("empirical_probe") or {}).get("evidence_strength") == strength
+        ]
+        probe_outcomes = Counter(
+            _outcome(record, tolerance)
+            for record in probe_records
+            if _record_regret_reduction(record) is not None
+        )
+        probe_metrics[strength] = {
+            "challenge_count": len(probe_records),
+            "improved": probe_outcomes.get("improved", 0),
+            "worsened": probe_outcomes.get("worsened", 0),
+            "neutral": probe_outcomes.get("neutral", 0),
+            "harm_rate": _rate(probe_outcomes.get("worsened", 0), len(probe_records)),
+            "mean_regret_reduction": _mean([
+                float(_record_regret_reduction(record))
+                for record in probe_records
+                if _record_regret_reduction(record) is not None
+            ]),
+        }
+    total_positive_gain = float(sum(positive)) if positive else 0.0
+    sorted_positive = sorted(positive, reverse=True)
+    gain_concentration = {
+        "total_positive_gain": total_positive_gain,
+        "top_1_fraction": (
+            float(sum(sorted_positive[:1]) / total_positive_gain) if total_positive_gain else None
+        ),
+        "top_5_fraction": (
+            float(sum(sorted_positive[:5]) / total_positive_gain) if total_positive_gain else None
+        ),
+        "positive_intervention_count": len(positive),
+    }
+    regime_groups: dict[str, list[dict[str, Any]]] = {}
+    for record in valid:
+        deterministic_artifact = record.get("deterministic_recommendation") or {}
+        diagnostics = deterministic_artifact.get("diagnostics", {})
+        if not diagnostics:
+            diagnostics = record.get("diagnostics") or {}
+        interaction = diagnostics.get("interaction_signals") or {}
+        boundary = diagnostics.get("classification_boundary_signals") or {}
+        labels = {
+            "task": str(record.get("task_type", "unknown")),
+            "interaction": str(interaction.get("interaction_strength", "unknown")),
+            "boundary": str(boundary.get("boundary_complexity", "unknown")),
+        }
+        for dimension, value in labels.items():
+            if value != "unknown":
+                regime_groups.setdefault(f"{dimension}:{value}", []).append(record)
+    regime_metrics: dict[str, dict[str, Any]] = {}
+    suppressed_regimes: list[str] = []
+    for key, group in sorted(regime_groups.items()):
+        if len(group) < 2:
+            suppressed_regimes.append(key)
+            continue
+        group_deltas = [
+            float(_record_regret_reduction(record))
+            for record in group
+            if _record_regret_reduction(record) is not None
+        ]
+        group_outcomes = Counter(
+            _outcome(record, tolerance)
+            for record in group
+            if _record_regret_reduction(record) is not None
+        )
+        regime_metrics[key] = {
+            "support": len(group),
+            "improved": group_outcomes.get("improved", 0),
+            "worsened": group_outcomes.get("worsened", 0),
+            "neutral": group_outcomes.get("neutral", 0),
+            "mean_regret_reduction": _mean(group_deltas),
+        }
+    return {
+        "total_disagreements": sum(_soft_status(record) == "disagreement" for record in valid),
+        "total_challenges": len(challenges),
+        "total_abstentions": len(abstentions),
+        "improved_interventions": improved,
+        "worsened_interventions": worsened,
+        "neutral_interventions": neutral,
+        "intervention_precision": _rate(improved, improved + worsened),
+        "intervention_precision_including_neutral": _rate(improved, len(challenges)),
+        "challenge_yield": _rate(improved, len(challenges)),
+        "harmful_intervention_rate": _rate(worsened, len(challenges)),
+        "unnecessary_intervention_count": neutral,
+        "unnecessary_intervention_rate": _rate(neutral, len(challenges)),
+        "challenge_recall": _rate(beneficial_challenges, beneficial_opportunities),
+        "beneficial_challenge_count": beneficial_challenges,
+        "beneficial_opportunity_count": beneficial_opportunities,
+        "missed_rescue_count": missed_rescue,
+        "good_abstention_count": good_abstention,
+        "avoided_harm_count": avoided_harm,
+        "neutral_abstention_count": neutral_abstention,
+        "intervention_f1": (
+            _rate(2 * improved, 2 * improved + worsened + (beneficial_opportunities - beneficial_challenges))
+            if 2 * improved + worsened + (beneficial_opportunities - beneficial_challenges)
+            else None
+        ),
+        "mean_regret_reduction": _mean(deltas),
+        "median_regret_reduction": _median(deltas),
+        "regret_reduction_ci": _bootstrap_interval(deltas),
+        "mean_intervention_regret_reduction": _mean(challenge_deltas),
+        "median_intervention_regret_reduction": _median(challenge_deltas),
+        "positive_delta_mean": _mean(positive),
+        "positive_delta_median": _median(positive),
+        "negative_delta_mean": _mean(negative),
+        "negative_delta_median": _median(negative),
+        "worst_regression": min(negative) if negative else None,
+        "largest_improvement": max(positive) if positive else None,
+        "initial_catastrophic_count": initial_catastrophic,
+        "final_catastrophic_count": final_catastrophic,
+        "catastrophic_prevented_count": prevented,
+        "catastrophic_introduced_count": introduced,
+        "initial_agent_catastrophic_count": initial_catastrophic,
+        "final_gate_catastrophic_count": final_catastrophic,
+        "catastrophic_regret_prevented_count": prevented,
+        "catastrophic_regret_introduced_count": introduced,
+        "catastrophic_prevented_rate": _rate(prevented, initial_catastrophic),
+        "catastrophic_introduced_rate": _rate(introduced, len(paired) - initial_catastrophic),
+        "net_catastrophic_prevention": prevented - introduced,
+        "utility": utility,
+        "outcome_counts": outcome_counts,
+        "path_metrics": path_metrics,
+        "confidence_metrics": confidence_metrics,
+        "probe_strength_metrics": probe_metrics,
+        "regime_metrics": regime_metrics,
+        "suppressed_regime_slices": suppressed_regimes,
+        "gain_concentration": gain_concentration,
+        "comparable_trial_count": len(paired),
+    }
+
+
+def _dataset_weighted_health(
+    records: list[dict[str, Any]],
+    *,
+    tolerance: float,
+    catastrophic_threshold: float,
+    weights: GateUtilityWeights,
+) -> dict[str, Any]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        grouped.setdefault(str(record.get("benchmark_case", record.get("dataset_id", "unknown"))), []).append(record)
+    per_dataset = {
+        dataset: _gate_health(group, tolerance=tolerance, catastrophic_threshold=catastrophic_threshold, weights=weights)
+        for dataset, group in sorted(grouped.items())
+    }
+    numeric = (
+        "intervention_precision", "challenge_yield", "harmful_intervention_rate",
+        "unnecessary_intervention_rate", "challenge_recall", "mean_regret_reduction",
+        "median_regret_reduction", "catastrophic_prevented_rate", "catastrophic_introduced_rate",
+    )
+    return {
+        "dataset_count": len(per_dataset),
+        "per_dataset": per_dataset,
+        **{name: _mean(
+            float(item[name]) for item in per_dataset.values() if item.get(name) is not None
+        ) for name in numeric},
+    }
+
+
+def summarize_gate_health(
+    records: list[dict[str, Any]],
+    *,
+    neutral_tolerance: float = DEFAULT_THRESHOLDS["neutral_tolerance"],
+    catastrophic_threshold: float = DEFAULT_THRESHOLDS["catastrophic_regret_threshold"],
+    weights: GateUtilityWeights = DEFAULT_GATE_UTILITY_WEIGHTS,
+) -> dict[str, Any]:
+    """Public shared utility for trial- and policy-calibration intervention summaries."""
+
+    return _gate_health(
+        records,
+        tolerance=neutral_tolerance,
+        catastrophic_threshold=catastrophic_threshold,
+        weights=weights,
+    )
 
 
 def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -352,10 +873,20 @@ def summarize_trials(
     trials: list[dict[str, Any]],
     *,
     thresholds: dict[str, float] | None = None,
+    utility_weights: GateUtilityWeights | dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Aggregate rows while keeping operational and OpenAI-only views separate."""
 
     configured = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    neutral_tolerance = float(
+        configured.get("neutral_tolerance", configured["paired_normalized_regret"])
+    )
+    if utility_weights is None:
+        weights = DEFAULT_GATE_UTILITY_WEIGHTS
+    elif isinstance(utility_weights, GateUtilityWeights):
+        weights = utility_weights
+    else:
+        weights = GateUtilityWeights(**utility_weights)
     total = len(trials)
     failed = [record for record in trials if record.get("trial_status") == "failed"]
     completed = [record for record in trials if record.get("trial_status") != "failed"]
@@ -407,6 +938,12 @@ def summarize_trials(
             if record.get("agent_normalized_regret") is not None
             and record.get("gated_normalized_regret") is not None
         ]
+        health = _gate_health(
+            valid_records,
+            tolerance=neutral_tolerance,
+            catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+            weights=weights,
+        )
         improvements = _paired_improvements(paired)
         holdout_improvements = _holdout_improvements(paired)
         outcomes = Counter(_outcome(record, float(configured["paired_normalized_regret"])) for record in paired)
@@ -431,7 +968,7 @@ def summarize_trials(
         ]
         challenge_improved = challenge_outcomes.count("improved")
         challenge_worsened = challenge_outcomes.count("worsened")
-        challenge_neutral = challenge_outcomes.count("tie")
+        challenge_neutral = challenge_outcomes.count("neutral")
         abstained_comparable = [
             record for record in abstained_records
             if record.get("agent_normalized_regret") is not None
@@ -546,7 +1083,22 @@ def summarize_trials(
             "challenge_improved_count": challenge_improved,
             "challenge_worsened_count": challenge_worsened,
             "challenge_neutral_count": challenge_neutral,
-            "intervention_precision": _rate(challenge_improved, challenge_improved + challenge_worsened),
+            "intervention_precision": health["intervention_precision"],
+            "challenge_yield": health["challenge_yield"],
+            "harmful_intervention_rate": health["harmful_intervention_rate"],
+            "challenge_recall": health["challenge_recall"],
+            "missed_rescue_count": health["missed_rescue_count"],
+            "good_abstention_count": health["good_abstention_count"],
+            "neutral_abstention_count": health["neutral_abstention_count"],
+            "mean_regret_reduction": health["mean_regret_reduction"],
+            "median_regret_reduction": health["median_regret_reduction"],
+            "regret_reduction_ci": health["regret_reduction_ci"],
+            "initial_catastrophic_count": health["initial_catastrophic_count"],
+            "final_catastrophic_count": health["final_catastrophic_count"],
+            "catastrophic_prevented_count": health["catastrophic_prevented_count"],
+            "catastrophic_introduced_count": health["catastrophic_introduced_count"],
+            "net_catastrophic_prevention": health["net_catastrophic_prevention"],
+            "gate_utility": health["utility"],
             "mean_performance_delta_conditional_on_challenge": _mean(challenge_deltas),
             "abstained_agent_better_count": abstained_agent_better,
             "abstained_deterministic_better_count": abstained_deterministic_better,
@@ -556,8 +1108,8 @@ def summarize_trials(
             "catastrophic_regret_prevented_by_challenge_rate": _rate(
                 catastrophic_prevented, len(catastrophic_challenges)
             ),
-            "unnecessary_intervention_count": challenge_worsened,
-            "unnecessary_intervention_rate": _rate(challenge_worsened, len(challenge_records)),
+            "unnecessary_intervention_count": health["unnecessary_intervention_count"],
+            "unnecessary_intervention_rate": health["unnecessary_intervention_rate"],
             "unsafe_plan_interception_count": sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
             "unsafe_plan_interception_rate": _rate(
                 sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
@@ -602,11 +1154,12 @@ def summarize_trials(
             "gating_outcome_counts": {
                 "improved": outcomes.get("improved", 0),
                 "worsened": outcomes.get("worsened", 0),
-                "tie": outcomes.get("tie", 0),
+                "neutral": outcomes.get("neutral", 0),
+                "tie": outcomes.get("neutral", 0),
                 "not_comparable": outcomes.get("not_comparable", 0),
                 "gated_better_count": outcomes.get("improved", 0),
                 "agent_better_count": outcomes.get("worsened", 0),
-                "tie_count": outcomes.get("tie", 0),
+                "tie_count": outcomes.get("neutral", 0),
                 "eligible_count": len(paired),
             },
             "potentially_unnecessary_intervention_count": len(unnecessary),
@@ -618,6 +1171,7 @@ def summarize_trials(
             "validation_interception_rate": _rate(
                 sum(record.get("unsafe_plan_intercepted") is True for record in task_unsafe), len(task_unsafe)
             ),
+            "gate_health": health,
         }
 
     all_matches_initial, all_initial_denominator = method_match(completed, "agent_initial_method")
@@ -664,6 +1218,27 @@ def summarize_trials(
         for task in ("classification", "regression")
     }
     overall_selective = aggregate_for(completed)
+    overall_gate_health = overall_selective["gate_health"]
+    dataset_gate_health = _dataset_weighted_health(
+        completed,
+        tolerance=neutral_tolerance,
+        catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+        weights=weights,
+    )
+    leave_one_dataset_out: dict[str, Any] = {}
+    dataset_names = sorted({str(record.get("benchmark_case")) for record in completed})
+    if len(dataset_names) >= 2:
+        for dataset_name in dataset_names:
+            remaining = [
+                record for record in completed
+                if str(record.get("benchmark_case")) != dataset_name
+            ]
+            leave_one_dataset_out[dataset_name] = _gate_health(
+                remaining,
+                tolerance=neutral_tolerance,
+                catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+                weights=weights,
+            )
     source_counts = {
         source: sum(record.get("agent_source") == source for record in trials)
         for source in sorted({str(record.get("agent_source")) for record in trials})
@@ -677,8 +1252,23 @@ def summarize_trials(
             "regression_normalized_regret": "regression_regret / max(abs(best_rmse), 1e-12)",
             "paired_cv_improvement_classification": "gated_macro_f1 - initial_macro_f1",
             "paired_cv_improvement_regression": "initial_rmse - gated_rmse",
-            "gate_outcome": "improved/worsened when normalized regret differs by more than paired_normalized_regret; otherwise tie",
+            "normalized_performance_delta": "classification=final_macro_f1-initial_macro_f1; regression=initial_rmse-final_rmse",
+            "regret_reduction": "initial_normalized_regret-final_normalized_regret",
+            "gate_outcome": "improved/worsened when regret reduction differs from zero by more than neutral_tolerance; otherwise neutral",
+            "intervention_precision": "improved_interventions/(improved_interventions+worsened_interventions); neutral interventions excluded",
+            "challenge_yield": "improved_interventions/total_challenges",
+            "harmful_intervention_rate": "worsened_interventions/total_challenges",
+            "unnecessary_intervention_rate": "neutral_interventions/total_challenges",
+            "challenge_recall": "beneficial_challenges_made/all_disagreements_where_deterministic_alternative_would_help",
             "potentially_unnecessary_intervention": "valid initial plan AND method disagreement AND final method changed AND initial regret within the task tolerance",
+        },
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
+        "gate_evaluation_objective": {
+            "version": GATE_OBJECTIVE_VERSION,
+            "neutral_tolerance": neutral_tolerance,
+            "catastrophic_regret_threshold": configured["catastrophic_regret_threshold"],
+            "utility_weights": weights.as_dict(),
+            "calibration_data_role": "policy development only; final evaluation is never used to tune these values",
         },
         "thresholds": configured,
         "trial_count": total,
@@ -758,6 +1348,41 @@ def summarize_trials(
         "challenge_worsened_count": overall_selective["challenge_worsened_count"],
         "challenge_neutral_count": overall_selective["challenge_neutral_count"],
         "intervention_precision": overall_selective["intervention_precision"],
+        "challenge_yield": overall_selective["challenge_yield"],
+        "harmful_intervention_rate": overall_selective["harmful_intervention_rate"],
+        "unnecessary_intervention_rate": overall_selective["unnecessary_intervention_rate"],
+        "challenge_recall": overall_selective["challenge_recall"],
+        "missed_rescue_count": overall_selective["missed_rescue_count"],
+        "good_abstention_count": overall_selective["good_abstention_count"],
+        "neutral_abstention_count": overall_selective["neutral_abstention_count"],
+        "gate_health": overall_gate_health,
+        "trial_weighted_gate_health": overall_gate_health,
+        "dataset_weighted_gate_health": dataset_gate_health,
+        "total_challenges": overall_gate_health["total_challenges"],
+        "total_abstentions": overall_gate_health["total_abstentions"],
+        "improved_interventions": overall_gate_health["improved_interventions"],
+        "worsened_interventions": overall_gate_health["worsened_interventions"],
+        "neutral_interventions": overall_gate_health["neutral_interventions"],
+        "path_metrics": overall_gate_health["path_metrics"],
+        "confidence_metrics": overall_gate_health["confidence_metrics"],
+        "probe_strength_metrics": overall_gate_health["probe_strength_metrics"],
+        "regime_metrics": overall_gate_health["regime_metrics"],
+        "suppressed_regime_slices": overall_gate_health["suppressed_regime_slices"],
+        "gain_concentration": overall_gate_health["gain_concentration"],
+        "mean_regret_reduction": overall_gate_health["mean_regret_reduction"],
+        "median_regret_reduction": overall_gate_health["median_regret_reduction"],
+        "regret_reduction_ci": overall_gate_health["regret_reduction_ci"],
+        "initial_catastrophic_count": overall_gate_health["initial_catastrophic_count"],
+        "final_catastrophic_count": overall_gate_health["final_catastrophic_count"],
+        "catastrophic_prevented_count": overall_gate_health["catastrophic_prevented_count"],
+        "catastrophic_introduced_count": overall_gate_health["catastrophic_introduced_count"],
+        "initial_agent_catastrophic_count": overall_gate_health["initial_catastrophic_count"],
+        "final_gate_catastrophic_count": overall_gate_health["final_catastrophic_count"],
+        "catastrophic_regret_prevented_count": overall_gate_health["catastrophic_prevented_count"],
+        "catastrophic_regret_introduced_count": overall_gate_health["catastrophic_introduced_count"],
+        "net_catastrophic_prevention": overall_gate_health["net_catastrophic_prevention"],
+        "gate_utility": overall_gate_health["utility"],
+        "leave_one_dataset_out": leave_one_dataset_out,
         "mean_performance_delta_conditional_on_challenge": overall_selective[
             "mean_performance_delta_conditional_on_challenge"
         ],
@@ -772,7 +1397,6 @@ def summarize_trials(
             "catastrophic_regret_prevented_by_challenge_rate"
         ],
         "unnecessary_intervention_count": overall_selective["unnecessary_intervention_count"],
-        "unnecessary_intervention_rate": overall_selective["unnecessary_intervention_rate"],
         "unsafe_plan_interception_count": len(intercepted),
         "unsafe_plan_interception_rate": _rate(len(intercepted), len(initial_invalid)),
         "validation_interception_count": len(intentionally_unsafe_intercepted),
@@ -815,11 +1439,12 @@ def summarize_trials(
         "gating_outcome_counts": {
             "improved": outcomes.get("improved", 0),
             "worsened": outcomes.get("worsened", 0),
-            "tie": outcomes.get("tie", 0),
+            "neutral": outcomes.get("neutral", 0),
+            "tie": outcomes.get("neutral", 0),
             "not_comparable": outcomes.get("not_comparable", 0),
             "gated_better_count": outcomes.get("improved", 0),
             "agent_better_count": outcomes.get("worsened", 0),
-            "tie_count": outcomes.get("tie", 0),
+            "tie_count": outcomes.get("neutral", 0),
             "eligible_count": len(paired),
         },
         "potentially_unnecessary_intervention_count": len(unnecessary),
@@ -868,7 +1493,8 @@ def summarize_trials(
             "std_paired_holdout_improvement": _std(openai_holdout_improvements),
             "improved_count": sum(_outcome(record, float(configured["paired_normalized_regret"])) == "improved" for record in openai_paired),
             "worsened_count": sum(_outcome(record, float(configured["paired_normalized_regret"])) == "worsened" for record in openai_paired),
-            "tie_count": sum(_outcome(record, float(configured["paired_normalized_regret"])) == "tie" for record in openai_paired),
+            "neutral_count": sum(_outcome(record, neutral_tolerance) == "neutral" for record in openai_paired),
+            "tie_count": sum(_outcome(record, neutral_tolerance) == "neutral" for record in openai_paired),
         },
         "stability_by_dataset": {
             case: _stability([record for record in openai if record.get("benchmark_case") == case])

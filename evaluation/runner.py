@@ -40,7 +40,17 @@ from evaluation.empirical_reference import (
     evaluate_plan_cv,
     training_only_requirements,
 )
-from evaluation.metrics import DEFAULT_THRESHOLDS, normalized_regret, regret, summarize_trials
+from evaluation.metrics import (
+    DEFAULT_THRESHOLDS,
+    GATE_OBJECTIVE_VERSION,
+    catastrophic_transition,
+    classify_intervention_outcome,
+    normalized_performance_delta,
+    normalized_regret,
+    regret,
+    regret_reduction,
+    summarize_trials,
+)
 from evaluation.perturbations import Perturbation, default_perturbations
 
 
@@ -397,6 +407,7 @@ def _run_trial(
     }
     initial_input_artifact = {
         "evaluation_mode": "modeling_gate",
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "gate_mode": config.gate_mode,
         "question": case.question,
         "benchmark_target_constraint": case.target_column,
@@ -684,11 +695,6 @@ def _run_trial(
     )
     agent_regret = regret(case.expected_task_type, best_score, agent_family_score)
     gated_regret = regret(case.expected_task_type, best_score, gated_family_score)
-    deterministic_normalized_regret = normalized_regret(
-        case.expected_task_type,
-        best_score,
-        deterministic_family_score,
-    )
     paired_cv_improvement = None
     if agent_family_score is not None and gated_family_score is not None:
         paired_cv_improvement = (
@@ -696,15 +702,65 @@ def _run_trial(
             if case.expected_task_type == "classification"
             else agent_family_score - gated_family_score
         )
-    tolerance = float(config.thresholds["paired_normalized_regret"])
-    if agent_regret is None or gated_regret is None:
+    tolerance = float(config.thresholds.get("neutral_tolerance", config.thresholds["paired_normalized_regret"]))
+    initial_normalized_regret = normalized_regret(case.expected_task_type, best_score, agent_family_score)
+    final_normalized_regret = normalized_regret(case.expected_task_type, best_score, gated_family_score)
+    deterministic_normalized_regret = normalized_regret(
+        case.expected_task_type,
+        best_score,
+        deterministic_family_score,
+    )
+    normalized_gate_delta = regret_reduction(initial_normalized_regret, final_normalized_regret)
+    gate_outcome = classify_intervention_outcome(normalized_gate_delta, tolerance)
+    if normalized_gate_delta is None:
         gate_outcome = "not_comparable"
-    elif gated_regret < agent_regret - tolerance:
-        gate_outcome = "improved"
-    elif gated_regret > agent_regret + tolerance:
-        gate_outcome = "worsened"
-    else:
-        gate_outcome = "tie"
+    gate_primary_delta = normalized_performance_delta(
+        case.expected_task_type,
+        (agent_plan_cv or {}).get("primary_mean"),
+        (gated_plan_cv or {}).get("primary_mean"),
+    )
+    soft_decision = (
+        (gate_result or {}).get("soft_challenge_decision")
+        or (gate_result or {}).get("soft_challenge", {}).get("decision")
+    )
+    soft_intervention_occurred = soft_decision == "challenge"
+    alternative_regret_reduction = regret_reduction(
+        initial_normalized_regret, deterministic_normalized_regret
+    )
+    alternative_outcome = classify_intervention_outcome(alternative_regret_reduction, tolerance)
+    catastrophe = catastrophic_transition(
+        initial_normalized_regret,
+        final_normalized_regret,
+        float(config.thresholds["catastrophic_regret_threshold"]),
+    )
+    gate_outcome_details = {
+        "intervention_occurred": soft_intervention_occurred,
+        "soft_challenge_decision": soft_decision,
+        "outcome": gate_outcome,
+        "normalized_performance_delta": gate_primary_delta,
+        "normalized_gate_delta": normalized_gate_delta,
+        "initial_regret": initial_normalized_regret,
+        "final_regret": final_normalized_regret,
+        "deterministic_regret": deterministic_normalized_regret,
+        "regret_reduction": normalized_gate_delta,
+        "alternative_regret_reduction": alternative_regret_reduction,
+        "alternative_outcome": alternative_outcome,
+        **catastrophe,
+        "unnecessary_intervention": bool(
+            soft_intervention_occurred and gate_outcome == "neutral"
+        ),
+        "missed_rescue": bool(
+            soft_decision == "abstain" and alternative_outcome == "improved"
+        ),
+        "good_abstention": bool(
+            soft_decision == "abstain" and alternative_outcome == "worsened"
+        ),
+        "neutral_abstention": bool(
+            soft_decision == "abstain" and alternative_outcome == "neutral"
+        ),
+        "evaluation_only": True,
+        "objective_version": GATE_OBJECTIVE_VERSION,
+    }
     initial_failure_codes = [failure["code"] for failure in _failed_checks(initial_validation)]
     final_failure_codes = [
         check["code"]
@@ -717,6 +773,7 @@ def _run_trial(
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
         "evaluation_mode": "modeling_gate",
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "gate_mode": config.gate_mode,
         "trial": trial_number,
         "trial_id": context["trial_id"],
@@ -854,6 +911,21 @@ def _run_trial(
         "final_hard_invalid": final_valid is False,
         "empirical_best_method": reference.get("best_method"),
         "empirical_reference_method": reference.get("best_method"),
+        "initial_agent_choice": {
+            "method": initial_fields["method"],
+            "performance": agent_family_score,
+            "normalized_regret": initial_normalized_regret,
+        },
+        "final_gated_choice": {
+            "method": final_fields["method"],
+            "performance": gated_family_score,
+            "normalized_regret": final_normalized_regret,
+        },
+        "empirical_reference_choice": {
+            "method": reference.get("best_method"),
+            "performance": best_score,
+            "normalized_regret": 0.0 if best_score is not None else None,
+        },
         "empirical_reference": reference,
         "candidate_cv_metrics": reference.get("candidate_metrics", {}),
         "agent_initial_cv_metric": agent_family_score,
@@ -862,8 +934,11 @@ def _run_trial(
         "gated_final_plan_cv_metric": (gated_plan_cv or {}).get("primary_mean"),
         "agent_regret": agent_regret,
         "gated_regret": gated_regret,
-        "agent_normalized_regret": normalized_regret(case.expected_task_type, best_score, agent_family_score),
-        "gated_normalized_regret": normalized_regret(case.expected_task_type, best_score, gated_family_score),
+        "agent_normalized_regret": initial_normalized_regret,
+        "gated_normalized_regret": final_normalized_regret,
+        "initial_regret": initial_normalized_regret,
+        "final_regret": final_normalized_regret,
+        "deterministic_regret": deterministic_normalized_regret,
         "deterministic_normalized_regret": deterministic_normalized_regret,
         "challenge_regret_delta": (
             normalized_regret(case.expected_task_type, best_score, agent_family_score)
@@ -875,6 +950,17 @@ def _run_trial(
         "paired_cv_improvement": paired_cv_improvement,
         "gate_outcome": gate_outcome,
         "gate_outcome_tolerance": tolerance,
+        "gate_outcome_details": gate_outcome_details,
+        "normalized_gate_delta": normalized_gate_delta,
+        "regret_reduction": normalized_gate_delta,
+        "initial_catastrophic": catastrophe["initial_catastrophic"],
+        "final_catastrophic": catastrophe["final_catastrophic"],
+        "initial_agent_catastrophic": catastrophe["initial_catastrophic"],
+        "final_gate_catastrophic": catastrophe["final_catastrophic"],
+        "catastrophic_prevented": catastrophe["catastrophic_prevented"],
+        "catastrophic_introduced": catastrophe["catastrophic_introduced"],
+        "unnecessary_intervention": gate_outcome_details["unnecessary_intervention"],
+        "missed_rescue": gate_outcome_details["missed_rescue"],
         "agent_initial_cv": agent_plan_cv,
         "gated_final_cv": gated_plan_cv,
         "agent_initial_holdout_metrics": (agent_holdout or {}).get("holdout_metrics", {}),
@@ -1104,7 +1190,8 @@ def run_evaluation(
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
     stable_config = {
-        "config_version": "2026-08-23.evaluation.v3-hard-soft-gate",
+        "config_version": "2026-08-24.evaluation.v4-intervention-quality",
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,
@@ -1140,6 +1227,9 @@ def run_evaluation(
             "candidate_selection_data": "frozen training partition only",
             "holdout_data": "final evaluation only",
             "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor",
+            "objective": "intervention quality; exact family match is diagnostic only",
+            "neutrality": "normalized regret reduction within neutral_tolerance is neutral",
+            "catastrophic_regret": "normalized regret at or above catastrophic_regret_threshold",
         },
         "thresholds": config.thresholds,
         "limitations": [

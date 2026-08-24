@@ -51,6 +51,7 @@ def render_summary_markdown(
         f"- Repetitions per benchmark/scenario: **{config.get('repetitions', 'n/a')}**.",
         f"- Base seed: **{config.get('seed', 'n/a')}**; holdout fraction: **{config.get('test_size', 'n/a')}**.",
         f"- Requested model: `{config.get('agent_model_requested', 'n/a')}`; prompt/schema version: `{config.get('prompt_schema_version', 'n/a')}`.",
+        f"- Gate objective version: `{config.get('gate_objective_version', summary.get('gate_objective_version', 'n/a'))}`; neutrality tolerance: `{summary.get('thresholds', {}).get('neutral_tolerance', 'n/a')}`; catastrophic threshold: `{summary.get('thresholds', {}).get('catastrophic_regret_threshold', 'n/a')}`.",
         f"- Repository commit: `{config.get('repository_commit') or 'unavailable'}`.",
         "- Each repetition keeps the case, frozen train/holdout membership, and training-only profile fixed; the intended varying factor is the stochastic LLM response.",
         "- These rows are `modeling_gate` evaluations: benchmark target/task values are fixed context, while `agent_initial` represents only the post-split model-family and preprocessing proposal. `gated_final` is the approved plan after comparison, optional reconciliation, and deterministic validation. Formulation accuracy requires a separate formulation-gate evaluation mode.",
@@ -68,6 +69,23 @@ def render_summary_markdown(
         f"| Completed trials | {summary.get('completed_trial_count', 0)} |",
         "",
         "Claims about LLM behavior below use `agent_source == \"openai\"` only.",
+        "",
+        "## Gate Health",
+        "",
+        "Intervention quality is primary. Exact family match and top-2 compatibility below are secondary diagnostics.",
+        f"- Challenges: **{summary.get('total_challenges', summary.get('challenges', 0))} / {summary.get('total_disagreements', summary.get('soft_challenge_count', 0))} disagreements**; abstentions: **{summary.get('total_abstentions', summary.get('abstentions', 0))}**.",
+        f"- Improved: **{summary.get('improved_interventions', summary.get('challenge_improved_count', 0))}**; worsened: **{summary.get('worsened_interventions', summary.get('challenge_worsened_count', 0))}**; neutral: **{summary.get('neutral_interventions', summary.get('challenge_neutral_count', 0))}**.",
+        f"- Intervention precision: **{_percent(summary.get('intervention_precision'))}**; challenge yield: **{_percent(summary.get('challenge_yield'))}**; harmful-intervention rate: **{_percent(summary.get('harmful_intervention_rate'))}**; unnecessary-intervention rate: **{_percent(summary.get('unnecessary_intervention_rate'))}**.",
+        f"- Challenge recall: **{_percent(summary.get('challenge_recall'))}**; missed rescues: **{summary.get('missed_rescue_count', 0)}**.",
+        f"- Mean regret reduction: **{_number(summary.get('mean_regret_reduction'))}**; median: **{_number(summary.get('median_regret_reduction'))}**; uncertainty interval: `{summary.get('regret_reduction_ci')}`.",
+        f"- Catastrophic regret: initial **{summary.get('initial_catastrophic_count', 0)}**, final **{summary.get('final_catastrophic_count', 0)}**, prevented **{summary.get('catastrophic_prevented_count', 0)}**, introduced **{summary.get('catastrophic_introduced_count', 0)}**, net **{summary.get('net_catastrophic_prevention', 0)}**.",
+        f"- Utility contribution: `{summary.get('gate_utility', {})}`.",
+        "",
+        "| Metric | Trial-weighted | Dataset-weighted |",
+        "|---|---:|---:|",
+        f"| Intervention precision | {_percent(summary.get('trial_weighted_gate_health', {}).get('intervention_precision', summary.get('intervention_precision')))} | {_percent(summary.get('dataset_weighted_gate_health', {}).get('intervention_precision'))} |",
+        f"| Harmful-intervention rate | {_percent(summary.get('trial_weighted_gate_health', {}).get('harmful_intervention_rate', summary.get('harmful_intervention_rate')))} | {_percent(summary.get('dataset_weighted_gate_health', {}).get('harmful_intervention_rate'))} |",
+        f"| Mean regret reduction | {_number(summary.get('trial_weighted_gate_health', {}).get('mean_regret_reduction', summary.get('mean_regret_reduction')))} | {_number(summary.get('dataset_weighted_gate_health', {}).get('mean_regret_reduction'))} |",
         "",
         "## LLM Decision Stability",
         "",
@@ -105,10 +123,10 @@ def render_summary_markdown(
         "",
         "## Effect of the Validation Gate",
         "",
-        f"- OpenAI-only gate outcomes: **{openai_outcomes['improved']} improved**, **{openai_outcomes['worsened']} worsened**, **{openai_outcomes['tie']} tied**.",
+        f"- OpenAI-only gate outcomes: **{openai_outcomes['improved']} improved**, **{openai_outcomes['worsened']} worsened**, **{openai_outcomes['tie']} neutral**.",
         f"- OpenAI-only potentially unnecessary interventions: **{openai_only.get('potentially_unnecessary_intervention_count', 0)}**.",
-        f"- Operational outcomes: improved **{outcomes.get('improved', outcomes.get('gated_better_count', 0))}**, worsened **{outcomes.get('worsened', outcomes.get('agent_better_count', 0))}**, tie **{outcomes.get('tie', outcomes.get('tie_count', 0))}**.",
-        "- Improved/worsened/tie is defined from paired training-only CV regret using the configured tolerance; holdout results do not define this label.",
+        f"- Operational outcomes: improved **{outcomes.get('improved', outcomes.get('gated_better_count', 0))}**, worsened **{outcomes.get('worsened', outcomes.get('agent_better_count', 0))}**, neutral **{outcomes.get('neutral', outcomes.get('tie', outcomes.get('tie_count', 0)))}**.",
+        "- Improved/worsened/neutral is defined from normalized regret reduction using the configured neutrality tolerance; holdout results do not define this label.",
         "",
         "## Soft-Challenge Reconciliation Outcomes",
         "",
@@ -136,14 +154,14 @@ def render_summary_markdown(
         "",
         "## Dataset-Level Results",
         "",
-        "| Dataset | Trials | Initial match | Gated match | Improved / worsened / tie | Mean paired CV improvement |",
-        "|---|---:|---:|---:|---|---:|",
+        "| Dataset | Trials | Challenges | Abstentions | Improved / worsened / neutral | Precision | Harm | Mean regret reduction | Catastrophic prevented / introduced | Exact match (diagnostic) |",
+        "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|",
     ])
     for dataset, item in summary.get("by_dataset", {}).items():
-        live_item = item.get("openai_only", {})
+        live_item = item.get("openai_only") or item
         item_outcomes = live_item.get("gating_outcome_counts", {})
         rows.append(
-            f"| {dataset} | {item.get('openai_trial_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} | {_percent(live_item.get('gated_empirical_reference_match_rate'))} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('tie', 0)} | {_number(live_item.get('paired_cv_improvement_mean'))} |"
+            f"| {dataset} | {item.get('openai_trial_count', 0)} | {live_item.get('total_challenges', 0)} | {live_item.get('total_abstentions', 0)} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('neutral', item_outcomes.get('tie', 0))} | {_percent(live_item.get('intervention_precision'))} | {_percent(live_item.get('harmful_intervention_rate'))} | {_number(live_item.get('mean_regret_reduction'))} | {live_item.get('catastrophic_prevented_count', 0)} / {live_item.get('catastrophic_introduced_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} -> {_percent(live_item.get('gated_empirical_reference_match_rate'))} |"
         )
     rows.extend([
         "",

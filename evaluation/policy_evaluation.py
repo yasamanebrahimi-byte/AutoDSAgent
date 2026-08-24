@@ -19,6 +19,7 @@ from evaluation.policy_calibration import (
     final_evaluation_cases,
     policy_candidates,
 )
+from evaluation.metrics import GATE_OBJECTIVE_VERSION
 
 
 def _final_holdout_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -68,6 +69,11 @@ def render_final_report(artifact: dict[str, Any]) -> str:
         "",
         "## Policy quality metrics",
         "",
+        f"- Gate objective: `{artifact.get('gate_objective_version', GATE_OBJECTIVE_VERSION)}`",
+        f"- Intervention precision: `{aggregate.get('intervention_precision')}`; challenge yield: `{aggregate.get('challenge_yield')}`; harmful-intervention rate: `{aggregate.get('harmful_intervention_rate')}`",
+        f"- Challenge recall: `{aggregate.get('challenge_recall')}`; unnecessary-intervention rate: `{aggregate.get('unnecessary_intervention_rate')}`",
+        f"- Mean regret reduction: `{aggregate.get('mean_regret_reduction')}`; median: `{aggregate.get('median_regret_reduction')}`",
+        f"- Catastrophic prevented: `{aggregate.get('catastrophic_prevented_count', 0)}`; introduced: `{aggregate.get('catastrophic_introduced_count', 0)}`; net: `{aggregate.get('net_catastrophic_prevention')}`",
         f"- Mean dataset-level normalized regret: `{aggregate['mean_normalized_regret']}`",
         f"- Median dataset-level normalized regret: `{aggregate['median_normalized_regret']}`",
         f"- Empirical-reference match rate: `{aggregate['exact_reference_match_rate']}`",
@@ -157,6 +163,7 @@ def run_policy_evaluation(
     aggregate = aggregate_candidate_records(records, current)
     artifact: dict[str, Any] = {
         "evaluation_schema_version": CALIBRATION_SCHEMA_VERSION,
+        "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "evaluation_role": BenchmarkRole.FINAL_EVALUATION.value,
         "benchmark_role": BenchmarkRole.FINAL_EVALUATION.value,
         "benchmark_suite_version": BENCHMARK_SUITE_VERSION,
@@ -171,6 +178,7 @@ def run_policy_evaluation(
             "classification_primary_metric": "macro_f1; larger is better",
             "regression_primary_metric": "rmse; smaller is better",
             "normalized_regret": "training-only CV reference regret; holdout is never used for policy choice",
+            "intervention_quality": "the frozen policy is judged by intervention outcomes; family matches are secondary diagnostics",
         },
         "aggregate_metrics": aggregate,
         "holdout_metrics": _final_holdout_summary(records),
