@@ -8,7 +8,7 @@ The central idea is simple:
 2. Freeze one deterministic supervised train/holdout partition using positional row membership, the configured seed, and stratification when required.
 3. Give the independent modeling agent and deterministic recommender the same compact profile built from training rows only.
 4. A validation gate compares both independent plans before any model is fit. Disagreement triggers a second agent call that investigates the deterministic recommendation using the same training-only evidence.
-5. Apply structural cleaning while preserving original row positions, then compute EDA and plots from cleaned training rows only. The EDA agent interprets those training-only summaries before the approved model is fit.
+5. Fit and freeze structural-cleaning decisions from training rows only, transform the training and holdout partitions independently while preserving original row positions, then compute EDA and plots from cleaned training rows only. The EDA agent interprets those training-only summaries before the approved model is fit.
 6. Specialist calls write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
@@ -118,7 +118,7 @@ Name-based indicators such as a feature containing the target name are recorded 
 
 ## Preprocessing contract and validation gate
 
-Structural cleaning and learned preprocessing are intentionally separate. The cleaning plan is selected from the training-only profile and may trim strings, coerce numeric strings, remove exact duplicates, drop all-null or constant columns, and remove rows with missing targets. The same deterministic structural actions are applied with original row positions carried through, so validation and fitting can verify the frozen membership after cleaning. Imputation, scaling, categorical encoding, and any other learned transformation are never cleaning actions; they are fitted inside the scikit-learn pipeline after the train/holdout split and inside every cross-validation fold. Global deterministic normalization is safe to apply consistently; training-derived structural decisions use training evidence; learned preprocessing is always fit inside the training pipeline.
+Structural cleaning and learned preprocessing are intentionally separate. The cleaning plan is selected from the training-only profile and may trim strings, coerce numeric strings, remove exact duplicates, drop all-null or constant columns, and remove rows with missing targets. A typed cleaning specification freezes the columns, coercion eligibility, row-removal decisions, and training-only evidence; the specification is then transformed independently on training and holdout partitions with original row positions carried through. Exact duplicates are detected within each partition only and are never compared across train and holdout, so a holdout row cannot remove or retain a training row. Reproduction loads the recorded specification and fails closed if the recorded transforms cannot be replayed. Imputation, scaling, categorical encoding, and any other learned transformation are never cleaning actions; they are fitted inside the scikit-learn pipeline after the train/holdout split and inside every cross-validation fold. Global deterministic normalization is safe to apply consistently; training-derived structural decisions use training evidence; learned preprocessing is always fit inside the training pipeline.
 
 The modeling agent and deterministic recommender independently return the typed `PreprocessingContract` persisted in `decision.json`. Its compact vocabulary includes numeric and categorical imputation, numeric scaling, one-hot or ordinal encoding, safe unknown-category handling, infinity handling, identifier/high-cardinality/text/datetime policies, and the invariant `fit_inside_pipeline=true`. Known legacy names are accepted only as an allow-listed migration and are serialized back to the typed object; arbitrary transformation names and Python code are rejected.
 
@@ -333,11 +333,11 @@ The most important files are:
 - `profile.json`: compact full-dataset facts recorded after final evaluation for report context; `planning_profile.json` is the training-only profile supplied to modeling and reconciliation.
 - `planning_profile.json`: the compact profile supplied to modeling and reconciliation, built from frozen training rows only.
 - `split_contract` in `decision.json`: target/task, seed, holdout policy, source fingerprint, and train/holdout position digests.
-- `cleaning.json`: requested and applied structural actions.
+- `cleaning.json`: requested actions, the training-fitted structural-cleaning specification and evidence, partition-local transforms, duplicate policy, and rows/columns removed.
 - `eda.json`: deterministic training-partition-only EDA values, scope metadata, agent findings, and plot paths.
 - `modeling.json`: selected model, CV metrics, holdout metrics, feature handling, and artifact path.
 - `report.md`: analyst-style narrative.
-- `reproduce_analysis.py`: executable replay of the approved decision plus the deterministic cleaning, EDA, and modeling stages.
+- `reproduce_analysis.py`: executable replay of the approved decision plus the recorded structural-cleaning specification, EDA, and modeling stages; it fails closed rather than fitting new cleaning decisions.
 - `model/selected_model.joblib`: fitted scikit-learn pipeline.
 
 Generated run folders are ignored by Git so datasets, models, and reports do not accidentally become repository history. The agent decisions remain inspectable in `decision.json`; replay does not silently make a new semantic decision.

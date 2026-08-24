@@ -220,6 +220,7 @@ def validate_training_plan(
     preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
     split: FrozenSplit | None = None,
     row_positions: Sequence[int] | None = None,
+    evidence_dataframe: pd.DataFrame | None = None,
 ) -> ValidationResult:
     """Evaluate one complete plan against the actual modeling dataframe.
 
@@ -298,6 +299,23 @@ def validate_training_plan(
         return result
 
     target = dataframe.iloc[:, target_positions[0]].copy()
+    feature_evidence_frame = dataframe if evidence_dataframe is None else evidence_dataframe.copy()
+    evidence_column_names = [str(column) for column in feature_evidence_frame.columns]
+    if evidence_column_names != column_names:
+        result.add_failure(
+            "training_evidence_schema_matches_data",
+            "Training-only feature evidence must use the same ordered schema as the modeling dataframe.",
+            {
+                "modeling_columns": column_names,
+                "evidence_columns": evidence_column_names,
+            },
+        )
+        return result
+    evidence_target = feature_evidence_frame.iloc[:, target_positions[0]].copy()
+    evidence_valid_mask, evidence_normalized_target, _ = _normalize_target(
+        evidence_target,
+        str(task_type),
+    )
     valid_mask, normalized_target, target_evidence = _normalize_target(target, str(task_type))
     result.target_rows_removed = int((~valid_mask).sum())
     result.valid_target_rows = int(valid_mask.sum())
@@ -357,7 +375,7 @@ def validate_training_plan(
         )
 
     if task_type in SUPPORTED_TASKS:
-        target_kind = semantic_type(target)
+        target_kind = semantic_type(evidence_target.loc[evidence_valid_mask])
         compatible = task_type == "classification" or (
             task_type == "regression" and target_evidence.get("invalid_nonnumeric_rows", 0) == 0
         )
@@ -401,14 +419,27 @@ def validate_training_plan(
         return result
 
     requested_positions = [column_names.index(name) for name in requested_names]
-    target_for_comparison = target.loc[valid_mask].reset_index(drop=True)
-    normalized_for_model = normalized_target.loc[valid_mask].reset_index(drop=True)
-    frame_for_features = dataframe.iloc[valid_mask.to_numpy(), requested_positions].reset_index(drop=True)
+    evidence_mask = evidence_valid_mask.to_numpy(dtype=bool, copy=True)
+    if split is not None and evidence_dataframe is None:
+        current_positions_for_evidence = (
+            np.arange(len(dataframe), dtype=int)
+            if row_positions is None
+            else np.asarray(row_positions, dtype=int)
+        )
+        if len(current_positions_for_evidence) == len(dataframe):
+            evidence_mask &= np.isin(
+                current_positions_for_evidence,
+                np.asarray(split.train_row_positions, dtype=int),
+            )
+    target_for_comparison = evidence_target.iloc[np.flatnonzero(evidence_mask)].reset_index(drop=True)
+    normalized_for_model = evidence_normalized_target.iloc[np.flatnonzero(evidence_mask)].reset_index(drop=True)
+    frame_for_features = feature_evidence_frame.iloc[evidence_mask, requested_positions].reset_index(drop=True)
+    feature_evidence_frame = feature_evidence_frame.iloc[evidence_mask].reset_index(drop=True)
     direct_copies: list[str] = []
     name_warnings: list[str] = []
     for name, position in zip(requested_names, requested_positions):
-        feature = dataframe.iloc[:, position]
-        if _safe_series_equal(target_for_comparison, feature.loc[valid_mask].reset_index(drop=True)):
+        feature = feature_evidence_frame.iloc[:, position]
+        if _safe_series_equal(target_for_comparison, feature.reset_index(drop=True)):
             direct_copies.append(name)
             result.excluded_features.append(
                 {"column": name, "reason_code": "direct_target_copy", "reason": "exact target copy"}
@@ -434,7 +465,7 @@ def validate_training_plan(
     for name, position in zip(requested_names, requested_positions):
         if name in direct_copies:
             continue
-        series = dataframe.iloc[:, position].loc[valid_mask]
+        series = feature_evidence_frame.iloc[:, position]
         kind = semantic_type(series)
         if is_identifier(name, series):
             result.excluded_features.append(
@@ -489,7 +520,7 @@ def validate_training_plan(
         "At least one feature must remain after deterministic schema, identifier, cardinality, and leakage exclusions.",
     )
     preprocessing_records = records_from_dataframe(
-        dataframe,
+        feature_evidence_frame,
         usable_names,
         result.excluded_features,
     )
@@ -706,7 +737,7 @@ def validate_training_plan(
         else:
             split_positions = current_positions[valid_mask.to_numpy(dtype=bool)]
             split_evidence = _validate_frozen_split(
-                normalized_for_model,
+                normalized_target.loc[valid_mask].reset_index(drop=True),
                 str(target_column),
                 str(task_type),
                 test_size,
@@ -727,16 +758,17 @@ def validate_training_plan(
     if method == "boosted_tree":
         estimated_one_hot = int(
             sum(
-                dataframe.iloc[:, position].loc[valid_mask].nunique(dropna=True) + 1
+                feature_evidence_frame.iloc[:, position].nunique(dropna=True) + 1
                 for name, position in zip(requested_names, requested_positions)
                 if name in usable_names
-                and semantic_type(dataframe.iloc[:, position].loc[valid_mask]) in {"categorical", "boolean"}
+                and semantic_type(feature_evidence_frame.iloc[:, position])
+                in {"categorical", "boolean"}
             )
             + sum(
                 1
                 for name, position in zip(requested_names, requested_positions)
                 if name in usable_names
-                and pd.api.types.is_numeric_dtype(dataframe.iloc[:, position])
+                and pd.api.types.is_numeric_dtype(feature_evidence_frame.iloc[:, position])
             )
         )
         result.add_check(

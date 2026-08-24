@@ -48,6 +48,7 @@ def fit_selected_model(
     preprocessing: PreprocessingContract | dict[str, Any] | list[str] | None = None,
     split: FrozenSplit | None = None,
     row_positions: Sequence[int] | None = None,
+    evidence_dataframe: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     validation = validate_training_plan(
         dataframe,
@@ -60,6 +61,7 @@ def fit_selected_model(
         preprocessing=preprocessing,
         split=split,
         row_positions=row_positions,
+        evidence_dataframe=evidence_dataframe,
     )
     validation.raise_if_failed()
     frame, target = modeling_arrays(dataframe, validation)

@@ -9,12 +9,13 @@ from typing import Any, Callable
 import pandas as pd
 
 from app.deterministic import (
-    apply_cleaning,
     deterministic_recommendation,
     establish_target_task,
     eda_summary,
+    fit_cleaning_spec,
     make_plots,
     profile_dataframe,
+    transform_cleaning,
 )
 from app.llm import OpenAIAgents
 from app.modeling import fit_selected_model
@@ -56,7 +57,11 @@ def run_analysis(
     dataset_path = Path(dataset_path).resolve()
     if not dataset_path.exists():
         raise FileNotFoundError(dataset_path)
-    dataframe = pd.read_csv(dataset_path)
+    # Preserve source values as object/string representations until the
+    # training-fitted cleaning specification decides which columns are
+    # numeric-like.  Inferring a dtype from the complete CSV can otherwise let
+    # holdout-only strings change the training profile before cleaning fits.
+    dataframe = pd.read_csv(dataset_path, dtype=object)
     if dataframe.empty or len(dataframe.columns) < 2:
         raise ValueError("The input must be a non-empty tabular file with at least two columns.")
 
@@ -92,7 +97,9 @@ def run_analysis(
         },
         "cleaning_policy": {
             "decision_evidence": "training_partition_only",
-            "structural_actions": "applied_with_original_row_positions_preserved",
+            "structural_actions": "fitted_on_training_and_transformed_per_partition_with_original_row_positions_preserved",
+            "duplicate_policy": "within_partition_only_keep_first",
+            "holdout_used_for_cleaning_decisions": False,
             "learned_preprocessing": "fit_inside_training_pipeline_only",
         },
     }
@@ -203,15 +210,63 @@ def run_analysis(
             )
         cleaning_input = dataframe.copy()
         cleaning_input[row_position_column] = range(len(cleaning_input))
-        cleaned, cleaning_log = apply_cleaning(
-            cleaning_input,
+        training_cleaning_input = cleaning_input.iloc[list(split.train_row_positions)].copy()
+        cleaning_specification = fit_cleaning_spec(
+            training_cleaning_input,
             selected_target,
             list(cleaning_plan.actions),
             row_position_column=row_position_column,
         )
+        valid_positions = set(split.valid_row_positions)
+        partition_positions = {
+            "training": list(split.train_row_positions),
+            "holdout": list(split.holdout_row_positions),
+            "unassigned": [
+                int(position)
+                for position in range(len(cleaning_input))
+                if int(position) not in valid_positions
+            ],
+        }
+        transformed_partitions: list[pd.DataFrame] = []
+        transformed_by_partition: dict[str, pd.DataFrame] = {}
+        partition_logs: dict[str, dict[str, Any]] = {}
+        for partition_name, positions in partition_positions.items():
+            partition_input = cleaning_input.iloc[positions].copy()
+            transformed, partition_log = transform_cleaning(
+                partition_input,
+                cleaning_specification,
+                partition=partition_name,
+            )
+            transformed_partitions.append(transformed)
+            transformed_by_partition[partition_name] = transformed
+            partition_logs[partition_name] = partition_log
+        cleaned = (
+            pd.concat(transformed_partitions, axis=0, ignore_index=True)
+            .sort_values(row_position_column, kind="stable")
+            .reset_index(drop=True)
+        )
+        removed_columns = list(
+            dict.fromkeys(
+                cleaning_specification.all_null_columns
+                + cleaning_specification.constant_columns
+            )
+        )
+        cleaning_log = {
+            "original_shape": [int(dataframe.shape[0]), int(dataframe.shape[1])],
+            "cleaned_shape": [int(cleaned.shape[0]), int(cleaned.shape[1])],
+            "requested_actions": list(cleaning_plan.actions),
+            "applied_actions": list(cleaning_plan.actions),
+            "removed_rows": int(sum(log["removed_rows"] for log in partition_logs.values())),
+            "removed_columns": removed_columns,
+            "partition_logs": partition_logs,
+            "decision_scope": "training_partition_only",
+            "holdout_used_for_cleaning_decisions": False,
+            "duplicate_policy": "within_partition_only_keep_first",
+        }
         cleaned_row_positions = cleaned.pop(row_position_column).to_numpy(dtype=int)
-        cleaning_log["original_shape"] = [int(dataframe.shape[0]), int(dataframe.shape[1])]
-        cleaning_log["cleaned_shape"] = [int(cleaned.shape[0]), int(cleaned.shape[1])]
+        training_evidence_frame = transformed_by_partition["training"].drop(
+            columns=[row_position_column]
+        )
         post_cleaning_result = validate_training_plan(
             cleaned,
             selected_target,
@@ -222,6 +277,7 @@ def run_analysis(
             preprocessing=validation["approved_preprocessing"],
             split=split,
             row_positions=cleaned_row_positions,
+            evidence_dataframe=training_evidence_frame,
         )
         post_cleaning_result.raise_if_failed()
         validation["pre_cleaning_deterministic_validation"] = validation[
@@ -242,7 +298,23 @@ def run_analysis(
         cleaned.to_csv(cleaned_path, index=False)
         write_json(
             run_dir / "cleaning.json",
-            {"plan": cleaning_plan.model_dump(mode="json"), "log": cleaning_log},
+            {
+                "decision_scope": "training_partition_only",
+                "holdout_used_for_cleaning_decisions": False,
+                "requested_actions": list(cleaning_plan.actions),
+                "plan": cleaning_plan.model_dump(mode="json"),
+                "fitted_specification": cleaning_specification.model_dump(mode="json"),
+                "training_only_evidence": cleaning_specification.training_only_evidence,
+                "applied_transformations": partition_logs,
+                "rows_removed": {
+                    "training": partition_logs["training"]["removed_rows"],
+                    "holdout": partition_logs["holdout"]["removed_rows"],
+                    "unassigned": partition_logs["unassigned"]["removed_rows"],
+                    "total_before_validation": cleaning_log["removed_rows"],
+                },
+                "columns_removed": removed_columns,
+                "log": cleaning_log,
+            },
         )
         decision_payload["validation"] = validation
         write_json(run_dir / "decision.json", decision_payload)
@@ -287,6 +359,7 @@ def run_analysis(
             random_state=random_state,
             split=split,
             row_positions=cleaned_row_positions,
+            evidence_dataframe=training_evidence_frame,
         )
         write_json(run_dir / "modeling.json", modeling)
         decision_payload["model_training_occurred"] = True

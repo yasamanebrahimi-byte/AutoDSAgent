@@ -40,7 +40,7 @@ import json
 from pathlib import Path
 import pandas as pd
 from app.schemas import PreprocessingContract
-from app.deterministic import apply_cleaning, deterministic_recommendation, eda_summary
+from app.deterministic import eda_summary, transform_cleaning
 from app.modeling import fit_selected_model
 from app.validation import (
     freeze_supervised_split,
@@ -58,7 +58,7 @@ METHOD = {method!r}
 TASK_TYPE = {task_type!r}
 TEST_SIZE = {test_size!r}
 
-raw = pd.read_csv(DATASET)
+raw = pd.read_csv(DATASET, dtype=object)
 decision = json.loads((RUN_DIR / "decision.json").read_text(encoding="utf-8"))
 approved = decision["validation"]
 APPROVED_PREPROCESSING = approved["approved_preprocessing"]
@@ -99,21 +99,54 @@ raw_validation = validate_training_plan(
     preprocessing=APPROVED_PREPROCESSING,
     split=split,
     row_positions=list(range(len(raw))),
+    evidence_dataframe=raw.iloc[list(split.train_row_positions)].copy(),
 )
 raw_validation.raise_if_failed()
 cleaning = json.loads((RUN_DIR / "cleaning.json").read_text(encoding="utf-8"))
+if cleaning.get("decision_scope") != "training_partition_only":
+    raise RuntimeError("The cleaning artifact does not record training-only decision scope.")
+if cleaning.get("holdout_used_for_cleaning_decisions") is not False:
+    raise RuntimeError("The cleaning artifact does not prove holdout isolation.")
+recorded_specification = cleaning.get("fitted_specification")
+if not recorded_specification:
+    raise RuntimeError("The cleaning artifact does not contain a fitted specification.")
+from app.schemas import CleaningSpecification
+specification = CleaningSpecification.model_validate(recorded_specification)
 ROW_POSITION_COLUMN = "__autods_row_position__"
 if ROW_POSITION_COLUMN in raw.columns:
     raise RuntimeError("The reserved row-position column is present in the source dataset.")
 raw_with_positions = raw.copy()
 raw_with_positions[ROW_POSITION_COLUMN] = range(len(raw_with_positions))
-cleaned, cleaning_log = apply_cleaning(
-    raw_with_positions,
-    target_column=TARGET,
-    actions=cleaning["plan"]["actions"],
-    row_position_column=ROW_POSITION_COLUMN,
+valid_positions = set(split.valid_row_positions)
+partition_positions = {{
+    "training": list(split.train_row_positions),
+    "holdout": list(split.holdout_row_positions),
+    "unassigned": [
+        int(position) for position in range(len(raw_with_positions)) if int(position) not in valid_positions
+    ],
+}}
+transformed_partitions = []
+transformed_by_partition = {{}}
+partition_logs = {{}}
+for partition_name, positions in partition_positions.items():
+    transformed, partition_log = transform_cleaning(
+        raw_with_positions.iloc[positions].copy(),
+        specification,
+        partition=partition_name,
+    )
+    transformed_partitions.append(transformed)
+    transformed_by_partition[partition_name] = transformed
+    partition_logs[partition_name] = partition_log
+recorded_transformations = cleaning.get("applied_transformations")
+if recorded_transformations != partition_logs:
+    raise RuntimeError("The recorded cleaning specification cannot reproduce the partition transforms.")
+cleaned = (
+    pd.concat(transformed_partitions, axis=0, ignore_index=True)
+    .sort_values(ROW_POSITION_COLUMN, kind="stable")
+    .reset_index(drop=True)
 )
 cleaned_row_positions = cleaned.pop(ROW_POSITION_COLUMN).to_numpy(dtype=int)
+training_evidence_frame = transformed_by_partition["training"].drop(columns=[ROW_POSITION_COLUMN])
 cleaned_validation = validate_training_plan(
     cleaned,
     TARGET,
@@ -124,6 +157,7 @@ cleaned_validation = validate_training_plan(
     preprocessing=APPROVED_PREPROCESSING,
     split=split,
     row_positions=cleaned_row_positions,
+    evidence_dataframe=training_evidence_frame,
 )
 cleaned_validation.raise_if_failed()
 cleaned_row_positions = validated_row_positions(
@@ -145,6 +179,7 @@ result = fit_selected_model(
     random_state={seed},
     split=split,
     row_positions=cleaned_row_positions,
+    evidence_dataframe=training_evidence_frame,
 )
 if result["approved_preprocessing"] != APPROVED_PREPROCESSING:
     raise RuntimeError("The reproduced executable preprocessing does not match the recorded contract.")
@@ -279,6 +314,8 @@ The deterministic requirements and checks are persisted with the gate. All learn
 The cleaning agent requested: <code>{', '.join(cleaning_plan.actions) if cleaning_plan.actions else 'no actions'}</code>.
 
 Applied structural actions: <code>{', '.join(cleaning_log['applied_actions']) if cleaning_log['applied_actions'] else 'none'}</code>.
+
+The structural-cleaning specification was fitted from <code>{cleaning_log.get('decision_scope', 'training_partition_only')}</code> evidence and then transformed independently on each partition. Holdout values were not used to derive column removals, coercion eligibility, thresholds, or training duplicate membership. Exact-duplicate removal uses the policy <code>{cleaning_log.get('duplicate_policy', 'within_partition_only_keep_first')}</code>.
 
 {cleaning_plan.reasoning}
 

@@ -357,8 +357,12 @@ def compute_deterministic_diagnostics(
     requirements = requirements_from_records(records, task_type, "linear")
     numeric_names = [str(value) for value in requirements.evidence["numeric_features"]]
     categorical_names = [str(value) for value in requirements.evidence["categorical_features"]]
+    diagnostic_frame = dataframe.copy()
+    for name in numeric_names:
+        if not pd.api.types.is_numeric_dtype(diagnostic_frame[name]):
+            diagnostic_frame[name] = pd.to_numeric(diagnostic_frame[name], errors="coerce")
     usable_names = numeric_names + categorical_names
-    feature_frame = dataframe.drop(columns=[target_column])
+    feature_frame = diagnostic_frame.drop(columns=[target_column])
     rows = int(len(dataframe))
     feature_count = len(feature_frame.columns)
     usable = len(usable_names)
@@ -401,7 +405,11 @@ def compute_deterministic_diagnostics(
         if unique <= 2:
             binary_count += 1
 
-    correlations = dataframe[numeric_names].replace([np.inf, -np.inf], np.nan).corr() if len(numeric_names) >= 2 else pd.DataFrame()
+    correlations = (
+        diagnostic_frame[numeric_names].replace([np.inf, -np.inf], np.nan).corr()
+        if len(numeric_names) >= 2
+        else pd.DataFrame()
+    )
     pair_values: list[float] = []
     if not correlations.empty:
         for left_index, left in enumerate(correlations.columns):
@@ -413,7 +421,7 @@ def compute_deterministic_diagnostics(
     high_pairs = sum(value >= policy.high_correlation_threshold for value in pair_values)
     high_pair_fraction = high_pairs / max(len(pair_values), 1)
     relationship = _relationship_signals(
-        dataframe,
+        diagnostic_frame,
         target_column,
         task_type,
         numeric_names,
@@ -458,10 +466,10 @@ def compute_deterministic_diagnostics(
     else:
         structural_complexity_signal = "low"
 
-    outlier_fractions = [_iqr_outlier_fraction(dataframe[name]) for name in numeric_names]
+    outlier_fractions = [_iqr_outlier_fraction(diagnostic_frame[name]) for name in numeric_names]
     outlier_feature_fraction = float(np.mean([value >= policy.outlier_moderate_fraction for value in outlier_fractions])) if outlier_fractions else 0.0
     numeric_values = [
-        _finite_numeric(dataframe[name])
+        _finite_numeric(diagnostic_frame[name])
         for name in numeric_names
     ]
     numeric_cells = sum(len(values) for values in numeric_values)

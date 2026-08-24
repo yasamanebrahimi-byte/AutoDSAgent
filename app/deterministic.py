@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from app.schemas import DeterministicRecommendation, Method, TaskType
+from app.schemas import CleaningSpecification, DeterministicRecommendation, Method, TaskType
 from app.deterministic_policy import DeterministicPolicy
 
 
@@ -43,9 +43,19 @@ def is_identifier(name: str, series: pd.Series) -> bool:
         return True
     non_null = series.dropna()
     if len(non_null) >= 20 and non_null.nunique() / len(non_null) >= 0.98:
-        if pd.api.types.is_integer_dtype(series) and (
-            non_null.is_monotonic_increasing or non_null.is_monotonic_decreasing
-        ):
+        numeric = pd.to_numeric(non_null, errors="coerce")
+        source_integer_like = pd.api.types.is_integer_dtype(series)
+        if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+            source_integer_like = bool(
+                non_null.astype(str).str.fullmatch(r"[+-]?\d+").all()
+            )
+        integer_like = bool(
+            numeric.notna().all()
+            and np.isclose(numeric % 1, 0).all()
+            and source_integer_like
+        )
+        monotonic = bool(numeric.notna().all() and (numeric.is_monotonic_increasing or numeric.is_monotonic_decreasing))
+        if integer_like and monotonic:
             return True
     return False
 
@@ -280,82 +290,260 @@ def deterministic_recommendation(
     )
 
 
-def apply_cleaning(
-    dataframe: pd.DataFrame,
+def _trim_string_columns(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    for column in columns:
+        if column not in frame.columns:
+            raise ValueError(f"The frozen cleaning specification references missing column '{column}'.")
+        frame[column] = frame[column].map(
+            lambda value: value.strip() if isinstance(value, str) else value
+        )
+        frame[column] = frame[column].replace(r"^\s*$", np.nan, regex=True)
+    return frame
+
+
+def fit_cleaning_spec(
+    training_dataframe: pd.DataFrame,
     target_column: str,
     actions: list[str],
     row_position_column: str | None = None,
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Apply only allow-listed structural operations selected by the agent."""
+) -> CleaningSpecification:
+    """Fit structural-cleaning decisions from one partition only.
 
-    frame = dataframe.copy()
-    original_shape = [int(frame.shape[0]), int(frame.shape[1])]
-    applied: list[str] = []
-    removed_columns: list[str] = []
-    removed_rows = 0
+    This function is intentionally the only place where structural properties
+    such as numeric-like ratios, all-null columns, constants, and training
+    duplicate membership are derived.  Callers must pass the frozen training
+    partition, never a frame containing holdout rows.
+    """
 
+    frame = training_dataframe.copy()
+    if row_position_column is not None and row_position_column not in frame.columns:
+        raise ValueError(f"The row-position column '{row_position_column}' is missing from the training frame.")
+    if target_column not in frame.columns:
+        raise ValueError(f"The target column '{target_column}' is missing from the training frame.")
+
+    source_positions = (
+        frame[row_position_column].to_numpy(dtype=int, copy=True)
+        if row_position_column is not None
+        else np.arange(len(frame), dtype=int)
+    )
+    evidence: dict[str, Any] = {
+        "rows": int(len(frame)),
+        "columns": [str(column) for column in frame.columns if column != row_position_column],
+        "string_columns_considered": [],
+        "numeric_coercion_ratios": {},
+        "all_null_columns": [],
+        "constant_columns": {},
+        "training_duplicate_row_positions": [],
+    }
+
+    trim_columns: list[str] = []
     if "trim_strings" in actions:
-        for column in frame.select_dtypes(include=["object", "string"]).columns:
-            frame[column] = frame[column].map(lambda value: value.strip() if isinstance(value, str) else value)
-            frame[column] = frame[column].replace(r"^\s*$", np.nan, regex=True)
-        applied.append("trim_strings")
+        trim_columns = [
+            str(column)
+            for column in frame.select_dtypes(include=["object", "string"]).columns
+            if column != row_position_column
+        ]
+        evidence["string_columns_considered"] = trim_columns
+        _trim_string_columns(frame, trim_columns)
 
+    numeric_coercion_columns: list[str] = []
     if "coerce_numeric_strings" in actions:
         for column in frame.columns:
-            if column == target_column or frame[column].dtype != "object":
+            if column == target_column or column == row_position_column or frame[column].dtype != "object":
                 continue
             non_null = frame[column].dropna()
-            if len(non_null) and pd.to_numeric(non_null, errors="coerce").notna().mean() >= 0.95:
-                frame[column] = pd.to_numeric(frame[column], errors="coerce")
-        applied.append("coerce_numeric_strings")
+            ratio = (
+                float(pd.to_numeric(non_null, errors="coerce").notna().mean())
+                if len(non_null)
+                else 0.0
+            )
+            evidence["numeric_coercion_ratios"][str(column)] = ratio
+            if len(non_null) and ratio >= 0.95:
+                numeric_coercion_columns.append(str(column))
+        for column in numeric_coercion_columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
+    training_duplicate_row_positions: list[int] = []
     if "drop_exact_duplicates" in actions:
-        before = len(frame)
         duplicate_columns = [column for column in frame.columns if column != row_position_column]
-        frame = frame.drop_duplicates(subset=duplicate_columns).reset_index(drop=True)
-        removed_rows += before - len(frame)
-        applied.append("drop_exact_duplicates")
+        duplicate_mask = frame.duplicated(subset=duplicate_columns, keep="first")
+        training_duplicate_row_positions = [
+            int(value) for value in source_positions[duplicate_mask.to_numpy(dtype=bool)]
+        ]
+        evidence["training_duplicate_row_positions"] = training_duplicate_row_positions
+        frame = frame.loc[~duplicate_mask].copy()
 
+    all_null_columns: list[str] = []
     if "drop_all_null_columns" in actions:
-        all_null = [
+        all_null_columns = [
             str(column)
             for column in frame.columns
-            if frame[column].isna().all()
-            and column != target_column
+            if column != target_column
             and column != row_position_column
+            and frame[column].isna().all()
         ]
-        if all_null:
-            frame = frame.drop(columns=all_null)
-            removed_columns.extend(all_null)
-        applied.append("drop_all_null_columns")
+        evidence["all_null_columns"] = all_null_columns
+        if all_null_columns:
+            frame = frame.drop(columns=all_null_columns)
 
+    constant_columns: list[str] = []
     if "drop_constant_features" in actions:
-        constant = [
+        constant_columns = [
             str(column)
             for column in frame.columns
             if column != target_column
             and column != row_position_column
             and frame[column].nunique(dropna=True) <= 1
         ]
-        if constant:
-            frame = frame.drop(columns=constant)
-            removed_columns.extend(constant)
-        applied.append("drop_constant_features")
+        evidence["constant_columns"] = {
+            column: {
+                "non_null_unique_values": int(frame[column].nunique(dropna=True)),
+                "all_null": bool(frame[column].isna().all()),
+            }
+            for column in constant_columns
+        }
 
     if "drop_rows_missing_target" in actions:
-        before = len(frame)
-        frame = frame.dropna(subset=[target_column]).reset_index(drop=True)
-        removed_rows += before - len(frame)
-        applied.append("drop_rows_missing_target")
+        evidence["training_missing_target_rows"] = int(frame[target_column].isna().sum())
 
-    return frame, {
+    return CleaningSpecification(
+        target_column=str(target_column),
+        row_position_column=row_position_column,
+        requested_actions=list(actions),
+        trim_columns=trim_columns,
+        numeric_coercion_columns=numeric_coercion_columns,
+        all_null_columns=all_null_columns,
+        constant_columns=constant_columns,
+        drop_rows_missing_target="drop_rows_missing_target" in actions,
+        training_duplicate_row_positions=training_duplicate_row_positions,
+        training_only_evidence=evidence,
+    )
+
+
+def transform_cleaning(
+    dataframe: pd.DataFrame,
+    specification: CleaningSpecification | dict[str, Any],
+    *,
+    partition: str = "training",
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Apply a frozen specification without fitting structural decisions.
+
+    Duplicate removal is deliberately the sole partition-local operation:
+    training duplicates use positions frozen by :func:`fit_cleaning_spec`,
+    while holdout (and otherwise-unassigned) duplicates are detected only
+    within that partition.  No row is ever compared across partitions.
+    """
+
+    spec = CleaningSpecification.model_validate(specification)
+    if partition not in {"training", "holdout", "unassigned"}:
+        raise ValueError("Cleaning transforms require partition='training', 'holdout', or 'unassigned'.")
+    frame = dataframe.copy()
+    original_shape = [int(frame.shape[0]), int(frame.shape[1])]
+    row_position_column = spec.row_position_column
+    if row_position_column is not None and row_position_column not in frame.columns:
+        raise ValueError(f"The row-position column '{row_position_column}' is missing from the transform frame.")
+    if spec.target_column not in frame.columns:
+        raise ValueError(f"The target column '{spec.target_column}' is missing from the transform frame.")
+
+    if "trim_strings" in spec.requested_actions:
+        _trim_string_columns(frame, list(spec.trim_columns))
+
+    if "coerce_numeric_strings" in spec.requested_actions:
+        for column in spec.numeric_coercion_columns:
+            if column not in frame.columns:
+                raise ValueError(f"The frozen cleaning specification references missing column '{column}'.")
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    removed_row_positions: list[int] = []
+    if "drop_exact_duplicates" in spec.requested_actions:
+        if partition == "training":
+            if row_position_column is not None:
+                position_values = frame[row_position_column].to_numpy(dtype=int, copy=False)
+                duplicate_mask = np.isin(position_values, np.asarray(spec.training_duplicate_row_positions, dtype=int))
+            else:
+                duplicate_mask = np.isin(
+                    np.arange(len(frame), dtype=int),
+                    np.asarray(spec.training_duplicate_row_positions, dtype=int),
+                )
+        else:
+            duplicate_columns = [column for column in frame.columns if column != row_position_column]
+            duplicate_mask = frame.duplicated(subset=duplicate_columns, keep="first").to_numpy(dtype=bool)
+        if row_position_column is not None:
+            removed_row_positions.extend(
+                int(value)
+                for value in frame.loc[duplicate_mask, row_position_column].to_numpy(dtype=int)
+            )
+        frame = frame.loc[~duplicate_mask].copy()
+
+    removed_columns: list[str] = []
+    frozen_drop_columns = list(dict.fromkeys(spec.all_null_columns + spec.constant_columns))
+    if frozen_drop_columns:
+        missing = [column for column in frozen_drop_columns if column not in frame.columns]
+        if missing:
+            raise ValueError(
+                "The frozen cleaning specification cannot be applied because columns are missing: "
+                + ", ".join(missing)
+            )
+        frame = frame.drop(columns=frozen_drop_columns)
+        removed_columns.extend(frozen_drop_columns)
+
+    if spec.drop_rows_missing_target:
+        missing_target_mask = frame[spec.target_column].isna().to_numpy(dtype=bool)
+        if row_position_column is not None:
+            removed_row_positions.extend(
+                int(value)
+                for value in frame.loc[missing_target_mask, row_position_column].to_numpy(dtype=int)
+            )
+        frame = frame.loc[~missing_target_mask].copy()
+
+    removed_row_positions = list(dict.fromkeys(removed_row_positions))
+    applied = list(spec.requested_actions)
+    return frame.reset_index(drop=True), {
+        "partition": partition,
         "original_shape": original_shape,
         "cleaned_shape": [int(frame.shape[0]), int(frame.shape[1])],
-        "requested_actions": actions,
+        "requested_actions": list(spec.requested_actions),
         "applied_actions": applied,
-        "removed_rows": removed_rows,
+        "removed_rows": int(original_shape[0] - len(frame)),
+        "removed_row_positions": removed_row_positions,
         "removed_columns": removed_columns,
+        "frozen_columns_used": {
+            "trim_columns": list(spec.trim_columns),
+            "numeric_coercion_columns": list(spec.numeric_coercion_columns),
+            "all_null_columns": list(spec.all_null_columns),
+            "constant_columns": list(spec.constant_columns),
+        },
+        "duplicate_scope": "within_partition_only",
     }
+
+
+def apply_cleaning(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    actions: list[str] | None = None,
+    row_position_column: str | None = None,
+    *,
+    specification: CleaningSpecification | dict[str, Any] | None = None,
+    partition: str = "training",
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Compatibility entry point for explicit fit/transform cleaning.
+
+    New pipeline code passes a fitted ``specification``.  When omitted, the
+    supplied dataframe is treated as the single fitting partition; callers
+    handling a frozen split should use :func:`fit_cleaning_spec` on training
+    rows and :func:`transform_cleaning` on each partition explicitly.
+    """
+
+    if specification is None:
+        if actions is None:
+            raise ValueError("Either a cleaning specification or requested actions must be provided.")
+        specification = fit_cleaning_spec(
+            dataframe,
+            target_column,
+            actions,
+            row_position_column=row_position_column,
+        )
+    return transform_cleaning(dataframe, specification, partition=partition)
 
 
 def eda_summary(dataframe: pd.DataFrame, target_column: str) -> dict[str, Any]:

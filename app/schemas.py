@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
@@ -228,6 +228,23 @@ class ConflictResolution(StrictModel):
 class CleaningPlan(StrictModel):
     actions: list[CleaningAction] = Field(max_length=6)
     reasoning: str = Field(min_length=10, max_length=1000)
+
+
+class CleaningSpecification(StrictModel):
+    """Frozen structural-cleaning decisions fitted from training rows only."""
+
+    schema_version: Literal["1"] = "1"
+    target_column: str
+    row_position_column: Optional[str] = None
+    requested_actions: list[CleaningAction] = Field(max_length=6)
+    trim_columns: list[str] = Field(default_factory=list)
+    numeric_coercion_columns: list[str] = Field(default_factory=list)
+    all_null_columns: list[str] = Field(default_factory=list)
+    constant_columns: list[str] = Field(default_factory=list)
+    drop_rows_missing_target: bool = False
+    duplicate_policy: Literal["within_partition_keep_first"] = "within_partition_keep_first"
+    training_duplicate_row_positions: list[int] = Field(default_factory=list)
+    training_only_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReportDraft(StrictModel):
