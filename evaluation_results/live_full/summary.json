@@ -1,0 +1,3239 @@
+{
+  "agent_empirical_reference_match_rate": 0.4388888888888889,
+  "agent_initial_invalid_count": 0,
+  "agent_initial_valid_count": 180,
+  "agent_initial_validity_rate": 1.0,
+  "agent_normalized_regret_mean": 0.016190440340428224,
+  "agent_normalized_regret_median": 0.001427618317074672,
+  "agreement_rate": 0.5055555555555555,
+  "by_dataset": {
+    "breast_cancer": {
+      "agent_empirical_reference_match_rate": 0.8,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.003722634311802353,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.8,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.2,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 2,
+          "rate": 0.2
+        },
+        "regularized_linear": {
+          "count": 8,
+          "rate": 0.8
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.8,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.003722634311802353,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 0.8,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.2,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 2,
+            "rate": 0.2
+          },
+          "regularized_linear": {
+            "count": 8,
+            "rate": 0.8
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.003722634311802353,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.007445268623604706,
+        "paired_holdout_improvement_mean": 0.0038088874039425404,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.007617774807885081,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": 0.0,
+        "reconciliation_invocation_rate": 0.2,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 2,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.003722634311802353,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.007445268623604706,
+      "paired_holdout_improvement_mean": 0.0038088874039425404,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.007617774807885081,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 0.2,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 2,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "diabetes": {
+      "agent_empirical_reference_match_rate": 1.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 1.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 1.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 1.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": 0.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": null,
+      "reconciliation_invocation_rate": 0.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": null,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": null,
+      "reconciliation_success_rate": null,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "digits_subset": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0026322160515708237,
+      "agent_normalized_regret_median": 0.0026322160515708237,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.003046629932503153,
+      "gated_normalized_regret_median": 0.003046629932503153,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0026322160515708237,
+        "agent_normalized_regret_median": 0.0026322160515708237,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.003046629932503153,
+        "gated_normalized_regret_median": 0.003046629932503153,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": -0.00041441388093232945,
+        "paired_cv_improvement_median": -0.00041441388093232945,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.011524226570666207,
+        "paired_holdout_improvement_median": 0.011524226570666207,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 10,
+        "potentially_unnecessary_intervention_rate": 1.0,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 10,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": -0.00041441388093232945,
+      "paired_cv_improvement_median": -0.00041441388093232945,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.011524226570666207,
+      "paired_holdout_improvement_median": 0.011524226570666207,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 10,
+      "potentially_unnecessary_intervention_rate": 1.0,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 10,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "final_interaction_regression": {
+      "agent_empirical_reference_match_rate": 1.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 3,
+          "rate": 0.3
+        },
+        "linear": {
+          "count": 7,
+          "rate": 0.7
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.3,
+      "gated_normalized_regret_mean": 0.3600610958466157,
+      "gated_normalized_regret_median": 0.5143729940665939,
+      "gating_outcome_counts": {
+        "agent_better_count": 7,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 3,
+        "tie_count": 3,
+        "worsened": 7
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 1.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "boosted_tree": {
+            "count": 3,
+            "rate": 0.3
+          },
+          "linear": {
+            "count": 7,
+            "rate": 0.7
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.3,
+        "gated_normalized_regret_mean": 0.3600610958466157,
+        "gated_normalized_regret_median": 0.5143729940665939,
+        "gating_outcome_counts": {
+          "agent_better_count": 7,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 3,
+          "tie_count": 3,
+          "worsened": 7
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": -0.4738278397929478,
+        "paired_cv_improvement_median": -0.6768969139899255,
+        "paired_cv_improvement_std": 0.3101931346040846,
+        "paired_holdout_improvement_mean": -0.5907057254885327,
+        "paired_holdout_improvement_median": -0.8438653221264754,
+        "paired_holdout_improvement_std": 0.38670767149928664,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 7,
+        "potentially_unnecessary_intervention_rate": 0.7,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 3,
+        "reconciliation_sided_with_agent_rate": 0.3,
+        "reconciliation_sided_with_deterministic_count": 7,
+        "reconciliation_sided_with_deterministic_rate": 0.7,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": -0.4738278397929478,
+      "paired_cv_improvement_median": -0.6768969139899255,
+      "paired_cv_improvement_std": 0.3101931346040846,
+      "paired_holdout_improvement_mean": -0.5907057254885327,
+      "paired_holdout_improvement_median": -0.8438653221264754,
+      "paired_holdout_improvement_std": 0.38670767149928664,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 7,
+      "potentially_unnecessary_intervention_rate": 0.7,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 3,
+      "reconciliation_sided_with_agent_rate": 0.3,
+      "reconciliation_sided_with_deterministic_count": 7,
+      "reconciliation_sided_with_deterministic_rate": 0.7,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "final_low_n_high_p_classification": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.02782583336615574,
+      "agent_normalized_regret_median": 0.02782583336615574,
+      "agreement_rate": 1.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.02782583336615574,
+      "gated_normalized_regret_median": 0.02782583336615574,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.02782583336615574,
+        "agent_normalized_regret_median": 0.02782583336615574,
+        "agreement_rate": 1.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.02782583336615574,
+        "gated_normalized_regret_median": 0.02782583336615574,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": 0.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": null,
+      "reconciliation_invocation_rate": 0.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": null,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": null,
+      "reconciliation_success_rate": null,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "final_mixed_type_classification": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.038756918448831,
+      "agent_normalized_regret_median": 0.038756918448831,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.056891791956208304,
+      "gated_normalized_regret_median": 0.056891791956208304,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "tree_ensemble": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": null,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 0,
+        "agent_initial_validity_rate": null,
+        "agent_normalized_regret_mean": null,
+        "agent_normalized_regret_median": null,
+        "agreement_rate": null,
+        "completed_trial_count": 0,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": null,
+        "disagreement_rate": null,
+        "final_invalid_count": 0,
+        "final_invalid_rate": null,
+        "final_method_distribution": {},
+        "gated_empirical_reference_match_rate": null,
+        "gated_normalized_regret_mean": null,
+        "gated_normalized_regret_median": null,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 0,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 0,
+          "tie_count": 0,
+          "worsened": 0
+        },
+        "initial_method_distribution": {},
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": null,
+        "paired_cv_improvement_median": null,
+        "paired_cv_improvement_std": null,
+        "paired_holdout_improvement_mean": null,
+        "paired_holdout_improvement_median": null,
+        "paired_holdout_improvement_std": null,
+        "performance_comparable_count": 0,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": null,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 0,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 0,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 0,
+      "paired_cv_improvement_mean": -0.018134873507377303,
+      "paired_cv_improvement_median": -0.018134873507377303,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 10,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "final_shifted_nonlinear_regression": {
+      "agent_empirical_reference_match_rate": 1.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 1.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 1.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 1.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": 0.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": null,
+      "reconciliation_invocation_rate": 0.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": null,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": null,
+      "reconciliation_success_rate": null,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_binary_linear": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.004164857432334634,
+      "agent_normalized_regret_median": 0.004164857432334634,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.004164857432334634,
+        "agent_normalized_regret_median": 0.004164857432334634,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.004164857432334634,
+        "paired_cv_improvement_median": 0.004164857432334634,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 10,
+        "potentially_unnecessary_intervention_rate": 1.0,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 10,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.004164857432334634,
+      "paired_cv_improvement_median": 0.004164857432334634,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 10,
+      "potentially_unnecessary_intervention_rate": 1.0,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 10,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_binary_nonlinear": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.016702907990208127,
+      "agent_normalized_regret_median": 0.016702907990208127,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 1,
+          "rate": 0.1
+        },
+        "linear": {
+          "count": 9,
+          "rate": 0.9
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.12218310736353084,
+      "gated_normalized_regret_median": 0.13390312951612227,
+      "gating_outcome_counts": {
+        "agent_better_count": 9,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 1,
+        "tie_count": 1,
+        "worsened": 9
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.016702907990208127,
+        "agent_normalized_regret_median": 0.016702907990208127,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "boosted_tree": {
+            "count": 1,
+            "rate": 0.1
+          },
+          "linear": {
+            "count": 9,
+            "rate": 0.9
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.12218310736353084,
+        "gated_normalized_regret_median": 0.13390312951612227,
+        "gating_outcome_counts": {
+          "agent_better_count": 9,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 1,
+          "tie_count": 1,
+          "worsened": 9
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": -0.10548019937332272,
+        "paired_cv_improvement_median": -0.11720022152591414,
+        "paired_cv_improvement_std": 0.03516006645777424,
+        "paired_holdout_improvement_mean": -0.12003334259516532,
+        "paired_holdout_improvement_median": -0.1333703806612948,
+        "paired_holdout_improvement_std": 0.040011114198388445,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": 0.0,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 1,
+        "reconciliation_sided_with_agent_rate": 0.1,
+        "reconciliation_sided_with_deterministic_count": 9,
+        "reconciliation_sided_with_deterministic_rate": 0.9,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": -0.10548019937332272,
+      "paired_cv_improvement_median": -0.11720022152591414,
+      "paired_cv_improvement_std": 0.03516006645777424,
+      "paired_holdout_improvement_mean": -0.12003334259516532,
+      "paired_holdout_improvement_median": -0.1333703806612948,
+      "paired_holdout_improvement_std": 0.040011114198388445,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 1,
+      "reconciliation_sided_with_agent_rate": 0.1,
+      "reconciliation_sided_with_deterministic_count": 9,
+      "reconciliation_sided_with_deterministic_rate": 0.9,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_high_dim_regression": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0037620289740035234,
+      "agent_normalized_regret_median": 0.0037620289740035234,
+      "agreement_rate": 1.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.0037620289740035234,
+      "gated_normalized_regret_median": 0.0037620289740035234,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0037620289740035234,
+        "agent_normalized_regret_median": 0.0037620289740035234,
+        "agreement_rate": 1.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.0037620289740035234,
+        "gated_normalized_regret_median": 0.0037620289740035234,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": 0.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": null,
+      "reconciliation_invocation_rate": 0.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": null,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": null,
+      "reconciliation_success_rate": null,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_imbalanced_classification": {
+      "agent_empirical_reference_match_rate": 0.4,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.027787335487607347,
+      "agent_normalized_regret_median": 0.04631222581267891,
+      "agreement_rate": 0.6,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.4,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.04631222581267891,
+      "gated_normalized_regret_median": 0.04631222581267891,
+      "gating_outcome_counts": {
+        "agent_better_count": 4,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 6,
+        "tie_count": 6,
+        "worsened": 4
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 4,
+          "rate": 0.4
+        },
+        "regularized_linear": {
+          "count": 6,
+          "rate": 0.6
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.4,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.027787335487607347,
+        "agent_normalized_regret_median": 0.04631222581267891,
+        "agreement_rate": 0.6,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.4,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.04631222581267891,
+        "gated_normalized_regret_median": 0.04631222581267891,
+        "gating_outcome_counts": {
+          "agent_better_count": 4,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 6,
+          "tie_count": 6,
+          "worsened": 4
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 4,
+            "rate": 0.4
+          },
+          "regularized_linear": {
+            "count": 6,
+            "rate": 0.6
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": -0.018524890325071562,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.022688264418723063,
+        "paired_holdout_improvement_mean": -0.028708133971291884,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.03516013984856239,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 4,
+        "potentially_unnecessary_intervention_rate": 1.0,
+        "reconciliation_invocation_rate": 0.4,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 4,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": -0.018524890325071562,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.022688264418723063,
+      "paired_holdout_improvement_mean": -0.028708133971291884,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.03516013984856239,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 4,
+      "potentially_unnecessary_intervention_rate": 1.0,
+      "reconciliation_invocation_rate": 0.4,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 4,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_linear_regression": {
+      "agent_empirical_reference_match_rate": 0.9,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0009244516201187073,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.9,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.1,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "linear": {
+          "count": 9,
+          "rate": 0.9
+        },
+        "regularized_linear": {
+          "count": 1,
+          "rate": 0.1
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.9,
+      "gated_normalized_regret_mean": 0.0009244516201187073,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "linear": {
+          "count": 9,
+          "rate": 0.9
+        },
+        "regularized_linear": {
+          "count": 1,
+          "rate": 0.1
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.9,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0009244516201187073,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 0.9,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.1,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "linear": {
+            "count": 9,
+            "rate": 0.9
+          },
+          "regularized_linear": {
+            "count": 1,
+            "rate": 0.1
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.9,
+        "gated_normalized_regret_mean": 0.0009244516201187073,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "linear": {
+            "count": 9,
+            "rate": 0.9
+          },
+          "regularized_linear": {
+            "count": 1,
+            "rate": 0.1
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": 0.0,
+        "reconciliation_invocation_rate": 0.1,
+        "reconciliation_sided_with_agent_count": 1,
+        "reconciliation_sided_with_agent_rate": 1.0,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": 0.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 0.1,
+      "reconciliation_sided_with_agent_count": 1,
+      "reconciliation_sided_with_agent_rate": 1.0,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": 0.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_missingness": {
+      "agent_empirical_reference_match_rate": 1.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.0,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 1.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 1.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.0,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 1.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.0,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": 0.0,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": null,
+        "reconciliation_invocation_rate": 0.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": null,
+        "reconciliation_sided_with_deterministic_count": 0,
+        "reconciliation_sided_with_deterministic_rate": null,
+        "reconciliation_success_rate": null,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.0,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": 0.0,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": null,
+      "reconciliation_invocation_rate": 0.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": null,
+      "reconciliation_sided_with_deterministic_count": 0,
+      "reconciliation_sided_with_deterministic_rate": null,
+      "reconciliation_success_rate": null,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_multiclass": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.007500758245302608,
+      "agent_normalized_regret_median": 0.007500758245302608,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "linear": {
+          "count": 8,
+          "rate": 0.8
+        },
+        "regularized_linear": {
+          "count": 2,
+          "rate": 0.2
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.0,
+      "gated_normalized_regret_mean": 0.02974218283846004,
+      "gated_normalized_regret_median": 0.0353025389867494,
+      "gating_outcome_counts": {
+        "agent_better_count": 8,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 2,
+        "tie_count": 2,
+        "worsened": 8
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.007500758245302608,
+        "agent_normalized_regret_median": 0.007500758245302608,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "linear": {
+            "count": 8,
+            "rate": 0.8
+          },
+          "regularized_linear": {
+            "count": 2,
+            "rate": 0.2
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.0,
+        "gated_normalized_regret_mean": 0.02974218283846004,
+        "gated_normalized_regret_median": 0.0353025389867494,
+        "gating_outcome_counts": {
+          "agent_better_count": 8,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 2,
+          "tie_count": 2,
+          "worsened": 8
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": -0.022241424593157432,
+        "paired_cv_improvement_median": -0.02780178074144679,
+        "paired_cv_improvement_std": 0.011120712296578716,
+        "paired_holdout_improvement_mean": -0.010956244847615348,
+        "paired_holdout_improvement_median": -0.013695306059519186,
+        "paired_holdout_improvement_std": 0.005478122423807674,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 8,
+        "potentially_unnecessary_intervention_rate": 0.8,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 2,
+        "reconciliation_sided_with_agent_rate": 0.2,
+        "reconciliation_sided_with_deterministic_count": 8,
+        "reconciliation_sided_with_deterministic_rate": 0.8,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": -0.022241424593157432,
+      "paired_cv_improvement_median": -0.02780178074144679,
+      "paired_cv_improvement_std": 0.011120712296578716,
+      "paired_holdout_improvement_mean": -0.010956244847615348,
+      "paired_holdout_improvement_median": -0.013695306059519186,
+      "paired_holdout_improvement_std": 0.005478122423807674,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 8,
+      "potentially_unnecessary_intervention_rate": 0.8,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 2,
+      "reconciliation_sided_with_agent_rate": 0.2,
+      "reconciliation_sided_with_deterministic_count": 8,
+      "reconciliation_sided_with_deterministic_rate": 0.8,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_nonlinear_regression": {
+      "agent_empirical_reference_match_rate": 0.9,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.020266239653677073,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.9,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.1,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 1,
+        "improved": 1,
+        "not_comparable": 0,
+        "tie": 9,
+        "tie_count": 9,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 9,
+          "rate": 0.9
+        },
+        "tree_ensemble": {
+          "count": 1,
+          "rate": 0.1
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.9,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.020266239653677073,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 0.9,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.1,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 1,
+          "improved": 1,
+          "not_comparable": 0,
+          "tie": 9,
+          "tie_count": 9,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 9,
+            "rate": 0.9
+          },
+          "tree_ensemble": {
+            "count": 1,
+            "rate": 0.1
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.04777913208433269,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.14333739625299807,
+        "paired_holdout_improvement_mean": 0.03293438777120929,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.09880316331362789,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": 0.0,
+        "reconciliation_invocation_rate": 0.1,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 1,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.04777913208433269,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.14333739625299807,
+      "paired_holdout_improvement_mean": 0.03293438777120929,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.09880316331362789,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 0.1,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 1,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_outlier_regression": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.00014242587293481586,
+      "agent_normalized_regret_median": 0.00014242587293481586,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 0,
+        "improved": 0,
+        "not_comparable": 0,
+        "tie": 10,
+        "tie_count": 10,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.00014242587293481586,
+        "agent_normalized_regret_median": 0.00014242587293481586,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 0,
+          "improved": 0,
+          "not_comparable": 0,
+          "tie": 10,
+          "tie_count": 10,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.008646455971003775,
+        "paired_cv_improvement_median": 0.008646455971003775,
+        "paired_cv_improvement_std": 0.0,
+        "paired_holdout_improvement_mean": -0.04085142237696715,
+        "paired_holdout_improvement_median": -0.04085142237696715,
+        "paired_holdout_improvement_std": 0.0,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 10,
+        "potentially_unnecessary_intervention_rate": 1.0,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 10,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.008646455971003775,
+      "paired_cv_improvement_median": 0.008646455971003775,
+      "paired_cv_improvement_std": 0.0,
+      "paired_holdout_improvement_mean": -0.04085142237696715,
+      "paired_holdout_improvement_median": -0.04085142237696715,
+      "paired_holdout_improvement_std": 0.0,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 10,
+      "potentially_unnecessary_intervention_rate": 1.0,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 10,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "synthetic_regression": {
+      "agent_empirical_reference_match_rate": 0.0,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.13157276369391283,
+      "agent_normalized_regret_median": 0.001427618317074672,
+      "agreement_rate": 0.0,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 1.0,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "linear": {
+          "count": 8,
+          "rate": 0.8
+        },
+        "regularized_linear": {
+          "count": 2,
+          "rate": 0.2
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.8,
+      "gated_normalized_regret_mean": 0.0002855236634149344,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 8,
+        "improved": 8,
+        "not_comparable": 0,
+        "tie": 2,
+        "tie_count": 2,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 1,
+          "rate": 0.1
+        },
+        "regularized_linear": {
+          "count": 9,
+          "rate": 0.9
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.0,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.13157276369391283,
+        "agent_normalized_regret_median": 0.001427618317074672,
+        "agreement_rate": 0.0,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 1.0,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "linear": {
+            "count": 8,
+            "rate": 0.8
+          },
+          "regularized_linear": {
+            "count": 2,
+            "rate": 0.2
+          }
+        },
+        "gated_empirical_reference_match_rate": 0.8,
+        "gated_normalized_regret_mean": 0.0002855236634149344,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 8,
+          "improved": 8,
+          "not_comparable": 0,
+          "tie": 2,
+          "tie_count": 2,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 1,
+            "rate": 0.1
+          },
+          "regularized_linear": {
+            "count": 9,
+            "rate": 0.9
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 2.057877581266029,
+        "paired_cv_improvement_median": 0.022377374439665587,
+        "paired_cv_improvement_std": 6.121425232512791,
+        "paired_holdout_improvement_mean": 1.2615754837927577,
+        "paired_holdout_improvement_median": -0.006866674215102009,
+        "paired_holdout_improvement_std": 3.8007496561066247,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 7,
+        "potentially_unnecessary_intervention_rate": 0.7,
+        "reconciliation_invocation_rate": 1.0,
+        "reconciliation_sided_with_agent_count": 2,
+        "reconciliation_sided_with_agent_rate": 0.2,
+        "reconciliation_sided_with_deterministic_count": 8,
+        "reconciliation_sided_with_deterministic_rate": 0.8,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 2.057877581266029,
+      "paired_cv_improvement_median": 0.022377374439665587,
+      "paired_cv_improvement_std": 6.121425232512791,
+      "paired_holdout_improvement_mean": 1.2615754837927577,
+      "paired_holdout_improvement_median": -0.006866674215102009,
+      "paired_holdout_improvement_std": 3.8007496561066247,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 7,
+      "potentially_unnecessary_intervention_rate": 0.7,
+      "reconciliation_invocation_rate": 1.0,
+      "reconciliation_sided_with_agent_count": 2,
+      "reconciliation_sided_with_agent_rate": 0.2,
+      "reconciliation_sided_with_deterministic_count": 8,
+      "reconciliation_sided_with_deterministic_rate": 0.8,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "wine": {
+      "agent_empirical_reference_match_rate": 0.9,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 10,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.005666554979248483,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.9,
+      "completed_trial_count": 10,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.1,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "gated_empirical_reference_match_rate": 1.0,
+      "gated_normalized_regret_mean": 0.0,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 0,
+        "eligible_count": 10,
+        "gated_better_count": 1,
+        "improved": 1,
+        "not_comparable": 0,
+        "tie": 9,
+        "tie_count": 9,
+        "worsened": 0
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 1,
+          "rate": 0.1
+        },
+        "regularized_linear": {
+          "count": 9,
+          "rate": 0.9
+        }
+      },
+      "invalid_trial_count": 0,
+      "openai_only": {
+        "agent_empirical_reference_match_rate": 0.9,
+        "agent_initial_invalid_count": 0,
+        "agent_initial_valid_count": 10,
+        "agent_initial_validity_rate": 1.0,
+        "agent_normalized_regret_mean": 0.005666554979248483,
+        "agent_normalized_regret_median": 0.0,
+        "agreement_rate": 0.9,
+        "completed_trial_count": 10,
+        "deterministic_validation_intervention_count": 0,
+        "deterministic_validation_intervention_rate": 0.0,
+        "disagreement_rate": 0.1,
+        "final_invalid_count": 0,
+        "final_invalid_rate": 0.0,
+        "final_method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "gated_empirical_reference_match_rate": 1.0,
+        "gated_normalized_regret_mean": 0.0,
+        "gated_normalized_regret_median": 0.0,
+        "gating_outcome_counts": {
+          "agent_better_count": 0,
+          "eligible_count": 10,
+          "gated_better_count": 1,
+          "improved": 1,
+          "not_comparable": 0,
+          "tie": 9,
+          "tie_count": 9,
+          "worsened": 0
+        },
+        "initial_method_distribution": {
+          "boosted_tree": {
+            "count": 1,
+            "rate": 0.1
+          },
+          "regularized_linear": {
+            "count": 9,
+            "rate": 0.9
+          }
+        },
+        "invalid_trial_count": 0,
+        "paired_cv_improvement_mean": 0.005666554979248483,
+        "paired_cv_improvement_median": 0.0,
+        "paired_cv_improvement_std": 0.016999664937745452,
+        "paired_holdout_improvement_mean": -0.0025987006496751676,
+        "paired_holdout_improvement_median": 0.0,
+        "paired_holdout_improvement_std": 0.007796101949025502,
+        "performance_comparable_count": 10,
+        "potentially_unnecessary_intervention_count": 0,
+        "potentially_unnecessary_intervention_rate": 0.0,
+        "reconciliation_invocation_rate": 0.1,
+        "reconciliation_sided_with_agent_count": 0,
+        "reconciliation_sided_with_agent_rate": 0.0,
+        "reconciliation_sided_with_deterministic_count": 1,
+        "reconciliation_sided_with_deterministic_rate": 1.0,
+        "reconciliation_success_rate": 1.0,
+        "trial_count": 10,
+        "unsafe_plan_interception_count": 0,
+        "unsafe_plan_interception_rate": null,
+        "valid_trial_count": 10,
+        "validation_interception_count": 0,
+        "validation_interception_rate": null
+      },
+      "openai_trial_count": 10,
+      "paired_cv_improvement_mean": 0.005666554979248483,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.016999664937745452,
+      "paired_holdout_improvement_mean": -0.0025987006496751676,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.007796101949025502,
+      "performance_comparable_count": 10,
+      "potentially_unnecessary_intervention_count": 0,
+      "potentially_unnecessary_intervention_rate": 0.0,
+      "reconciliation_invocation_rate": 0.1,
+      "reconciliation_sided_with_agent_count": 0,
+      "reconciliation_sided_with_agent_rate": 0.0,
+      "reconciliation_sided_with_deterministic_count": 1,
+      "reconciliation_sided_with_deterministic_rate": 1.0,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 10,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 10,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    }
+  },
+  "by_task": {
+    "classification": {
+      "agent_empirical_reference_match_rate": 0.31,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 100,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.013476001631306111,
+      "agent_normalized_regret_median": 0.004164857432334634,
+      "agreement_rate": 0.43,
+      "completed_trial_count": 100,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.57,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 11,
+          "rate": 0.11
+        },
+        "linear": {
+          "count": 17,
+          "rate": 0.17
+        },
+        "regularized_linear": {
+          "count": 72,
+          "rate": 0.72
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.4,
+      "gated_normalized_regret_mean": 0.0286001771269537,
+      "gated_normalized_regret_median": 0.0052736940889028805,
+      "gating_outcome_counts": {
+        "agent_better_count": 21,
+        "eligible_count": 100,
+        "gated_better_count": 1,
+        "improved": 1,
+        "not_comparable": 0,
+        "tie": 78,
+        "tie_count": 78,
+        "worsened": 21
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 27,
+          "rate": 0.27
+        },
+        "linear": {
+          "count": 10,
+          "rate": 0.1
+        },
+        "regularized_linear": {
+          "count": 53,
+          "rate": 0.53
+        },
+        "tree_ensemble": {
+          "count": 10,
+          "rate": 0.1
+        }
+      },
+      "invalid_trial_count": 0,
+      "paired_cv_improvement_mean": -0.015124175495647587,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 0.03505418077858362,
+      "paired_holdout_improvement_mean": -0.014696330808913898,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 0.04041335309430233,
+      "performance_comparable_count": 100,
+      "potentially_unnecessary_intervention_count": 32,
+      "potentially_unnecessary_intervention_rate": 0.5614035087719298,
+      "reconciliation_invocation_rate": 0.57,
+      "reconciliation_sided_with_agent_count": 3,
+      "reconciliation_sided_with_agent_rate": 0.05263157894736842,
+      "reconciliation_sided_with_deterministic_count": 54,
+      "reconciliation_sided_with_deterministic_rate": 0.9473684210526315,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 100,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 100,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    },
+    "regression": {
+      "agent_empirical_reference_match_rate": 0.6,
+      "agent_initial_invalid_count": 0,
+      "agent_initial_valid_count": 80,
+      "agent_initial_validity_rate": 1.0,
+      "agent_normalized_regret_mean": 0.019583488726830866,
+      "agent_normalized_regret_median": 0.0,
+      "agreement_rate": 0.6,
+      "completed_trial_count": 80,
+      "deterministic_validation_intervention_count": 0,
+      "deterministic_validation_intervention_rate": 0.0,
+      "disagreement_rate": 0.4,
+      "final_invalid_count": 0,
+      "final_invalid_rate": 0.0,
+      "final_method_distribution": {
+        "boosted_tree": {
+          "count": 23,
+          "rate": 0.2875
+        },
+        "linear": {
+          "count": 34,
+          "rate": 0.425
+        },
+        "regularized_linear": {
+          "count": 23,
+          "rate": 0.2875
+        }
+      },
+      "gated_empirical_reference_match_rate": 0.75,
+      "gated_normalized_regret_mean": 0.04562913751301911,
+      "gated_normalized_regret_median": 0.0,
+      "gating_outcome_counts": {
+        "agent_better_count": 7,
+        "eligible_count": 80,
+        "gated_better_count": 9,
+        "improved": 9,
+        "not_comparable": 0,
+        "tie": 64,
+        "tie_count": 64,
+        "worsened": 7
+      },
+      "initial_method_distribution": {
+        "boosted_tree": {
+          "count": 30,
+          "rate": 0.375
+        },
+        "linear": {
+          "count": 9,
+          "rate": 0.1125
+        },
+        "regularized_linear": {
+          "count": 40,
+          "rate": 0.5
+        },
+        "tree_ensemble": {
+          "count": 1,
+          "rate": 0.0125
+        }
+      },
+      "invalid_trial_count": 0,
+      "paired_cv_improvement_mean": 0.20505941619105217,
+      "paired_cv_improvement_median": 0.0,
+      "paired_cv_improvement_std": 2.283471806310492,
+      "paired_holdout_improvement_mean": 0.08286909046230839,
+      "paired_holdout_improvement_median": 0.0,
+      "paired_holdout_improvement_std": 1.435850097306442,
+      "performance_comparable_count": 80,
+      "potentially_unnecessary_intervention_count": 24,
+      "potentially_unnecessary_intervention_rate": 0.75,
+      "reconciliation_invocation_rate": 0.4,
+      "reconciliation_sided_with_agent_count": 6,
+      "reconciliation_sided_with_agent_rate": 0.1875,
+      "reconciliation_sided_with_deterministic_count": 26,
+      "reconciliation_sided_with_deterministic_rate": 0.8125,
+      "reconciliation_success_rate": 1.0,
+      "trial_count": 80,
+      "unsafe_plan_interception_count": 0,
+      "unsafe_plan_interception_rate": null,
+      "valid_trial_count": 80,
+      "validation_interception_count": 0,
+      "validation_interception_rate": null
+    }
+  },
+  "clean_trial_count": 180,
+  "completed_trial_count": 180,
+  "deterministic_validation_intervention_count": 0,
+  "deterministic_validation_intervention_rate": 0.0,
+  "disagreement_rate": 0.49444444444444446,
+  "failed_trial_count": 0,
+  "failed_trials": 0,
+  "failure_counts_by_validation_code": {},
+  "final_invalid_count": 0,
+  "final_invalid_rate": 0.0,
+  "final_method_distribution": {
+    "boosted_tree": {
+      "count": 34,
+      "rate": 0.18888888888888888
+    },
+    "linear": {
+      "count": 51,
+      "rate": 0.2833333333333333
+    },
+    "regularized_linear": {
+      "count": 95,
+      "rate": 0.5277777777777778
+    }
+  },
+  "formulas": {
+    "classification_normalized_regret": "classification_regret",
+    "classification_regret": "max(0, best_macro_f1 - selected_macro_f1)",
+    "gate_outcome": "improved/worsened when normalized regret differs by more than paired_normalized_regret; otherwise tie",
+    "paired_cv_improvement_classification": "gated_macro_f1 - initial_macro_f1",
+    "paired_cv_improvement_regression": "initial_rmse - gated_rmse",
+    "potentially_unnecessary_intervention": "valid initial plan AND method disagreement AND final method changed AND initial regret within the task tolerance",
+    "regression_normalized_regret": "regression_regret / max(abs(best_rmse), 1e-12)",
+    "regression_regret": "max(0, selected_rmse - best_rmse)"
+  },
+  "gated_empirical_reference_match_rate": 0.5555555555555556,
+  "gated_normalized_regret_mean": 0.03616860396520499,
+  "gated_normalized_regret_median": 0.0,
+  "gated_reference_match_rate": 0.5882352941176471,
+  "gating_outcome_counts": {
+    "agent_better_count": 28,
+    "eligible_count": 180,
+    "gated_better_count": 10,
+    "improved": 10,
+    "not_comparable": 0,
+    "tie": 142,
+    "tie_count": 142,
+    "worsened": 28
+  },
+  "initial_method_distribution": {
+    "boosted_tree": {
+      "count": 57,
+      "rate": 0.31666666666666665
+    },
+    "linear": {
+      "count": 19,
+      "rate": 0.10555555555555556
+    },
+    "regularized_linear": {
+      "count": 93,
+      "rate": 0.5166666666666667
+    },
+    "tree_ensemble": {
+      "count": 11,
+      "rate": 0.06111111111111111
+    }
+  },
+  "initial_reference_match_rate": 0.4647058823529412,
+  "invalid_trial_count": 0,
+  "live_request_failed_trials": 10,
+  "mock_trials": 0,
+  "offline_fallback_trials": 10,
+  "openai_only": {
+    "agent_empirical_reference_match_rate": 0.4647058823529412,
+    "agent_initial_invalid_count": 0,
+    "agent_initial_valid_count": 170,
+    "agent_initial_validity_rate": 1.0,
+    "agent_normalized_regret_mean": 0.01486300045169865,
+    "agent_normalized_regret_median": 0.00014242587293481586,
+    "agreement_rate": 0.5352941176470588,
+    "completed_trial_count": 170,
+    "deterministic_validation_intervention_count": 0,
+    "deterministic_validation_intervention_rate": 0.0,
+    "disagreement_rate": 0.4647058823529412,
+    "final_invalid_count": 0,
+    "final_invalid_rate": 0.0,
+    "final_method_distribution": {
+      "boosted_tree": {
+        "count": 24,
+        "rate": 0.1411764705882353
+      },
+      "linear": {
+        "count": 51,
+        "rate": 0.3
+      },
+      "regularized_linear": {
+        "count": 95,
+        "rate": 0.5588235294117647
+      }
+    },
+    "gated_empirical_reference_match_rate": 0.5882352941176471,
+    "gated_normalized_regret_mean": 0.03494959290691068,
+    "gated_normalized_regret_median": 0.0,
+    "gating_outcome_counts": {
+      "agent_better_count": 28,
+      "eligible_count": 170,
+      "gated_better_count": 10,
+      "improved": 10,
+      "not_comparable": 0,
+      "tie": 132,
+      "tie_count": 132,
+      "worsened": 28
+    },
+    "initial_method_distribution": {
+      "boosted_tree": {
+        "count": 57,
+        "rate": 0.3352941176470588
+      },
+      "linear": {
+        "count": 19,
+        "rate": 0.11176470588235295
+      },
+      "regularized_linear": {
+        "count": 93,
+        "rate": 0.5470588235294118
+      },
+      "tree_ensemble": {
+        "count": 1,
+        "rate": 0.0058823529411764705
+      }
+    },
+    "invalid_trial_count": 0,
+    "paired_cv_improvement_mean": 0.08866873223995993,
+    "paired_cv_improvement_median": 0.0,
+    "paired_cv_improvement_std": 1.5705175781338514,
+    "paired_holdout_improvement_mean": 0.030352318565254593,
+    "paired_holdout_improvement_median": 0.0,
+    "paired_holdout_improvement_std": 0.9867085224913056,
+    "performance_comparable_count": 170,
+    "potentially_unnecessary_intervention_count": 56,
+    "potentially_unnecessary_intervention_rate": 0.7088607594936709,
+    "reconciliation_invocation_rate": 0.4647058823529412,
+    "reconciliation_sided_with_agent_count": 9,
+    "reconciliation_sided_with_agent_rate": 0.11392405063291139,
+    "reconciliation_sided_with_deterministic_count": 70,
+    "reconciliation_sided_with_deterministic_rate": 0.8860759493670886,
+    "reconciliation_success_rate": 1.0,
+    "requested_live_trials": 170,
+    "stability_by_dataset": {
+      "breast_cancer": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 2,
+            "rate": 0.2
+          },
+          "regularized_linear": {
+            "count": 8,
+            "rate": 0.8
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 8,
+        "modal_method_rate": 0.8,
+        "pairwise_consistency": 0.6444444444444445,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      },
+      "diabetes": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "digits_subset": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "boosted_tree",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "final_interaction_regression": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "boosted_tree",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "final_low_n_high_p_classification": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "final_shifted_nonlinear_regression": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "boosted_tree",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_binary_linear": {
+        "method_distribution": {
+          "linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_binary_nonlinear": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "boosted_tree",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_high_dim_regression": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_imbalanced_classification": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 4,
+            "rate": 0.4
+          },
+          "regularized_linear": {
+            "count": 6,
+            "rate": 0.6
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 6,
+        "modal_method_rate": 0.6,
+        "pairwise_consistency": 0.4666666666666667,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      },
+      "synthetic_linear_regression": {
+        "method_distribution": {
+          "linear": {
+            "count": 9,
+            "rate": 0.9
+          },
+          "regularized_linear": {
+            "count": 1,
+            "rate": 0.1
+          }
+        },
+        "modal_method": "linear",
+        "modal_method_frequency": 9,
+        "modal_method_rate": 0.9,
+        "pairwise_consistency": 0.8,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      },
+      "synthetic_missingness": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_multiclass": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_nonlinear_regression": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 9,
+            "rate": 0.9
+          },
+          "tree_ensemble": {
+            "count": 1,
+            "rate": 0.1
+          }
+        },
+        "modal_method": "boosted_tree",
+        "modal_method_frequency": 9,
+        "modal_method_rate": 0.9,
+        "pairwise_consistency": 0.8,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      },
+      "synthetic_outlier_regression": {
+        "method_distribution": {
+          "regularized_linear": {
+            "count": 10,
+            "rate": 1.0
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 10,
+        "modal_method_rate": 1.0,
+        "pairwise_consistency": 1.0,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 1
+      },
+      "synthetic_regression": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 1,
+            "rate": 0.1
+          },
+          "regularized_linear": {
+            "count": 9,
+            "rate": 0.9
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 9,
+        "modal_method_rate": 0.9,
+        "pairwise_consistency": 0.8,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      },
+      "wine": {
+        "method_distribution": {
+          "boosted_tree": {
+            "count": 1,
+            "rate": 0.1
+          },
+          "regularized_linear": {
+            "count": 9,
+            "rate": 0.9
+          }
+        },
+        "modal_method": "regularized_linear",
+        "modal_method_frequency": 9,
+        "modal_method_rate": 0.9,
+        "pairwise_consistency": 0.8,
+        "trial_count": 10,
+        "unique_initial_methods_selected": 2
+      }
+    },
+    "successful_openai_trials": 170,
+    "trial_count": 170,
+    "unsafe_plan_interception_count": 0,
+    "unsafe_plan_interception_rate": null,
+    "valid_trial_count": 170,
+    "validation_interception_count": 0,
+    "validation_interception_rate": null
+  },
+  "openai_only_match_rates": {
+    "gated_reference_match_rate": 0.5882352941176471,
+    "initial_reference_match_rate": 0.4647058823529412
+  },
+  "openai_only_method_agreement_rate": 0.5352941176470588,
+  "openai_only_paired_stats": {
+    "improved_count": 10,
+    "mean_paired_holdout_improvement": 0.030352318565254593,
+    "mean_paired_improvement": 0.08866873223995993,
+    "median_paired_holdout_improvement": 0.0,
+    "median_paired_improvement": 0.0,
+    "std_paired_holdout_improvement": 0.9867085224913056,
+    "std_paired_improvement": 1.5705175781338514,
+    "tie_count": 132,
+    "trial_count": 170,
+    "worsened_count": 28
+  },
+  "openai_only_preprocessing_agreement_rate": 0.7764705882352941,
+  "openai_only_reconciliation_invocation_rate": 0.4647058823529412,
+  "paired_cv_improvement_mean": 0.08273519858733008,
+  "paired_cv_improvement_median": 0.0,
+  "paired_cv_improvement_std": 1.5264648003780539,
+  "paired_holdout_improvement_mean": 0.02866607864496267,
+  "paired_holdout_improvement_median": 0.0,
+  "paired_holdout_improvement_std": 0.9589335257930965,
+  "perturbation_trial_count": 0,
+  "potentially_unnecessary_intervention_count": 56,
+  "potentially_unnecessary_intervention_rate": 0.6292134831460674,
+  "reconciliation_invocation_rate": 0.49444444444444446,
+  "reconciliation_sided_with_agent_count": 9,
+  "reconciliation_sided_with_agent_rate": 0.10112359550561797,
+  "reconciliation_sided_with_deterministic_count": 80,
+  "reconciliation_sided_with_deterministic_rate": 0.898876404494382,
+  "reconciliation_success_rate": 1.0,
+  "requested_live_trials": 180,
+  "source_counts": {
+    "offline_fallback": 10,
+    "openai": 170
+  },
+  "stability_by_dataset": {
+    "breast_cancer": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 2,
+          "rate": 0.2
+        },
+        "regularized_linear": {
+          "count": 8,
+          "rate": 0.8
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 8,
+      "modal_method_rate": 0.8,
+      "pairwise_consistency": 0.6444444444444445,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    },
+    "diabetes": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "digits_subset": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "boosted_tree",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "final_interaction_regression": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "boosted_tree",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "final_low_n_high_p_classification": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "final_shifted_nonlinear_regression": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "boosted_tree",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_binary_linear": {
+      "method_distribution": {
+        "linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_binary_nonlinear": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "boosted_tree",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_high_dim_regression": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_imbalanced_classification": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 4,
+          "rate": 0.4
+        },
+        "regularized_linear": {
+          "count": 6,
+          "rate": 0.6
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 6,
+      "modal_method_rate": 0.6,
+      "pairwise_consistency": 0.4666666666666667,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    },
+    "synthetic_linear_regression": {
+      "method_distribution": {
+        "linear": {
+          "count": 9,
+          "rate": 0.9
+        },
+        "regularized_linear": {
+          "count": 1,
+          "rate": 0.1
+        }
+      },
+      "modal_method": "linear",
+      "modal_method_frequency": 9,
+      "modal_method_rate": 0.9,
+      "pairwise_consistency": 0.8,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    },
+    "synthetic_missingness": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_multiclass": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_nonlinear_regression": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 9,
+          "rate": 0.9
+        },
+        "tree_ensemble": {
+          "count": 1,
+          "rate": 0.1
+        }
+      },
+      "modal_method": "boosted_tree",
+      "modal_method_frequency": 9,
+      "modal_method_rate": 0.9,
+      "pairwise_consistency": 0.8,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    },
+    "synthetic_outlier_regression": {
+      "method_distribution": {
+        "regularized_linear": {
+          "count": 10,
+          "rate": 1.0
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 10,
+      "modal_method_rate": 1.0,
+      "pairwise_consistency": 1.0,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 1
+    },
+    "synthetic_regression": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 1,
+          "rate": 0.1
+        },
+        "regularized_linear": {
+          "count": 9,
+          "rate": 0.9
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 9,
+      "modal_method_rate": 0.9,
+      "pairwise_consistency": 0.8,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    },
+    "wine": {
+      "method_distribution": {
+        "boosted_tree": {
+          "count": 1,
+          "rate": 0.1
+        },
+        "regularized_linear": {
+          "count": 9,
+          "rate": 0.9
+        }
+      },
+      "modal_method": "regularized_linear",
+      "modal_method_frequency": 9,
+      "modal_method_rate": 0.9,
+      "pairwise_consistency": 0.8,
+      "trial_count": 10,
+      "unique_initial_methods_selected": 2
+    }
+  },
+  "successful_openai_trials": 170,
+  "thresholds": {
+    "classification_regret": 0.01,
+    "paired_normalized_regret": 0.02,
+    "regression_normalized_regret": 0.02
+  },
+  "trial_count": 180,
+  "unsafe_plan_interception_count": 0,
+  "unsafe_plan_interception_rate": null,
+  "valid_trial_count": 180,
+  "validation_interception_count": 0,
+  "validation_interception_rate": null
+}

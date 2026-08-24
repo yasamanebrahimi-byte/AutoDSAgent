@@ -1,0 +1,49 @@
+{
+  "agent_mode": "offline",
+  "agent_model_requested": "gpt-4.1-mini",
+  "agent_source_policy": "openai, offline_fallback, or mock; source is persisted per trial",
+  "benchmark_cases": [
+    {
+      "category": "sklearn_local",
+      "columns": 14,
+      "dataset_source": "sklearn.datasets.load_wine(as_frame=True)",
+      "expected_task_type": "classification",
+      "name": "wine",
+      "notes": "",
+      "question": "Classify the wine cultivar from its measured chemical features.",
+      "random_seed": 42,
+      "rows": 178,
+      "target_column": "target"
+    }
+  ],
+  "created_at_utc": "2026-08-21T16:24:11.873554+00:00",
+  "evaluation_id": "20260821T162411Z",
+  "evaluation_settings": {
+    "candidate_methods": [
+      "linear",
+      "regularized_linear",
+      "tree_ensemble",
+      "boosted_tree"
+    ],
+    "candidate_selection_data": "frozen training partition only",
+    "holdout_data": "final evaluation only",
+    "primary_metrics": {
+      "classification": "macro_f1",
+      "regression": "rmse"
+    }
+  },
+  "limitations": [
+    "Small local benchmark suite.",
+    "Empirical reference compares only supported families under this CV procedure.",
+    "Offline/mock rows are not evidence about live LLM behavior."
+  ],
+  "perturbations": [],
+  "repetitions": 1,
+  "seed": 42,
+  "test_size": 0.2,
+  "thresholds": {
+    "classification_regret": 0.01,
+    "paired_normalized_regret": 0.02,
+    "regression_normalized_regret": 0.02
+  }
+}

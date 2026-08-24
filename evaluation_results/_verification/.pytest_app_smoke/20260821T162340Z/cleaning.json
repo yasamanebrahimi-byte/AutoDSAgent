@@ -1,0 +1,39 @@
+{
+  "plan": {
+    "actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target"
+    ],
+    "reasoning": "The offline cleaning fallback applies only structural operations and leaves learned imputation inside the model pipeline."
+  },
+  "log": {
+    "original_shape": [
+      442,
+      11
+    ],
+    "cleaned_shape": [
+      442,
+      11
+    ],
+    "requested_actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target"
+    ],
+    "applied_actions": [
+      "trim_strings",
+      "drop_exact_duplicates",
+      "drop_all_null_columns",
+      "drop_constant_features",
+      "drop_rows_missing_target"
+    ],
+    "removed_rows": 0,
+    "removed_columns": [],
+    "deterministic_target_rows_removed": 0
+  }
+}

@@ -13,4 +13,3 @@ __pycache__/
 .env
 runs/*
 !runs/.gitkeep
-evaluation_results/

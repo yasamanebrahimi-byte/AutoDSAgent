@@ -1,0 +1,165 @@
+{
+  "computed": {
+    "rows": 442,
+    "columns": 11,
+    "missing_by_column": {},
+    "numeric_summary": {
+      "age": {
+        "mean": 48.5181,
+        "std": 13.10903,
+        "min": 19.0,
+        "25%": 38.25,
+        "50%": 50.0,
+        "75%": 59.0,
+        "max": 79.0
+      },
+      "sex": {
+        "mean": 1.46833,
+        "std": 0.49956,
+        "min": 1.0,
+        "25%": 1.0,
+        "50%": 1.0,
+        "75%": 2.0,
+        "max": 2.0
+      },
+      "bmi": {
+        "mean": 26.37579,
+        "std": 4.41812,
+        "min": 18.0,
+        "25%": 23.2,
+        "50%": 25.7,
+        "75%": 29.275,
+        "max": 42.2
+      },
+      "bp": {
+        "mean": 94.64701,
+        "std": 13.83128,
+        "min": 62.0,
+        "25%": 84.0,
+        "50%": 93.0,
+        "75%": 105.0,
+        "max": 133.0
+      },
+      "s1": {
+        "mean": 189.14027,
+        "std": 34.60805,
+        "min": 97.0,
+        "25%": 164.25,
+        "50%": 186.0,
+        "75%": 209.75,
+        "max": 301.0
+      },
+      "s2": {
+        "mean": 115.43914,
+        "std": 30.41308,
+        "min": 41.6,
+        "25%": 96.05,
+        "50%": 113.0,
+        "75%": 134.5,
+        "max": 242.4
+      },
+      "s3": {
+        "mean": 49.78846,
+        "std": 12.9342,
+        "min": 22.0,
+        "25%": 40.25,
+        "50%": 48.0,
+        "75%": 57.75,
+        "max": 99.0
+      },
+      "s4": {
+        "mean": 4.07025,
+        "std": 1.29045,
+        "min": 2.0,
+        "25%": 3.0,
+        "50%": 4.0,
+        "75%": 5.0,
+        "max": 9.09
+      },
+      "s5": {
+        "mean": 4.64141,
+        "std": 0.52239,
+        "min": 3.2581,
+        "25%": 4.2767,
+        "50%": 4.62005,
+        "75%": 4.9972,
+        "max": 6.107
+      },
+      "s6": {
+        "mean": 91.26018,
+        "std": 11.49633,
+        "min": 58.0,
+        "25%": 83.25,
+        "50%": 91.0,
+        "75%": 98.0,
+        "max": 124.0
+      },
+      "disease_progression": {
+        "mean": 152.13348,
+        "std": 77.093,
+        "min": 25.0,
+        "25%": 87.0,
+        "50%": 140.5,
+        "75%": 211.5,
+        "max": 346.0
+      }
+    },
+    "target": {
+      "column": "disease_progression",
+      "unique": 214,
+      "mean": 152.13348,
+      "std": 77.093
+    },
+    "strongest_numeric_relationships": [
+      {
+        "feature_a": "s1",
+        "feature_b": "s2",
+        "abs_correlation": 0.8967
+      },
+      {
+        "feature_a": "s3",
+        "feature_b": "s4",
+        "abs_correlation": 0.7385
+      },
+      {
+        "feature_a": "s2",
+        "feature_b": "s4",
+        "abs_correlation": 0.6598
+      },
+      {
+        "feature_a": "s4",
+        "feature_b": "s5",
+        "abs_correlation": 0.6179
+      },
+      {
+        "feature_a": "bmi",
+        "feature_b": "disease_progression",
+        "abs_correlation": 0.5865
+      },
+      {
+        "feature_a": "s5",
+        "feature_b": "disease_progression",
+        "abs_correlation": 0.5659
+      },
+      {
+        "feature_a": "s1",
+        "feature_b": "s4",
+        "abs_correlation": 0.5422
+      },
+      {
+        "feature_a": "s1",
+        "feature_b": "s5",
+        "abs_correlation": 0.5155
+      }
+    ]
+  },
+  "agent_findings": [
+    "The cleaned analysis frame contains 442 rows and 11 columns.",
+    "No missing values were present in the cleaned frame.",
+    "The strongest absolute numeric relationship observed was s1 with s2 (absolute r=0.897)."
+  ],
+  "plots": [
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_app_smoke\\20260821T162340Z\\plots\\target_distribution.png",
+    "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_app_smoke\\20260821T162340Z\\plots\\correlation_heatmap.png"
+  ]
+}

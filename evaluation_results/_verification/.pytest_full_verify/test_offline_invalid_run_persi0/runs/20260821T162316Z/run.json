@@ -1,0 +1,16 @@
+{
+  "run_id": "20260821T162316Z",
+  "dataset": "C:\\Users\\19492\\Desktop\\AutoDSAgent\\.pytest_full_verify\\test_offline_invalid_run_persi0\\invalid.csv",
+  "validation_status": "failed",
+  "failure": {
+    "code": "validation_failed",
+    "error_type": "InvariantViolation",
+    "message": "[classification_split_and_stratification_feasible] Each class must be representable in the stratified holdout and retain at least two training rows for cross-validation.",
+    "check_codes": [
+      "classification_split_and_stratification_feasible"
+    ]
+  },
+  "api_used": false,
+  "gate_completed_before_training": false,
+  "model_training_occurred": false
+}

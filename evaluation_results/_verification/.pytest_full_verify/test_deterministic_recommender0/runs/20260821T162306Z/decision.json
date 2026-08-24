@@ -1,0 +1,72 @@
+{
+  "agent_plan": {
+    "target_column": "target",
+    "task_type": "classification",
+    "recommended_method": "regularized_linear",
+    "preprocessing": {
+      "numeric_imputation": "none",
+      "categorical_imputation": "none",
+      "numeric_scaling": "none",
+      "categorical_encoding": "none",
+      "categorical_unknown_handling": "ignore",
+      "identifier_handling": "exclude",
+      "high_cardinality_handling": "exclude",
+      "unsupported_text_handling": "exclude",
+      "datetime_handling": "exclude",
+      "infinity_handling": "replace_with_missing",
+      "fit_inside_pipeline": true
+    },
+    "reasoning": "Offline fallback uses an independent schema heuristic so the workflow remains runnable without an API key.",
+    "confidence": 0.4
+  },
+  "deterministic_recommendation": null,
+  "validation": null,
+  "warnings": [
+    "Deterministic recommendation failed closed: RuntimeError: deterministic policy crashed"
+  ],
+  "agent_sources": {
+    "modeling": "offline_fallback"
+  },
+  "gate_completed_before_training": false,
+  "validation_gate_status": "not_completed",
+  "model_training_occurred": false,
+  "holdout_policy": {
+    "frozen_before_modeling_recommendations": true,
+    "planning_data": "training_partition_only",
+    "holdout_used_for": "final_evaluation_only"
+  },
+  "cleaning_policy": {
+    "decision_evidence": "training_partition_only",
+    "structural_actions": "applied_with_original_row_positions_preserved",
+    "learned_preprocessing": "fit_inside_training_pipeline_only"
+  },
+  "target_establishment": {
+    "target_column": "target",
+    "task_type": "classification",
+    "target_source": "user_supplied",
+    "completed_before_holdout_freeze": true
+  },
+  "split_contract": {
+    "target_column": "target",
+    "task_type": "classification",
+    "random_state": 42,
+    "test_size": 0.2,
+    "strategy": "stratified",
+    "row_index_policy": "zero_based_row_position",
+    "dataset_fingerprint": "174000f887f25c9987876858c5abac5c4d65ceb7efe1045652c2eb9c2838000b",
+    "valid_rows": 40,
+    "train_rows": 32,
+    "holdout_rows": 8,
+    "train_positions_digest": "c6955ce95a87c980b2515bbee4135f2da6187825a58dc694ffd157ab3e8d54e9",
+    "holdout_positions_digest": "d0c5864d34d85b800586140fc3d475254ac624d48dc3cd0a3444010af673cb1a",
+    "valid_positions_digest": "eedc539e16fc0e9575f1fa403728001991d61b964b66f69d534ec9c36e4be3ba"
+  },
+  "failure": {
+    "code": "deterministic_recommendation_unavailable",
+    "error_type": "DeterministicRecommendationUnavailable",
+    "message": "[deterministic_recommendation_unavailable] The independent deterministic recommender failed before validation could begin.",
+    "check_codes": [],
+    "original_error_type": "RuntimeError",
+    "original_error_message": "deterministic policy crashed"
+  }
+}

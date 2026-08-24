@@ -1,0 +1,205 @@
+{
+  "rows": 442,
+  "columns": 11,
+  "duplicate_rows": 0,
+  "column_details": [
+    {
+      "name": "age",
+      "dtype": "int64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 58,
+      "identifier_like": false,
+      "sample_values": [
+        59,
+        48,
+        72
+      ],
+      "min": 19,
+      "max": 79,
+      "mean": 48.5181,
+      "infinity": 0
+    },
+    {
+      "name": "sex",
+      "dtype": "int64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 2,
+      "identifier_like": false,
+      "sample_values": [
+        2,
+        1,
+        2
+      ],
+      "min": 1,
+      "max": 2,
+      "mean": 1.4683,
+      "infinity": 0
+    },
+    {
+      "name": "bmi",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 163,
+      "identifier_like": false,
+      "sample_values": [
+        32.1,
+        21.6,
+        30.5
+      ],
+      "min": 18.0,
+      "max": 42.2,
+      "mean": 26.3758,
+      "infinity": 0
+    },
+    {
+      "name": "bp",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 100,
+      "identifier_like": false,
+      "sample_values": [
+        101.0,
+        87.0,
+        93.0
+      ],
+      "min": 62.0,
+      "max": 133.0,
+      "mean": 94.647,
+      "infinity": 0
+    },
+    {
+      "name": "s1",
+      "dtype": "int64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 141,
+      "identifier_like": false,
+      "sample_values": [
+        157,
+        183,
+        156
+      ],
+      "min": 97,
+      "max": 301,
+      "mean": 189.1403,
+      "infinity": 0
+    },
+    {
+      "name": "s2",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 302,
+      "identifier_like": false,
+      "sample_values": [
+        93.2,
+        103.2,
+        93.6
+      ],
+      "min": 41.6,
+      "max": 242.4,
+      "mean": 115.4391,
+      "infinity": 0
+    },
+    {
+      "name": "s3",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 63,
+      "identifier_like": false,
+      "sample_values": [
+        38.0,
+        70.0,
+        41.0
+      ],
+      "min": 22.0,
+      "max": 99.0,
+      "mean": 49.7885,
+      "infinity": 0
+    },
+    {
+      "name": "s4",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 66,
+      "identifier_like": false,
+      "sample_values": [
+        4.0,
+        3.0,
+        4.0
+      ],
+      "min": 2.0,
+      "max": 9.09,
+      "mean": 4.0702,
+      "infinity": 0
+    },
+    {
+      "name": "s5",
+      "dtype": "float64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 184,
+      "identifier_like": false,
+      "sample_values": [
+        4.8598,
+        3.8918,
+        4.6728
+      ],
+      "min": 3.2581,
+      "max": 6.107,
+      "mean": 4.6414,
+      "infinity": 0
+    },
+    {
+      "name": "s6",
+      "dtype": "int64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 56,
+      "identifier_like": false,
+      "sample_values": [
+        87,
+        69,
+        85
+      ],
+      "min": 58,
+      "max": 124,
+      "mean": 91.2602,
+      "infinity": 0
+    },
+    {
+      "name": "disease_progression",
+      "dtype": "int64",
+      "semantic_type": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "unique": 214,
+      "identifier_like": false,
+      "sample_values": [
+        151,
+        75,
+        141
+      ],
+      "min": 25,
+      "max": 346,
+      "mean": 152.1335,
+      "infinity": 0
+    }
+  ]
+}
