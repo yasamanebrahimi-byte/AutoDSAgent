@@ -11,6 +11,32 @@ __pycache__/
 .pytest_eval_*/
 .pytest_full_tmp*/
 evaluation_results/_objective_quality_*/
+
+# Keep curated evaluation summaries/configs trackable, but ignore raw run data.
+evaluation_results/**/trials.jsonl
+evaluation_results/**/*cache*.jsonl
+evaluation_results/**/empirical_reference*.json
+evaluation_results/**/run.json
+evaluation_results/**/decision.json
+evaluation_results/**/cleaning.json
+evaluation_results/**/eda.json
+evaluation_results/**/modeling.json
+evaluation_results/**/planning_profile.json
+evaluation_results/**/profile.json
+evaluation_results/**/reproduce_analysis.py
+evaluation_results/**/selected_model.joblib
+evaluation_results/**/data/
+evaluation_results/**/model/
+evaluation_results/**/plots/
+evaluation_results/**/runs/
+evaluation_results/**/*smoke*/
+evaluation_results/**/_verification/
+
+# Generated policy/evaluation scratch directories.
+.boundary_calibration_*/
+.boundary_final_*/
+.pytest_tmp_interaction*/
+
 .ruff_cache/
 .env
 runs/*
