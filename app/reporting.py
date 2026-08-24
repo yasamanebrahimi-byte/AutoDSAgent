@@ -223,6 +223,7 @@ def render_report(
     deterministic_validation = validation.get("deterministic_validation") or {}
     hard_validation = validation.get("hard_validation") or {}
     soft_challenge = validation.get("soft_challenge") or {}
+    empirical_probe = validation.get("empirical_probe") or {}
     final_decision = validation.get("final") or {}
     validation_checks = deterministic_validation.get("checks", [])
     passed_checks = sum(1 for check in validation_checks if check.get("passed"))
@@ -327,6 +328,12 @@ Selected-family score contributions:
 Hard validation: <code>{hard_validation.get('status', 'not recorded')}</code>; intervention required: <code>{hard_validation.get('intervention_required', False)}</code>; initial proposal hard-invalid: <code>{hard_validation.get('initial_hard_invalid', False)}</code>.
 
 Soft challenge: <code>{soft_challenge.get('status', 'not recorded')}</code>; decision: <code>{soft_challenge.get('decision', 'not recorded')}</code>; decision reason: <code>{soft_challenge.get('decision_reason', 'not recorded')}</code>; method disagreement: <code>{soft_challenge.get('method_disagreement', False)}</code>; preprocessing disagreement: <code>{soft_challenge.get('preprocessing_disagreement', False)}</code>; deterministic confidence: <code>{soft_challenge.get('deterministic_confidence', deterministic.confidence)}</code>; score margin: <code>{soft_challenge.get('score_margin', deterministic.score_margin)}</code>; empirical reliability: <code>{soft_challenge.get('empirical_reliability', 'insufficient_evidence')}</code>; calibration support: <code>{soft_challenge.get('calibration_support', 0)}</code>; reconciliation invoked: <code>{soft_challenge.get('reconciliation_invoked', False)}</code>.
+
+### Limited training-only empirical comparison
+
+Probe invoked: <code>{validation.get('empirical_probe_invoked', False)}</code>; status: <code>{empirical_probe.get('status', 'not invoked')}</code>; policy: <code>{empirical_probe.get('policy_version', 'not invoked')}</code>; metric: <code>{empirical_probe.get('metric', 'not invoked')}</code>; folds: <code>{empirical_probe.get('cv_folds', 'not invoked')}</code>; winner: <code>{empirical_probe.get('winner', 'not invoked')}</code>; evidence strength: <code>{empirical_probe.get('evidence_strength', 'not invoked')}</code>.
+
+The probe, when present, compares only Proposal A and Proposal B using frozen training-partition rows and fold-local preprocessing. Its result is directional evidence—not final holdout validation or an automatic model selection—and remains subject to fold variability and reconciliation judgment. Details: <code>{json.dumps(empirical_probe, sort_keys=True) if empirical_probe else 'not invoked'}</code>.
 
 Final selection source: <code>{final_decision.get('selected_source', 'not recorded')}</code>.
 

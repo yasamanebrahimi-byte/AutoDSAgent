@@ -224,7 +224,9 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
                     "deterministic_recommendation": deterministic,
                 },
             )
-        if profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
+        if isinstance(deterministic.get("_blinded_reconciliation_payload"), dict):
+            blinded_payload = deterministic["_blinded_reconciliation_payload"]
+        elif profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
             blinded_payload = profile
         else:
             blinded_payload = build_blinded_reconciliation(
@@ -274,11 +276,17 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
             Distinguish observed dataset evidence from each proposal's interpretation. The
             compatibility diagnostics in the input are heuristic structural evidence only.
             They are not probabilities, cross-validation results, empirical performance,
-            expected accuracy/RMSE, or proof that either proposal is better. Do not use holdout
-            values, candidate-model CV results, empirical-reference rankings, or historical
-            challenge reliability. Hard validation outcomes describe safety constraints, not
-            comparative predictive quality. Re-check preprocessing, leakage, immutable context,
-            supported methods, and the complete contract before returning the selected plan.""",
+            expected accuracy/RMSE, or proof that either proposal is better. When present,
+            the section named LIMITED TRAINING-ONLY EMPIRICAL COMPARISON is a small directional
+            comparison of only Proposal A and Proposal B using training-side folds. It is not
+            final holdout performance or a guarantee of future generalization; fold variability
+            matters, and preprocessing was fitted inside each fold. Weigh a strong, consistent
+            comparison more heavily than heuristic point scores, but do not treat its winner as
+            an automatic final decision. Do not use holdout values, empirical-reference
+            rankings, or historical challenge reliability. Hard validation outcomes describe
+            safety constraints, not comparative predictive quality. Re-check preprocessing,
+            leakage, immutable context, supported methods, and the complete contract before
+            returning the selected plan.""",
             {
                 "question": question,
                 **blinded_payload,
@@ -323,7 +331,9 @@ coerce_numeric_strings.""",
                     "deterministic_recommendation": deterministic,
                 },
             )
-        if profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
+        if isinstance(deterministic.get("_blinded_reconciliation_payload"), dict):
+            blinded_payload = deterministic["_blinded_reconciliation_payload"]
+        elif profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
             blinded_payload = profile
         else:
             blinded_payload = build_blinded_reconciliation(
@@ -370,12 +380,18 @@ coerce_numeric_strings.""",
 
             Compatibility diagnostics are heuristic structural evidence only. They are not
             probabilities, cross-validation results, empirical performance, expected
-            accuracy/RMSE, or proof that either proposal is better. Do not use holdout values,
-            candidate-model CV results, empirical-reference rankings, or historical challenge
-            reliability. Re-check target/task immutability, leakage, supported methods, all
-            observed missing/infinite values, safe unknown-category handling, and that learned
-            transformations remain inside the training pipeline. Explicitly discuss material
-            preprocessing differences. Return only a proposal represented in the input.""",
+            accuracy/RMSE, or proof that either proposal is better. When present, LIMITED
+            TRAINING-ONLY EMPIRICAL COMPARISON is a small directional training-fold comparison
+            of only Proposal A and Proposal B. It is not final holdout performance or a
+            guarantee of future generalization; consider fold variability and the fact that
+            preprocessing was fitted inside each fold. A weak or tied result should not
+            dominate structural reasoning, and the empirical winner is evidence rather than
+            an automatic final selection. Do not use holdout values, empirical-reference
+            rankings, or historical challenge reliability. Re-check target/task immutability,
+            leakage, supported methods, all observed missing/infinite values, safe
+            unknown-category handling, and that learned transformations remain inside the
+            training pipeline. Explicitly discuss material preprocessing differences. Return
+            only a proposal represented in the input.""",
             {
                 "question": question,
                 **blinded_payload,

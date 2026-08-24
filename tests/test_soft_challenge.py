@@ -194,6 +194,8 @@ def test_challenge_can_still_lose_reconciliation(tmp_path: Path):
     )
     assert result["soft_challenge_decision"] == "challenge"
     assert result["soft_challenge"]["reconciliation_invoked"] is True
+    assert result["empirical_probe_invoked"] is True
+    assert result["empirical_probe"]["status"] in {"completed", "unavailable", "failed"}
     assert result["final"]["selected_source"] == "agent"
 
 

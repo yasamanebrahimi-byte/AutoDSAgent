@@ -1,7 +1,7 @@
 # Modeling reconciliation
 
 The default post-challenge modeling reconciler is
-`2026-08-24.blinded-evidence-comparison.v1` (`blinded_evidence_comparison`). It
+`2026-08-24.blinded-evidence-comparison.v2-empirical-probe` (`blinded_evidence_comparison`). It
 is invoked only after the existing formulation gate, frozen split, hard
 validation, and soft-challenge policy. The initial modeling proposal and the
 deterministic recommendation remain independent; this change only affects the
@@ -30,18 +30,28 @@ universal simplicity or complexity rule.
 Distinguish observed dataset evidence from each proposal's interpretation. The
 compatibility diagnostics in the input are heuristic structural evidence only.
 They are not probabilities, cross-validation results, empirical performance,
-expected accuracy/RMSE, or proof that either proposal is better. Do not use holdout
-values, candidate-model CV results, empirical-reference rankings, or historical
-challenge reliability. Hard validation outcomes describe safety constraints, not
-comparative predictive quality. Re-check preprocessing, leakage, immutable context,
-supported methods, and the complete contract before returning the selected plan.
+expected accuracy/RMSE, or proof that either proposal is better. If present,
+`LIMITED TRAINING-ONLY EMPIRICAL COMPARISON` is a small directional comparison of
+only Proposal A and Proposal B using training-side folds. It is not final holdout
+performance or a guarantee of future generalization; fold variability matters and
+preprocessing was fitted inside each fold. Weigh strong, consistent direct evidence
+more heavily than heuristic point scores, but do not treat its winner as an
+automatic final decision. Do not use holdout values, empirical-reference rankings,
+or historical challenge reliability. Hard validation outcomes describe safety
+constraints, not comparative predictive quality. Re-check preprocessing, leakage,
+immutable context, supported methods, and the complete contract before returning
+the selected plan.
 ```
 
 The JSON payload contains shared `dataset_evidence`, `proposal_a`, `proposal_b`,
 shared preprocessing requirements, neutral preprocessing differences, and
 source-neutral hard-validation results. Each proposal has the same fields:
 `model_family`, `preprocessing`, `rationale`, `supporting_evidence`,
-`assumptions`, and `risks`.
+`assumptions`, and `risks`. A challenged payload may also contain an
+`empirical_probe` block with symmetric A/B mean and fold scores, standard
+deviations, fold wins, metric direction, relative advantage, and evidence
+strength. A failed or unavailable probe is recorded as such and is not treated as
+evidence for either proposal.
 
 Raw compatibility scores, ranked methods, score margins, deterministic
 confidence, calibration reliability, holdout results, candidate-model CV
@@ -66,7 +76,7 @@ state is never used. The resolved ordering is retained privately in artifacts:
 ```json
 {
   "reconciliation_mode": "blinded_evidence_comparison",
-  "reconciliation_prompt_version": "2026-08-24.blinded-evidence-comparison.v1",
+  "reconciliation_prompt_version": "2026-08-24.blinded-evidence-comparison.v2-empirical-probe",
   "proposal_order_seed": 123,
   "proposal_a_source": "agent",
   "proposal_b_source": "deterministic",
@@ -93,4 +103,3 @@ B/A order. The summary reports reconciliation invocation, agent versus
 deterministic selection, Proposal A/B selection rates and imbalance, and paired
 `order_swap_consistency_rate` / `order_swap_flip_rate`. The existing predictive,
 intervention, safety, and catastrophic-regret metrics remain unchanged.
-

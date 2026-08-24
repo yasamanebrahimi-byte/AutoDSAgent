@@ -14,6 +14,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
+from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
 from app.llm import PROMPT_SCHEMA_VERSION, OpenAIAgents
 from app.reconciliation import LEGACY_RECONCILIATION_PROMPT_VERSION
@@ -63,6 +64,7 @@ class EvaluationConfig:
     gate_mode: str = "selective"
     reconciliation_mode: str = "blinded"
     order_swap: bool = False
+    empirical_probe_enabled: bool = True
 
     def __post_init__(self) -> None:
         if self.repetitions < 1:
@@ -528,6 +530,10 @@ def _run_trial(
                     soft_challenge_mode=config.gate_mode,
                     reconciliation_mode=config.reconciliation_mode,
                     proposal_order_override=proposal_order,
+                    empirical_probe_policy=EmpiricalProbePolicy(
+                        enabled=config.empirical_probe_enabled,
+                        random_state=split_seed,
+                    ),
                 )
                 # The gate may also reconcile a hard-invalid initial proposal
                 # whose method-family comparison looks like agreement.  The
@@ -811,6 +817,12 @@ def _run_trial(
             "reconciliation_invoked": False,
             "reconciliation_status": "not_invoked",
         },
+        "empirical_probe_invoked": bool((gate_result or {}).get("empirical_probe_invoked", False)),
+        "empirical_probe_policy_version": (gate_result or {}).get(
+            "empirical_probe_policy_version", EmpiricalProbePolicy().policy_version
+        ),
+        "empirical_probe_status": ((gate_result or {}).get("empirical_probe") or {}).get("status"),
+        "empirical_probe": (gate_result or {}).get("empirical_probe"),
         "final_decision": gate_result.get("final") if gate_result else {
             **final_fields,
             "selected_source": None,
@@ -1059,6 +1071,7 @@ def run_evaluation(
     gate_mode: str = "always_reconcile",
     reconciliation_mode: str = "blinded",
     order_swap: bool = False,
+    empirical_probe_enabled: bool = True,
     resume: bool = False,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
@@ -1075,6 +1088,7 @@ def run_evaluation(
         gate_mode=gate_mode,
         reconciliation_mode=reconciliation_mode,
         order_swap=order_swap,
+        empirical_probe_enabled=empirical_probe_enabled,
         prompt_schema_version=(
             LEGACY_RECONCILIATION_PROMPT_VERSION
             if reconciliation_mode == "legacy"
@@ -1102,6 +1116,8 @@ def run_evaluation(
         "gate_mode": config.gate_mode,
         "reconciliation_mode": config.reconciliation_mode,
         "order_swap": config.order_swap,
+        "empirical_probe_enabled": config.empirical_probe_enabled,
+        "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "reconciliation_mode_definitions": {
             "legacy": "source-labeled reconciliation prompt retained as an evaluation baseline",
             "blinded": "source-neutral Proposal A/Proposal B evidence-comparison prompt",

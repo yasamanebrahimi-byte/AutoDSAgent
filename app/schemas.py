@@ -225,6 +225,9 @@ class SoftChallengeArtifact(StrictModel):
     catastrophic_regret_support: int = Field(default=0, ge=0)
     score_margin: Optional[float] = Field(default=None, ge=0)
     training_row_count: Optional[int] = Field(default=None, ge=0)
+    empirical_probe_invoked: StrictBool = False
+    empirical_probe_policy_version: str = "v1"
+    empirical_probe: Optional[dict[str, Any]] = None
     scores_are_probabilities: StrictBool = False
     scores_are_cross_validation_results: StrictBool = False
     scores_are_empirical_performance_estimates: StrictBool = False

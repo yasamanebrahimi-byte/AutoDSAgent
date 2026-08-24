@@ -33,6 +33,11 @@ def main() -> None:
         action="store_true",
         help="Run paired A/B and B/A reconciliation trials on identical evidence.",
     )
+    parser.add_argument(
+        "--no-empirical-probe",
+        action="store_true",
+        help="Disable the challenged-disagreement training-only probe for the no-probe ablation.",
+    )
     parser.add_argument("--case", action="append", dest="cases", help="Benchmark case name; repeatable.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use the documented offline fallback.")
@@ -55,6 +60,7 @@ def main() -> None:
         gate_mode=args.gate_mode,
         reconciliation_mode=args.reconciliation_mode,
         order_swap=args.order_swap,
+        empirical_probe_enabled=not args.no_empirical_probe,
         resume=args.resume,
     )
     print(json.dumps(result, indent=2, default=str))

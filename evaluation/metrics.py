@@ -281,6 +281,73 @@ def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dic
     }
 
 
+def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize runtime probe use without exposing it to runtime decisions."""
+
+    invoked = [record for record in records if record.get("empirical_probe_invoked") is True]
+    completed = [
+        record for record in invoked
+        if (record.get("empirical_probe") or {}).get("status") == "completed"
+    ]
+    unavailable = [
+        record for record in invoked
+        if (record.get("empirical_probe") or {}).get("status") == "unavailable"
+    ]
+    failed = [
+        record for record in invoked
+        if (record.get("empirical_probe") or {}).get("status") == "failed"
+    ]
+    winners = Counter((record.get("empirical_probe") or {}).get("winner") for record in completed)
+    strengths = Counter((record.get("empirical_probe") or {}).get("evidence_strength") for record in completed)
+    fits = [
+        float((record.get("empirical_probe") or {}).get("fit_count"))
+        for record in completed
+        if (record.get("empirical_probe") or {}).get("fit_count") is not None
+    ]
+    winner_final_matches = []
+    winner_reference_matches = []
+    useful = []
+    for record in completed:
+        probe = record.get("empirical_probe") or {}
+        winner = probe.get("winner")
+        if winner not in {"A", "B"}:
+            continue
+        proposal = probe.get(f"proposal_{winner.lower()}") or {}
+        method = proposal.get("model_family")
+        if method is not None and record.get("final_method") is not None:
+            winner_final_matches.append(record.get("final_method") == method)
+        if method is not None and record.get("empirical_best_method") is not None:
+            winner_reference_matches.append(method == record.get("empirical_best_method"))
+        if probe.get("evidence_strength") in {"moderate", "strong"}:
+            initial = record.get("agent_normalized_regret")
+            gated = record.get("gated_normalized_regret")
+            if initial is not None and gated is not None:
+                useful.append(float(gated) <= float(initial))
+    return {
+        "probe_invocation_count": len(invoked),
+        "probe_completion_count": len(completed),
+        "probe_unavailable_count": len(unavailable),
+        "probe_failed_count": len(failed),
+        "probe_completion_rate": _rate(len(completed), len(invoked)),
+        "probe_a_win_count": winners.get("A", 0),
+        "probe_b_win_count": winners.get("B", 0),
+        "probe_tie_count": winners.get("tie", 0),
+        "probe_evidence_strength_counts": dict(sorted(strengths.items())),
+        "probe_winner_matched_final_selection_count": sum(winner_final_matches),
+        "probe_winner_matched_final_selection_rate": _rate(
+            sum(winner_final_matches), len(winner_final_matches)
+        ),
+        "probe_winner_matched_empirical_reference_count": sum(winner_reference_matches),
+        "probe_winner_matched_empirical_reference_rate": _rate(
+            sum(winner_reference_matches), len(winner_reference_matches)
+        ),
+        "probe_moderate_or_strong_following_improved_or_tied_count": sum(useful),
+        "probe_moderate_or_strong_following_improved_or_tied_rate": _rate(sum(useful), len(useful)),
+        "probe_mean_model_fits": _mean(fits),
+        "probe_median_model_fits": _median(fits),
+    }
+
+
 def summarize_trials(
     trials: list[dict[str, Any]],
     *,
@@ -395,6 +462,7 @@ def summarize_trials(
             for record in catastrophic_challenges
         )
         return {
+            **_empirical_probe_summary(valid_records),
             "trial_count": len(records),
             "completed_trial_count": len(valid_records),
             "valid_trial_count": len(final_valid_records),
@@ -601,6 +669,7 @@ def summarize_trials(
         for source in sorted({str(record.get("agent_source")) for record in trials})
     }
     return {
+        **_empirical_probe_summary(completed),
         "formulas": {
             "classification_regret": "max(0, best_macro_f1 - selected_macro_f1)",
             "regression_regret": "max(0, selected_rmse - best_rmse)",

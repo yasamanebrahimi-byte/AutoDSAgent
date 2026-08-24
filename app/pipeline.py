@@ -20,6 +20,10 @@ from app.deterministic import (
 )
 from app.llm import OpenAIAgents
 from app.modeling import fit_selected_model
+from app.empirical_challenge_probe import (
+    EmpiricalProbePolicy,
+    run_pairwise_model_probe,
+)
 from app.preprocessing import compare_preprocessing_plans, requirements_from_records
 from app.reporting import render_code, render_report, write_json
 from app.reconciliation import (
@@ -72,6 +76,7 @@ def run_analysis(
     offline: bool = False,
     random_state: int = 42,
     test_size: float = 0.2,
+    empirical_probe_policy: EmpiricalProbePolicy | None = None,
 ) -> dict[str, Any]:
     dataset_path = Path(dataset_path).resolve()
     if not dataset_path.exists():
@@ -374,6 +379,7 @@ def run_analysis(
             row_positions=list(range(len(dataframe))),
             approved_target=established_target,
             approved_task=established_task,
+            empirical_probe_policy=empirical_probe_policy,
         )
         validation["formulation"] = decision_payload["formulation"]
         decision_payload["modeling_gate_status"] = "completed"
@@ -718,6 +724,7 @@ def _validate_modeling_gate(
     approved_task: str,
     soft_challenge_policy: SoftChallengePolicy | None = None,
     soft_challenge_mode: str = "selective",
+    empirical_probe_policy: EmpiricalProbePolicy | None = None,
 ) -> dict[str, Any]:
     """Validate the initial proposal before treating the deterministic output as a challenger.
 
@@ -736,6 +743,22 @@ def _validate_modeling_gate(
         if str(record.get("name")) != approved_target
     ]
     requirements = requirements_from_records(records, approved_task, deterministic.recommended_method)
+
+    def probe_training_frame() -> pd.DataFrame:
+        # Production reaches this gate before structural cleaning, so the
+        # frozen split positions directly identify the training rows.  The
+        # alternate mapping keeps the helper safe for callers that pass a
+        # cleaned frame with original source positions.
+        if row_positions == list(range(len(dataframe))):
+            return training_profile_frame(
+                dataframe,
+                approved_target,
+                approved_task,
+                test_size=test_size,
+                random_state=random_state,
+                split=split,
+            )
+        return training_partition_frame(dataframe, split, row_positions)
 
     def hard_validate(method: str, preprocessing: PreprocessingContract) -> ValidationResult:
         result = validate_training_plan(
@@ -822,6 +845,8 @@ def _validate_modeling_gate(
     blinded_reconciliation = None
     selected_proposal = None
     selected_proposal_source = None
+    empirical_probe: dict[str, Any] | None = None
+    empirical_probe_invoked = False
     if (
         not hard_reconciliation_required
         and not soft_reconciliation_required
@@ -863,6 +888,58 @@ def _validate_modeling_gate(
                 },
                 order_seed=random_state,
             )
+            if method_disagreement and soft_decision.decision == "challenge" and not hard_reconciliation_required and (
+                empirical_probe_policy is None or empirical_probe_policy.enabled
+            ) and (
+                agent_hard_validation.status == "passed" and challenger_hard_validation.status == "passed"
+            ):
+                # The first blinded payload establishes the randomized A/B
+                # mapping.  The probe is then translated into that same
+                # vocabulary before the prompt payload is rebuilt.
+                empirical_probe_invoked = True
+                configured_probe_policy = empirical_probe_policy or EmpiricalProbePolicy()
+                if configured_probe_policy.random_state is None:
+                    configured_probe_policy = replace(configured_probe_policy, random_state=random_state)
+                source_by_label = {
+                    "A": blinded_reconciliation.proposal_a_source,
+                    "B": blinded_reconciliation.proposal_b_source,
+                }
+                proposal_by_source = {
+                    "agent": modeling_plan,
+                    "deterministic": deterministic,
+                }
+                empirical_probe = run_pairwise_model_probe(
+                    probe_training_frame(),
+                    approved_target,
+                    approved_task,
+                    proposal_by_source[source_by_label["A"]],
+                    proposal_by_source[source_by_label["B"]],
+                    policy=configured_probe_policy,
+                    random_state=configured_probe_policy.random_state,
+                    validation_by_method={
+                        modeling_plan.recommended_method: agent_hard_validation,
+                        deterministic.recommended_method: challenger_hard_validation,
+                    },
+                )
+                blinded_reconciliation = build_blinded_reconciliation(
+                    reconciliation_profile,
+                    modeling_plan,
+                    deterministic,
+                    target_column=approved_target,
+                    task_type=approved_task,
+                    preprocessing_comparison=preprocessing_comparison,
+                    preprocessing_requirements=requirements.as_dict(),
+                    hard_validation={
+                        "agent": _reconciliation_hard_summary(agent_hard_validation),
+                        "deterministic": _reconciliation_hard_summary(challenger_hard_validation),
+                    },
+                    order_seed=random_state,
+                    proposal_order=(
+                        blinded_reconciliation.proposal_a_source,
+                        blinded_reconciliation.proposal_b_source,
+                    ),
+                    empirical_probe=empirical_probe,
+                )
             resolution = _call_or_fallback(
                 "modeling_reconciliation",
                 lambda: agents.reconcile_modeling(
@@ -876,6 +953,7 @@ def _validate_modeling_gate(
                             blinded_reconciliation.proposal_a_source,
                             blinded_reconciliation.proposal_b_source,
                         ],
+                        "_blinded_reconciliation_payload": blinded_reconciliation.payload,
                         "preprocessing_comparison": preprocessing_comparison,
                         "preprocessing_requirements": requirements.as_dict(),
                         "hard_validation": {
@@ -889,6 +967,7 @@ def _validate_modeling_gate(
                             "preprocessing_disagreement": preprocessing_disagreement,
                             "reconciliation_justified": soft_reconciliation_required,
                         },
+                        "empirical_probe": empirical_probe,
                     },
                 ),
                 lambda: _fallback_modeling_resolution(modeling_plan, deterministic),
@@ -1046,6 +1125,13 @@ def _validate_modeling_gate(
         catastrophic_regret_support=soft_decision.catastrophic_regret_support,
         score_margin=soft_decision.score_margin,
         training_row_count=soft_decision.training_row_count,
+        empirical_probe_invoked=empirical_probe_invoked,
+        empirical_probe_policy_version=(
+            empirical_probe_policy.policy_version
+            if empirical_probe_policy is not None
+            else EmpiricalProbePolicy().policy_version
+        ),
+        empirical_probe=empirical_probe,
     )
     final_artifact = {
         "target_column": approved_target,
@@ -1093,6 +1179,13 @@ def _validate_modeling_gate(
         "hard_validation": hard_artifact.model_dump(mode="json"),
         "soft_challenge": soft_artifact.model_dump(mode="json"),
         "soft_challenge_decision": soft_decision.decision,
+        "empirical_probe_invoked": empirical_probe_invoked,
+        "empirical_probe_policy_version": (
+            empirical_probe_policy.policy_version
+            if empirical_probe_policy is not None
+            else EmpiricalProbePolicy().policy_version
+        ),
+        "empirical_probe": empirical_probe,
         "final": final_artifact,
         "hard_validation_intervened": agent_hard_validation.status != "passed",
         "agent_method": modeling_plan.recommended_method,
@@ -1113,6 +1206,13 @@ def _validate_modeling_gate(
         "hard_validation": hard_artifact.model_dump(mode="json"),
         "soft_challenge": soft_artifact.model_dump(mode="json"),
         "soft_challenge_decision": soft_decision.decision,
+        "empirical_probe_invoked": empirical_probe_invoked,
+        "empirical_probe_policy_version": (
+            empirical_probe_policy.policy_version
+            if empirical_probe_policy is not None
+            else EmpiricalProbePolicy().policy_version
+        ),
+        "empirical_probe": empirical_probe,
         "final": final_artifact,
         "status": status,
         "artifact": gate_artifact.model_dump(mode="json"),
@@ -1141,6 +1241,7 @@ def _validate_before_training(
     soft_challenge_mode: str = "selective",
     reconciliation_mode: str = "blinded",
     proposal_order_override: tuple[str, str] | None = None,
+    empirical_probe_policy: EmpiricalProbePolicy | None = None,
 ) -> dict[str, Any]:
     """Legacy combined-plan gate with explicit hard and soft decision artifacts."""
     if reconciliation_mode not in {"blinded", "legacy"}:
@@ -1184,6 +1285,20 @@ def _validate_before_training(
             split=split,
             row_positions=row_positions,
         )
+
+    def probe_training_frame() -> pd.DataFrame:
+        if dataframe is None or split is None:
+            raise InvariantViolation("The empirical probe requires the frozen training partition.")
+        if row_positions is None or row_positions == list(range(len(dataframe))):
+            return training_profile_frame(
+                dataframe,
+                agent_plan.target_column,
+                agent_plan.task_type,
+                test_size=test_size,
+                random_state=random_state,
+                split=split,
+            )
+        return training_partition_frame(dataframe, split, row_positions)
     preprocessing_comparison = compare_preprocessing_plans(
         agent_plan.preprocessing,
         deterministic.preprocessing,
@@ -1251,6 +1366,8 @@ def _validate_before_training(
     blinded_reconciliation = None
     selected_proposal = None
     selected_proposal_source = None
+    empirical_probe: dict[str, Any] | None = None
+    empirical_probe_invoked = False
     if (
         not hard_reconciliation_required
         and not soft_reconciliation_required
@@ -1298,6 +1415,61 @@ def _validate_before_training(
                 order_seed=random_state,
                 proposal_order=proposal_order_override,
             )
+            if (
+                reconciliation_mode == "blinded"
+                and method_disagreement
+                and soft_decision.decision == "challenge"
+                and not hard_reconciliation_required
+                and (empirical_probe_policy is None or empirical_probe_policy.enabled)
+                and agent_hard_validation is not None
+                and challenger_hard_validation is not None
+                and agent_hard_validation.status == "passed"
+                and challenger_hard_validation.status == "passed"
+            ):
+                empirical_probe_invoked = True
+                configured_probe_policy = empirical_probe_policy or EmpiricalProbePolicy()
+                if configured_probe_policy.random_state is None:
+                    configured_probe_policy = replace(configured_probe_policy, random_state=random_state)
+                proposal_by_source = {
+                    "agent": agent_plan,
+                    "deterministic": deterministic,
+                }
+                source_by_label = {
+                    "A": blinded_reconciliation.proposal_a_source,
+                    "B": blinded_reconciliation.proposal_b_source,
+                }
+                empirical_probe = run_pairwise_model_probe(
+                    probe_training_frame(),
+                    agent_plan.target_column,
+                    agent_plan.task_type,
+                    proposal_by_source[source_by_label["A"]],
+                    proposal_by_source[source_by_label["B"]],
+                    policy=configured_probe_policy,
+                    random_state=configured_probe_policy.random_state,
+                    validation_by_method={
+                        agent_plan.recommended_method: agent_hard_validation,
+                        deterministic.recommended_method: challenger_hard_validation,
+                    },
+                )
+                blinded_reconciliation = build_blinded_reconciliation(
+                    reconciliation_profile or profile,
+                    agent_plan,
+                    deterministic,
+                    target_column=agent_plan.target_column,
+                    task_type=agent_plan.task_type,
+                    preprocessing_comparison=preprocessing_comparison,
+                    preprocessing_requirements=requirements.as_dict() if requirements else None,
+                    hard_validation={
+                        "agent": _reconciliation_hard_summary(agent_hard_validation),
+                        "deterministic": _reconciliation_hard_summary(challenger_hard_validation),
+                    },
+                    order_seed=random_state,
+                    proposal_order=(
+                        blinded_reconciliation.proposal_a_source,
+                        blinded_reconciliation.proposal_b_source,
+                    ),
+                    empirical_probe=empirical_probe,
+                )
             reconciliation_input = blinded_reconciliation.payload
         else:
             reconciliation_input = {
@@ -1327,6 +1499,11 @@ def _validate_before_training(
                     ]
                     if blinded_reconciliation is not None
                     else None,
+                    "_blinded_reconciliation_payload": (
+                        blinded_reconciliation.payload
+                        if blinded_reconciliation is not None
+                        else None
+                    ),
                     "preprocessing_comparison": preprocessing_comparison,
                     "preprocessing_requirements": requirements.as_dict() if requirements else None,
                     "hard_validation": {
@@ -1340,6 +1517,7 @@ def _validate_before_training(
                         "preprocessing_disagreement": preprocessing_disagreement,
                         "reconciliation_justified": soft_reconciliation_required,
                     },
+                    "empirical_probe": empirical_probe,
                 },
             ),
             lambda: _fallback_resolution(agent_plan, deterministic),
@@ -1568,6 +1746,13 @@ def _validate_before_training(
         catastrophic_regret_support=soft_decision.catastrophic_regret_support,
         score_margin=soft_decision.score_margin,
         training_row_count=soft_decision.training_row_count,
+        empirical_probe_invoked=empirical_probe_invoked,
+        empirical_probe_policy_version=(
+            empirical_probe_policy.policy_version
+            if empirical_probe_policy is not None
+            else EmpiricalProbePolicy().policy_version
+        ),
+        empirical_probe=empirical_probe,
     )
     final_artifact = {
         "target_column": selected_target,
@@ -1620,6 +1805,13 @@ def _validate_before_training(
         "hard_validation": hard_artifact.model_dump(mode="json"),
         "soft_challenge": soft_artifact.model_dump(mode="json"),
         "soft_challenge_decision": soft_decision.decision,
+        "empirical_probe_invoked": empirical_probe_invoked,
+        "empirical_probe_policy_version": (
+            empirical_probe_policy.policy_version
+            if empirical_probe_policy is not None
+            else EmpiricalProbePolicy().policy_version
+        ),
+        "empirical_probe": empirical_probe,
         "final": final_artifact,
         "hard_validation_intervened": agent_hard_status == "failed",
         "agent_method": agent_plan.recommended_method,

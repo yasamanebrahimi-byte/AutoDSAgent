@@ -125,6 +125,33 @@ def test_live_reconciliation_prompt_is_blinded_and_omits_raw_scores():
     assert "proposal_a" in prompt and "proposal_b" in prompt
 
 
+def test_empirical_probe_is_carried_as_source_neutral_evidence():
+    agent, deterministic = _plans()
+    probe = {
+        "status": "completed",
+        "metric": "macro_f1",
+        "cv_folds": 3,
+        "proposal_a": {"model_family": "linear", "mean_score": 0.80, "std_score": 0.01, "fold_wins": 3},
+        "proposal_b": {"model_family": "tree_ensemble", "mean_score": 0.72, "std_score": 0.02, "fold_wins": 0},
+        "winner": "A",
+        "evidence_strength": "strong",
+    }
+    blinded = build_blinded_reconciliation(
+        _profile(),
+        agent,
+        deterministic,
+        target_column="target",
+        task_type="classification",
+        order_seed=1,
+        empirical_probe=probe,
+    )
+    encoded = json.dumps(blinded.payload, sort_keys=True).lower()
+    assert "empirical_probe" in blinded.payload
+    assert "proposal_a" in encoded and "proposal_b" in encoded
+    assert "agent" not in encoded
+    assert "deterministic" not in encoded
+
+
 def test_reconciliation_metrics_report_position_and_order_swap_bias():
     records = [
         {"reconciliation_status": "succeeded", "selected_proposal": "A", "selected_proposal_source": "agent", "reconciliation_method_source": "agent", "order_swap_pair_id": "case-1"},

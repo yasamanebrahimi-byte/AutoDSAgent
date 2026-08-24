@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 
 BLINDED_RECONCILIATION_MODE = "blinded_evidence_comparison"
-BLINDED_RECONCILIATION_PROMPT_VERSION = "2026-08-24.blinded-evidence-comparison.v1"
+BLINDED_RECONCILIATION_PROMPT_VERSION = "2026-08-24.blinded-evidence-comparison.v2-empirical-probe"
 LEGACY_RECONCILIATION_PROMPT_VERSION = "legacy.reconciliation.v1"
 ProposalSource = Literal["agent", "deterministic"]
 ProposalLabel = Literal["A", "B"]
@@ -308,6 +308,7 @@ def build_blinded_reconciliation(
     hard_validation: dict[str, Any] | None = None,
     order_seed: int = 0,
     proposal_order: tuple[ProposalSource, ProposalSource] | None = None,
+    empirical_probe: dict[str, Any] | None = None,
 ) -> BlindedReconciliation:
     agent_values = _dump(agent_plan)
     deterministic_values = _dump(deterministic)
@@ -354,6 +355,10 @@ def build_blinded_reconciliation(
             "proposal_b": (hard_validation or {}).get(proposal_b_source, {}),
         },
     }
+    if empirical_probe is not None:
+        # The probe is already expressed in the randomized A/B vocabulary.
+        # Keep it as a neutral evidence block and never add source metadata.
+        payload["empirical_probe"] = empirical_probe
     return BlindedReconciliation(
         payload=payload,
         proposal_order_seed=resolved_seed,
