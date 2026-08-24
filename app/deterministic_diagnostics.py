@@ -6,12 +6,20 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import balanced_accuracy_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.neighbors import NearestNeighbors
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from app.deterministic_policy import (
     DeterministicPolicy,
     MAX_CATEGORICAL_CARDINALITY,
 )
 from app.schemas import (
+    ClassificationBoundaryDiagnostics,
     ClassificationTargetDiagnostics,
     DeterministicDiagnostics,
     InteractionDiagnostics,
@@ -556,6 +564,348 @@ def _classification_relationship_signals(
     )
 
 
+def _empty_classification_boundary_signals(
+    reason: str,
+    *,
+    rows: int = 0,
+    numeric_features: list[str] | None = None,
+) -> ClassificationBoundaryDiagnostics:
+    """Return an explicit, non-failing unavailable boundary diagnostic."""
+
+    selected = list(numeric_features or [])
+    return ClassificationBoundaryDiagnostics(
+        boundary_complexity_applicable=False,
+        diagnostic_rows=max(0, int(rows)),
+        diagnostic_numeric_feature_count=len(selected),
+        selected_numeric_features=selected,
+        boundary_diagnostic_reason=reason,
+    )
+
+
+def _select_classification_boundary_features(
+    dataframe: pd.DataFrame,
+    target: pd.Series,
+    numeric_names: list[str],
+    policy: DeterministicPolicy,
+) -> list[str]:
+    """Select a bounded association/coverage mixture for numeric geometry.
+
+    The marginal-association portion finds obvious signal, while coverage and
+    deterministic name-spread portions retain features whose useful signal
+    may only appear jointly.  This deliberately does not choose solely by
+    univariate class association, which would be especially unsafe for XOR-
+    like boundaries.
+    """
+
+    candidates: list[tuple[str, float, float, float]] = []
+    for name in sorted(numeric_names):
+        values = pd.to_numeric(dataframe[name], errors="coerce").replace(
+            [np.inf, -np.inf], np.nan
+        )
+        finite = values.dropna()
+        if len(finite) < 2 or finite.nunique(dropna=True) <= 1:
+            continue
+        coverage = float(len(finite) / max(len(values), 1))
+        scale = float(finite.std(ddof=0))
+        iqr = float(finite.quantile(0.75) - finite.quantile(0.25))
+        robust_spread = iqr / max(scale, 1e-12)
+        candidates.append(
+            (
+                name,
+                _eta_squared(values, target),
+                coverage,
+                robust_spread if np.isfinite(robust_spread) else 0.0,
+            )
+        )
+    limit = min(max(int(policy.max_boundary_numeric_features), 0), len(candidates))
+    if limit <= 0:
+        return []
+    if limit == len(candidates):
+        return sorted(item[0] for item in candidates)
+
+    selected: list[str] = []
+
+    def include(names: list[str]) -> None:
+        for name in names:
+            if name not in selected and len(selected) < limit:
+                selected.append(name)
+
+    quota = max(1, int(np.ceil(limit / 3)))
+    include([item[0] for item in sorted(candidates, key=lambda item: (-item[1], item[0]))[:quota]])
+    include(
+        [
+            item[0]
+            for item in sorted(
+                candidates,
+                key=lambda item: (-item[2], -item[3], item[0]),
+            )[:quota]
+        ]
+    )
+    spread_positions = np.linspace(0, len(candidates) - 1, num=limit, dtype=int)
+    include([candidates[int(position)][0] for position in spread_positions])
+    include([item[0] for item in candidates])
+    return sorted(selected)
+
+
+def _classification_boundary_signals(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    numeric_names: list[str],
+    policy: DeterministicPolicy,
+) -> ClassificationBoundaryDiagnostics:
+    """Estimate classification boundary complexity from training rows only.
+
+    The diagnostic compares two bounded, label-order-invariant signals:
+
+    * a 3-fold (or configured small fixed-fold) balanced-accuracy score from a
+      standardized logistic probe, with imputation and scaling fit inside each
+      fold; and
+    * macro-averaged same-class fraction among scaled numeric nearest
+      neighbors, which removes the majority-class baseline from local purity.
+
+    ``linear_separability_score`` and ``local_structure_score`` normalize their
+    raw scores above the multiclass chance level.  The raw complexity is
+    ``max(0, local_structure_score - linear_separability_score)`` multiplied
+    by ``0.70 + 0.30 * local_structure_score`` and a class-balance factor
+    ``sqrt(minority_fraction / chance_fraction)``.  The latter makes a weak
+    minority class conservative rather than letting majority geometry look
+    like nonlinear evidence.  The reported score also applies a confidence
+    multiplier (1.0 high, 0.8 medium, 0.45 low), so a fragile geometry
+    estimate cannot carry the same policy authority as a well-supported one.
+    This is a structural probe, not candidate-model CV.
+
+    Geometry intentionally uses usable numeric features only.  Categorical
+    marginal diagnostics remain active, but raw category codes are never
+    inserted into Euclidean neighborhoods.
+    """
+
+    target = dataframe[target_column]
+    valid_target = target.notna()
+    working = dataframe.loc[valid_target].copy()
+    target_values = target.loc[valid_target]
+    rows = int(len(working))
+    selected = _select_classification_boundary_features(
+        working,
+        target_values,
+        numeric_names,
+        policy,
+    )
+    if not selected:
+        return _empty_classification_boundary_signals(
+            "no_usable_numeric_features_for_geometry",
+            rows=rows,
+        )
+
+    class_counts = target_values.value_counts(sort=False)
+    class_count = int(len(class_counts))
+    minimum_class_size = int(class_counts.min()) if len(class_counts) else 0
+    configured_folds = max(2, int(policy.boundary_probe_cv_folds))
+    n_splits = min(configured_folds, minimum_class_size)
+    if class_count < 2 or n_splits < 2:
+        return _empty_classification_boundary_signals(
+            "insufficient_class_support_for_diagnostic_cv",
+            rows=rows,
+            numeric_features=selected,
+        )
+
+    diagnostic_frame = working[selected].apply(pd.to_numeric, errors="coerce")
+    if policy.max_boundary_rows and len(diagnostic_frame) > policy.max_boundary_rows:
+        row_hashes = pd.util.hash_pandas_object(diagnostic_frame, index=False).to_numpy(dtype=np.uint64)
+        positions = np.argsort(row_hashes, kind="mergesort")[: int(policy.max_boundary_rows)]
+        diagnostic_frame = diagnostic_frame.iloc[positions].reset_index(drop=True)
+        target_values = target_values.iloc[positions].reset_index(drop=True)
+    else:
+        diagnostic_frame = diagnostic_frame.reset_index(drop=True)
+        target_values = target_values.reset_index(drop=True)
+
+    # Stratified folds and nearest-neighbor tie handling must not depend on
+    # the caller's row order.  Canonical feature-row ordering is label-free;
+    # exact duplicate feature rows retain their stable input order, which is
+    # immaterial unless duplicate geometry has conflicting labels.
+    canonical_hashes = pd.util.hash_pandas_object(
+        diagnostic_frame,
+        index=False,
+    ).to_numpy(dtype=np.uint64)
+    canonical_order = np.argsort(canonical_hashes, kind="mergesort")
+    diagnostic_frame = diagnostic_frame.iloc[canonical_order].reset_index(drop=True)
+    target_values = target_values.iloc[canonical_order].reset_index(drop=True)
+
+    finite_counts = diagnostic_frame.notna().sum(axis=0)
+    usable_selected = [name for name in selected if int(finite_counts[name]) >= 2]
+    if not usable_selected:
+        return _empty_classification_boundary_signals(
+            "numeric_features_are_all_missing_or_nonfinite",
+            rows=len(diagnostic_frame),
+            numeric_features=selected,
+        )
+    diagnostic_frame = diagnostic_frame[usable_selected]
+    selected = sorted(usable_selected)
+    rows = int(len(diagnostic_frame))
+    class_counts = target_values.value_counts(sort=False)
+    minimum_class_size = int(class_counts.min()) if len(class_counts) else 0
+    n_splits = min(configured_folds, minimum_class_size)
+    if len(class_counts) < 2 or n_splits < 2:
+        return _empty_classification_boundary_signals(
+            "insufficient_class_support_after_row_limit",
+            rows=rows,
+            numeric_features=selected,
+        )
+
+    probe = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
+            ("scaler", StandardScaler()),
+            (
+                "linear_boundary_probe",
+                LogisticRegression(
+                    C=1.0,
+                    max_iter=500,
+                    solver="lbfgs",
+                    random_state=int(policy.boundary_probe_random_state),
+                ),
+            ),
+        ]
+    )
+    splitter = StratifiedKFold(
+        n_splits=n_splits,
+        shuffle=True,
+        random_state=int(policy.boundary_probe_random_state),
+    )
+    fold_scores: list[float] = []
+    try:
+        for train_index, test_index in splitter.split(diagnostic_frame, target_values):
+            probe.fit(diagnostic_frame.iloc[train_index], target_values.iloc[train_index])
+            predicted = probe.predict(diagnostic_frame.iloc[test_index])
+            score = float(
+                balanced_accuracy_score(target_values.iloc[test_index], predicted)
+            )
+            if not np.isfinite(score):
+                raise ValueError("linear boundary probe produced a non-finite score")
+            fold_scores.append(min(1.0, max(0.0, score)))
+    except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+        return _empty_classification_boundary_signals(
+            f"linear_boundary_probe_failed:{type(exc).__name__}",
+            rows=rows,
+            numeric_features=selected,
+        )
+    if not fold_scores:
+        return _empty_classification_boundary_signals(
+            "linear_boundary_probe_returned_no_folds",
+            rows=rows,
+            numeric_features=selected,
+        )
+
+    try:
+        geometry_imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+        geometry_scaled = StandardScaler().fit_transform(
+            geometry_imputer.fit_transform(diagnostic_frame)
+        )
+        neighbor_k = min(max(int(policy.boundary_neighbor_k), 1), rows - 1)
+        neighbors = NearestNeighbors(n_neighbors=neighbor_k + 1, algorithm="brute")
+        neighbor_indices = neighbors.fit(geometry_scaled).kneighbors(
+            geometry_scaled,
+            return_distance=False,
+        )[:, 1:]
+        label_array = target_values.to_numpy(dtype=object)
+        same_class_fraction = np.mean(
+            label_array[neighbor_indices] == label_array[:, np.newaxis],
+            axis=1,
+        )
+        per_class_consistency = [
+            float(np.mean(same_class_fraction[label_array == label]))
+            for label in pd.unique(target_values)
+        ]
+        local_consistency = float(np.mean(per_class_consistency))
+    except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+        return _empty_classification_boundary_signals(
+            f"local_geometry_failed:{type(exc).__name__}",
+            rows=rows,
+            numeric_features=selected,
+        )
+
+    class_chance = 1.0 / max(len(class_counts), 1)
+    chance_span = max(1.0 - class_chance, 1e-12)
+    linear_probe_score = float(np.mean(fold_scores))
+    linear_separability = min(
+        1.0,
+        max(0.0, (linear_probe_score - class_chance) / chance_span),
+    )
+    local_structure = min(
+        1.0,
+        max(0.0, (local_consistency - class_chance) / chance_span),
+    )
+    nonlinear_advantage = min(
+        1.0,
+        max(0.0, local_structure - linear_separability),
+    )
+    minority_fraction = float(class_counts.min() / max(rows, 1))
+    chance_fraction = 1.0 / max(len(class_counts), 1)
+    class_balance_factor = min(
+        1.0,
+        max(0.0, float(np.sqrt(minority_fraction / max(chance_fraction, 1e-12)))),
+    )
+    raw_complexity = min(
+        1.0,
+        max(
+            0.0,
+            nonlinear_advantage
+            * (0.70 + 0.30 * local_structure)
+            * class_balance_factor,
+        ),
+    )
+    fold_std = float(np.std(fold_scores, ddof=0))
+    missing_fraction = float(diagnostic_frame.isna().to_numpy(dtype=float).mean())
+    sample_to_feature_ratio = rows / max(len(selected), 1)
+    if (
+        rows >= 120
+        and minimum_class_size >= 5 * n_splits
+        and sample_to_feature_ratio >= 8.0
+        and fold_std <= 0.08
+        and missing_fraction <= 0.25
+    ):
+        confidence = "high"
+    elif (
+        rows >= 48
+        and minimum_class_size >= 2 * n_splits
+        and sample_to_feature_ratio >= 4.0
+        and fold_std <= 0.20
+    ):
+        confidence = "medium"
+    else:
+        confidence = "low"
+    confidence_multiplier = {"high": 1.0, "medium": 0.80, "low": 0.45}[confidence]
+    complexity = min(1.0, max(0.0, raw_complexity * confidence_multiplier))
+    if complexity >= policy.classification_boundary_high_threshold:
+        category = "high"
+    elif complexity >= policy.classification_boundary_moderate_threshold:
+        category = "moderate"
+    else:
+        category = "low"
+    return ClassificationBoundaryDiagnostics(
+        boundary_complexity_score=complexity,
+        boundary_complexity=category,
+        boundary_complexity_applicable=True,
+        linear_boundary_probe_score=linear_probe_score,
+        linear_separability_score=linear_separability,
+        linear_probe_fold_std=min(1.0, max(0.0, fold_std)),
+        local_class_consistency=min(1.0, max(0.0, local_consistency)),
+        local_structure_score=local_structure,
+        nonlinear_advantage_score=nonlinear_advantage,
+        diagnostic_rows=rows,
+        diagnostic_numeric_feature_count=len(selected),
+        selected_numeric_features=selected,
+        diagnostic_cv_folds=n_splits,
+        neighbor_k=neighbor_k,
+        diagnostic_missing_fraction=min(1.0, max(0.0, missing_fraction)),
+        diagnostic_sample_to_feature_ratio=max(0.0, float(sample_to_feature_ratio)),
+        boundary_diagnostic_confidence=confidence,
+        boundary_diagnostic_reason=(
+            "training_only_numeric_geometry; standardized_logistic_probe_and_"
+            "macro_local_neighbor_consistency"
+        ),
+    )
+
+
 def _relationship_signals(
     dataframe: pd.DataFrame,
     target_column: str,
@@ -717,6 +1067,16 @@ def compute_deterministic_diagnostics(
         numeric_names,
         categorical_names,
     )
+    classification_boundary = (
+        _classification_boundary_signals(
+            diagnostic_frame,
+            target_column,
+            numeric_names,
+            policy,
+        )
+        if task_type == "classification"
+        else ClassificationBoundaryDiagnostics()
+    )
     interaction_signals = (
         _regression_interaction_signals(
             diagnostic_frame,
@@ -747,10 +1107,20 @@ def compute_deterministic_diagnostics(
     )
     weak_univariate = 1.0 if univariate_signal < weak_association_threshold and usable >= 3 else 0.0
     nonlinear_share = relationship.nonlinear_feature_fraction
+    boundary_structure_score = 0.0
+    if task_type == "classification":
+        confidence_weight = {
+            "high": 1.0,
+            "medium": 0.75,
+            "low": 0.0,
+        }.get(classification_boundary.boundary_diagnostic_confidence, 0.0)
+        boundary_structure_score = classification_boundary.boundary_complexity_score * confidence_weight
     # This is a bounded structural prior for model-family compatibility.  The
-    # legacy relationship terms remain intact; interaction evidence is added as
-    # one modest, explicit term so it cannot silently dominate the policy or be
-    # counted as a second copy of every marginal diagnostic.
+    # legacy relationship terms remain intact; classification boundary evidence
+    # is a separate confidence-weighted term, and regression interaction
+    # evidence is added as one modest explicit term.  Neither can silently
+    # dominate the policy or be counted as a second copy of every marginal
+    # diagnostic.
     structural_complexity = min(
         1.0,
         policy.structural_complexity_mixed_weight * mixed_signal
@@ -759,6 +1129,7 @@ def compute_deterministic_diagnostics(
         + policy.structural_complexity_nonlinearity_strength_weight * nonlinearity
         + policy.structural_complexity_heterogeneity_weight * heterogeneity
         + policy.structural_complexity_weak_marginal_weight * weak_univariate
+        + policy.structural_complexity_boundary_weight * boundary_structure_score
         + policy.structural_complexity_interaction_weight * interaction_signals.interaction_score,
     )
     if structural_complexity >= policy.structural_complexity_high_threshold:
@@ -825,5 +1196,6 @@ def compute_deterministic_diagnostics(
         class_separation_strength=max(0.0, min(1.0, relationship.class_separation_strength)),
         association_measure=relationship.association_measure,
         nonlinearity_applicable=relationship.nonlinearity_applicable,
+        classification_boundary_signals=classification_boundary,
         interaction_signals=interaction_signals,
     )

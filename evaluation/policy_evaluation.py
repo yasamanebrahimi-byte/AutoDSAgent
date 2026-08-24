@@ -89,6 +89,7 @@ def render_final_report(artifact: dict[str, Any]) -> str:
             f"{', '.join(row['selected_families'])} |"
         )
     interaction = aggregate["interaction_diagnostics"]
+    boundary = aggregate["boundary_diagnostics"]
     lines.extend(
         [
             "",
@@ -99,6 +100,15 @@ def render_final_report(artifact: dict[str, Any]) -> str:
             f"- Mean evaluated pairs: `{interaction['mean_pairs_evaluated']}`; mean strong-pair fraction: `{interaction['mean_strong_pair_fraction']}`",
             f"- Regime metrics: `{json.dumps(aggregate['interaction_regime_metrics'], sort_keys=True)}`",
             f"- Top interaction evidence: `{json.dumps(interaction['top_interaction_evidence'], sort_keys=True)}`",
+            "",
+            "## Classification boundary diagnostics",
+            "",
+            f"- Mean boundary complexity score: `{boundary['mean_score']}`; median: `{boundary['median_score']}`",
+            f"- Mean linear probe score: `{boundary['mean_linear_boundary_probe_score']}`; mean normalized linear separability: `{boundary['mean_linear_separability_score']}`",
+            f"- Mean local class consistency: `{boundary['mean_local_class_consistency']}`; mean nonlinear advantage: `{boundary['mean_nonlinear_advantage_score']}`",
+            f"- Category distribution: `{json.dumps(boundary['category_distribution'], sort_keys=True)}`",
+            f"- Confidence distribution: `{json.dumps(boundary['confidence_distribution'], sort_keys=True)}`",
+            f"- Regime metrics: `{json.dumps(aggregate['boundary_regime_metrics'], sort_keys=True)}`",
             "",
             "## Final holdout metrics",
             "",

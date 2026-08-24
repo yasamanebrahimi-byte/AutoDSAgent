@@ -217,6 +217,55 @@ def _interaction_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _boundary_summary(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize classification boundary evidence without re-evaluating data."""
+
+    entries: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("task_type") not in {None, "classification"}:
+            continue
+        diagnostics = record.get("diagnostics") or {}
+        boundary = diagnostics.get("classification_boundary_signals") or {}
+        if not boundary:
+            continue
+        entries.append(boundary)
+    categories = Counter(str(item.get("boundary_complexity", "low")) for item in entries)
+    confidences = Counter(
+        str(item.get("boundary_diagnostic_confidence", "low")) for item in entries
+    )
+    category_order = {"low": 0, "moderate": 1, "high": 2}
+    modal_category = (
+        sorted(
+            categories,
+            key=lambda value: (-categories[value], category_order.get(value, -1), value),
+        )[0]
+        if categories
+        else "low"
+    )
+    applicable = [item for item in entries if item.get("boundary_complexity_applicable") is True]
+    return {
+        "mean_score": _mean(float(item.get("boundary_complexity_score", 0.0)) for item in entries),
+        "median_score": _median(float(item.get("boundary_complexity_score", 0.0)) for item in entries),
+        "mean_linear_boundary_probe_score": _mean(
+            float(item.get("linear_boundary_probe_score", 0.0)) for item in entries
+        ),
+        "mean_linear_separability_score": _mean(
+            float(item.get("linear_separability_score", 0.0)) for item in entries
+        ),
+        "mean_local_class_consistency": _mean(
+            float(item.get("local_class_consistency", 0.0)) for item in entries
+        ),
+        "mean_nonlinear_advantage_score": _mean(
+            float(item.get("nonlinear_advantage_score", 0.0)) for item in entries
+        ),
+        "modal_category": modal_category,
+        "category_distribution": dict(sorted(categories.items())),
+        "confidence_distribution": dict(sorted(confidences.items())),
+        "applicable_rate": len(applicable) / max(len(entries), 1),
+        "record_count": len(entries),
+    }
+
+
 def _repository_commit() -> str | None:
     try:
         return subprocess.check_output(
@@ -332,6 +381,12 @@ def _evaluate_case_seed(
     ]
     if not deterministic_ranking:
         deterministic_ranking = list(recommendation.ranked_methods)
+    boundary = (
+        recommendation.diagnostics.classification_boundary_signals
+        if recommendation.diagnostics is not None
+        and recommendation.task_type == "classification"
+        else None
+    )
     record: dict[str, Any] = {
         "dataset_id": case.name,
         "dataset": case.name,
@@ -345,6 +400,11 @@ def _evaluate_case_seed(
         "diagnostics": recommendation.diagnostics.model_dump(mode="json")
         if recommendation.diagnostics is not None
         else None,
+        "boundary_complexity_score": boundary.boundary_complexity_score if boundary else None,
+        "boundary_complexity_category": boundary.boundary_complexity if boundary else None,
+        "linear_separability_score": boundary.linear_separability_score if boundary else None,
+        "local_class_consistency": boundary.local_class_consistency if boundary else None,
+        "boundary_diagnostic_confidence": boundary.boundary_diagnostic_confidence if boundary else None,
         "deterministic_selected_method": selected_method,
         "deterministic_confidence": recommendation.confidence,
         "deterministic_score_margin": recommendation.score_margin,
@@ -470,6 +530,7 @@ def aggregate_candidate_records(
                     for method, count in sorted(counts.items())
                 },
                 "interaction_diagnostics": _interaction_summary(dataset_records),
+                "boundary_diagnostics": _boundary_summary(dataset_records),
                 "selected_family_modal_rate": modal_count / max(len(selections), 1),
                 "selected_families": sorted(counts),
             }
@@ -490,6 +551,39 @@ def aggregate_candidate_records(
     interaction_regime_metrics = {}
     for strength, datasets in sorted(interaction_by_strength.items()):
         interaction_regime_metrics[strength] = {
+            "dataset_count": len(datasets),
+            "mean_normalized_regret": _mean(
+                float(dataset["mean_normalized_regret"])
+                for dataset in datasets
+                if dataset.get("mean_normalized_regret") is not None
+            ),
+            "median_normalized_regret": _median(
+                float(dataset["mean_normalized_regret"])
+                for dataset in datasets
+                if dataset.get("mean_normalized_regret") is not None
+            ),
+            "exact_reference_match_rate": _mean(
+                float(dataset["exact_reference_match_rate"])
+                for dataset in datasets
+                if dataset.get("exact_reference_match_rate") is not None
+            ),
+            "top2_compatibility_rate": _mean(
+                float(dataset["top2_compatibility_rate"])
+                for dataset in datasets
+                if dataset.get("top2_compatibility_rate") is not None
+            ),
+            "catastrophic_regret_rate": _mean(
+                float(dataset["catastrophic_regret_rate"])
+                for dataset in datasets
+                if dataset.get("catastrophic_regret_rate") is not None
+            ),
+        }
+    boundary_by_category: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for dataset in per_dataset:
+        boundary_by_category[dataset["boundary_diagnostics"]["modal_category"]].append(dataset)
+    boundary_regime_metrics = {}
+    for category, datasets in sorted(boundary_by_category.items()):
+        boundary_regime_metrics[category] = {
             "dataset_count": len(datasets),
             "mean_normalized_regret": _mean(
                 float(dataset["mean_normalized_regret"])
@@ -541,6 +635,8 @@ def aggregate_candidate_records(
         "family_selection_distribution": family_distribution,
         "interaction_diagnostics": _interaction_summary(candidate_records),
         "interaction_regime_metrics": interaction_regime_metrics,
+        "boundary_diagnostics": _boundary_summary(candidate_records),
+        "boundary_regime_metrics": boundary_regime_metrics,
         "family_collapse_warning": bool(
             max((item["rate"] for item in family_distribution.values()), default=0.0) > 0.80
         ),
@@ -641,6 +737,12 @@ def _sensitivity_rows(aggregates: dict[str, dict[str, Any]], candidates: Sequenc
             "thresholds": {
                 "nonlinear_moderate_threshold": candidate.policy.nonlinear_moderate_threshold,
                 "nonlinear_high_threshold": candidate.policy.nonlinear_high_threshold,
+                "classification_boundary_moderate_threshold": candidate.policy.classification_boundary_moderate_threshold,
+                "classification_boundary_high_threshold": candidate.policy.classification_boundary_high_threshold,
+                "boundary_probe_cv_folds": candidate.policy.boundary_probe_cv_folds,
+                "boundary_neighbor_k": candidate.policy.boundary_neighbor_k,
+                "max_boundary_numeric_features": candidate.policy.max_boundary_numeric_features,
+                "max_boundary_rows": candidate.policy.max_boundary_rows,
                 "interaction_moderate_threshold": candidate.policy.interaction_moderate_threshold,
                 "interaction_high_threshold": candidate.policy.interaction_high_threshold,
                 "interaction_strong_pair_threshold": candidate.policy.interaction_strong_pair_threshold,
@@ -873,6 +975,9 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         lines.append(
             f"- `{row['candidate']}`: nonlinear thresholds "
             f"{row['thresholds']['nonlinear_moderate_threshold']}/{row['thresholds']['nonlinear_high_threshold']}; "
+            f"classification-boundary thresholds "
+            f"{row['thresholds']['classification_boundary_moderate_threshold']}/"
+            f"{row['thresholds']['classification_boundary_high_threshold']}; "
             f"interaction thresholds {row['thresholds']['interaction_moderate_threshold']}/{row['thresholds']['interaction_high_threshold']}; "
             f"interaction limits {row['thresholds']['max_interaction_features']} features/{row['thresholds']['max_interaction_pairs']} pairs; "
             f"sample-feature bands `{row['thresholds']['sample_feature_ratio']}`; "
@@ -900,6 +1005,7 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
             f"{', '.join(row['selected_families'])} |"
         )
     current_interaction = current["interaction_diagnostics"]
+    current_boundary = current["boundary_diagnostics"]
     lines.extend(
         [
             "",
@@ -910,6 +1016,15 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
             f"- Mean evaluated pairs: `{current_interaction['mean_pairs_evaluated']}`; mean strong-pair fraction: `{current_interaction['mean_strong_pair_fraction']}`",
             f"- Regime metrics: `{json.dumps(current['interaction_regime_metrics'], sort_keys=True)}`",
             f"- Top interaction evidence: `{json.dumps(current_interaction['top_interaction_evidence'], sort_keys=True)}`",
+            "",
+            "## Classification boundary diagnostics",
+            "",
+            f"- Mean boundary complexity score: `{current_boundary['mean_score']}`; median: `{current_boundary['median_score']}`",
+            f"- Mean linear probe score: `{current_boundary['mean_linear_boundary_probe_score']}`; mean normalized linear separability: `{current_boundary['mean_linear_separability_score']}`",
+            f"- Mean local class consistency: `{current_boundary['mean_local_class_consistency']}`; mean nonlinear advantage: `{current_boundary['mean_nonlinear_advantage_score']}`",
+            f"- Category distribution: `{json.dumps(current_boundary['category_distribution'], sort_keys=True)}`",
+            f"- Confidence distribution: `{json.dumps(current_boundary['confidence_distribution'], sort_keys=True)}`",
+            f"- Regime metrics: `{json.dumps(current['boundary_regime_metrics'], sort_keys=True)}`",
         ]
     )
     lines.extend(["", "Largest current-policy regret cases:", ""])

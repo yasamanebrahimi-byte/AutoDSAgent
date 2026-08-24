@@ -1,0 +1,299 @@
+{
+  "agent_source": "existing_offline_modeling_fallback_proxy",
+  "calibration_artifact_version": "soft-challenge-calibration-v1-v1",
+  "calibration_schema_version": "soft-challenge-calibration-v1",
+  "dataset_ids": [
+    "synthetic_binary_nonlinear",
+    "synthetic_high_dim_regression",
+    "synthetic_linear_regression",
+    "synthetic_multiclass",
+    "synthetic_nonlinear_regression",
+    "synthetic_outlier_regression",
+    "synthetic_regression"
+  ],
+  "outcome_tolerance": 0.02,
+  "policy": {
+    "catastrophic_prevention_min_rate": 0.75,
+    "catastrophic_regret_threshold": 0.1,
+    "high_confidence_min_reliability": 0.65,
+    "medium_confidence_min_reliability": 0.8,
+    "min_calibration_support": 8,
+    "min_catastrophic_support": 3,
+    "version": "v1"
+  },
+  "record_count": 20,
+  "regimes": {
+    "all/all/all/all": {
+      "catastrophic_regret_prevented_count": 3,
+      "catastrophic_regret_prevention_rate": 0.6,
+      "catastrophic_regret_support": 5,
+      "challenge_loss_count": 6,
+      "challenge_loss_rate": 0.6666666666666666,
+      "challenge_tie_count": 11,
+      "challenge_win_count": 3,
+      "challenge_win_rate": 0.3333333333333333,
+      "dataset_count": 7,
+      "empirical_reliability": 0.3333333333333333,
+      "mean_regret_delta": -0.4407438286660835,
+      "regime": "all/all/all/all",
+      "support": 20,
+      "task_types": [
+        "classification",
+        "regression"
+      ]
+    },
+    "classification/all/all/all": {
+      "catastrophic_regret_prevented_count": 2,
+      "catastrophic_regret_prevention_rate": 1.0,
+      "catastrophic_regret_support": 2,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.6,
+      "challenge_tie_count": 1,
+      "challenge_win_count": 2,
+      "challenge_win_rate": 0.4,
+      "dataset_count": 2,
+      "empirical_reliability": 0.4,
+      "mean_regret_delta": 0.027969114650984266,
+      "regime": "classification/all/all/all",
+      "support": 6,
+      "task_types": [
+        "classification"
+      ]
+    },
+    "classification/all/all/low": {
+      "catastrophic_regret_prevented_count": 2,
+      "catastrophic_regret_prevention_rate": 1.0,
+      "catastrophic_regret_support": 2,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.6,
+      "challenge_tie_count": 1,
+      "challenge_win_count": 2,
+      "challenge_win_rate": 0.4,
+      "dataset_count": 2,
+      "empirical_reliability": 0.4,
+      "mean_regret_delta": 0.027969114650984266,
+      "regime": "classification/all/all/low",
+      "support": 6,
+      "task_types": [
+        "classification"
+      ]
+    },
+    "classification/low/all/low": {
+      "catastrophic_regret_prevented_count": 2,
+      "catastrophic_regret_prevention_rate": 1.0,
+      "catastrophic_regret_support": 2,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.6,
+      "challenge_tie_count": 1,
+      "challenge_win_count": 2,
+      "challenge_win_rate": 0.4,
+      "dataset_count": 2,
+      "empirical_reliability": 0.4,
+      "mean_regret_delta": 0.027969114650984266,
+      "regime": "classification/low/all/low",
+      "support": 6,
+      "task_types": [
+        "classification"
+      ]
+    },
+    "classification/low/low/low": {
+      "catastrophic_regret_prevented_count": 2,
+      "catastrophic_regret_prevention_rate": 1.0,
+      "catastrophic_regret_support": 2,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.6,
+      "challenge_tie_count": 1,
+      "challenge_win_count": 2,
+      "challenge_win_rate": 0.4,
+      "dataset_count": 2,
+      "empirical_reliability": 0.4,
+      "mean_regret_delta": 0.027969114650984266,
+      "regime": "classification/low/low/low",
+      "support": 6,
+      "task_types": [
+        "classification"
+      ]
+    },
+    "regression/all/all/all": {
+      "catastrophic_regret_prevented_count": 1,
+      "catastrophic_regret_prevention_rate": 0.3333333333333333,
+      "catastrophic_regret_support": 3,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.75,
+      "challenge_tie_count": 10,
+      "challenge_win_count": 1,
+      "challenge_win_rate": 0.25,
+      "dataset_count": 5,
+      "empirical_reliability": 0.25,
+      "mean_regret_delta": -0.6416208043733983,
+      "regime": "regression/all/all/all",
+      "support": 14,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/all/all/low": {
+      "catastrophic_regret_prevented_count": 1,
+      "catastrophic_regret_prevention_rate": 0.3333333333333333,
+      "catastrophic_regret_support": 3,
+      "challenge_loss_count": 3,
+      "challenge_loss_rate": 0.75,
+      "challenge_tie_count": 8,
+      "challenge_win_count": 1,
+      "challenge_win_rate": 0.25,
+      "dataset_count": 5,
+      "empirical_reliability": 0.25,
+      "mean_regret_delta": -0.7496960020108591,
+      "regime": "regression/all/all/low",
+      "support": 12,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/all/all/medium": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": null,
+      "catastrophic_regret_support": 0,
+      "challenge_loss_count": 0,
+      "challenge_loss_rate": null,
+      "challenge_tie_count": 2,
+      "challenge_win_count": 0,
+      "challenge_win_rate": null,
+      "dataset_count": 1,
+      "empirical_reliability": null,
+      "mean_regret_delta": 0.006830381451366595,
+      "regime": "regression/all/all/medium",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/low/all/low": {
+      "catastrophic_regret_prevented_count": 1,
+      "catastrophic_regret_prevention_rate": 0.3333333333333333,
+      "catastrophic_regret_support": 3,
+      "challenge_loss_count": 1,
+      "challenge_loss_rate": 0.5,
+      "challenge_tie_count": 8,
+      "challenge_win_count": 1,
+      "challenge_win_rate": 0.5,
+      "dataset_count": 4,
+      "empirical_reliability": 0.5,
+      "mean_regret_delta": -0.11244066177206309,
+      "regime": "regression/low/all/low",
+      "support": 10,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/low/all/medium": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": null,
+      "catastrophic_regret_support": 0,
+      "challenge_loss_count": 0,
+      "challenge_loss_rate": null,
+      "challenge_tie_count": 2,
+      "challenge_win_count": 0,
+      "challenge_win_rate": null,
+      "dataset_count": 1,
+      "empirical_reliability": null,
+      "mean_regret_delta": 0.006830381451366595,
+      "regime": "regression/low/all/medium",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/low/high/low": {
+      "catastrophic_regret_prevented_count": 1,
+      "catastrophic_regret_prevention_rate": 1.0,
+      "catastrophic_regret_support": 1,
+      "challenge_loss_count": 1,
+      "challenge_loss_rate": 0.5,
+      "challenge_tie_count": 0,
+      "challenge_win_count": 1,
+      "challenge_win_rate": 0.5,
+      "dataset_count": 2,
+      "empirical_reliability": 0.5,
+      "mean_regret_delta": -0.5637537899553178,
+      "regime": "regression/low/high/low",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/low/low/medium": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": null,
+      "catastrophic_regret_support": 0,
+      "challenge_loss_count": 0,
+      "challenge_loss_rate": null,
+      "challenge_tie_count": 2,
+      "challenge_win_count": 0,
+      "challenge_win_rate": null,
+      "dataset_count": 1,
+      "empirical_reliability": null,
+      "mean_regret_delta": 0.006830381451366595,
+      "regime": "regression/low/low/medium",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/low/moderate/low": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": 0.0,
+      "catastrophic_regret_support": 2,
+      "challenge_loss_count": 0,
+      "challenge_loss_rate": null,
+      "challenge_tie_count": 8,
+      "challenge_win_count": 0,
+      "challenge_win_rate": null,
+      "dataset_count": 4,
+      "empirical_reliability": null,
+      "mean_regret_delta": 0.0003876202737505812,
+      "regime": "regression/low/moderate/low",
+      "support": 8,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/medium/all/low": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": null,
+      "catastrophic_regret_support": 0,
+      "challenge_loss_count": 2,
+      "challenge_loss_rate": 1.0,
+      "challenge_tie_count": 0,
+      "challenge_win_count": 0,
+      "challenge_win_rate": 0.0,
+      "dataset_count": 1,
+      "empirical_reliability": 0.0,
+      "mean_regret_delta": -3.935972703204839,
+      "regime": "regression/medium/all/low",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    },
+    "regression/medium/high/low": {
+      "catastrophic_regret_prevented_count": 0,
+      "catastrophic_regret_prevention_rate": null,
+      "catastrophic_regret_support": 0,
+      "challenge_loss_count": 2,
+      "challenge_loss_rate": 1.0,
+      "challenge_tie_count": 0,
+      "challenge_win_count": 0,
+      "challenge_win_rate": 0.0,
+      "dataset_count": 1,
+      "empirical_reliability": 0.0,
+      "mean_regret_delta": -3.935972703204839,
+      "regime": "regression/medium/high/low",
+      "support": 2,
+      "task_types": [
+        "regression"
+      ]
+    }
+  },
+  "source_role": "policy_development"
+}

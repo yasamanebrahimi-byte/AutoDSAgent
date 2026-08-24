@@ -329,9 +329,13 @@ def deterministic_recommendation(
     ][:3]
     reason_detail = "; ".join(positive_reasons) or "no positive compatibility factor dominated"
     if task_type == "classification":
+        boundary = diagnostics.classification_boundary_signals
         relationship_summary = (
             f"nominal class association measured with {diagnostics.association_measure}; "
-            f"maximum class-separation strength was {diagnostics.class_separation_strength:.2f}"
+            f"maximum class-separation strength was {diagnostics.class_separation_strength:.2f}; "
+            f"boundary complexity was {boundary.boundary_complexity} "
+            f"({boundary.boundary_complexity_score:.2f}) with "
+            f"{boundary.boundary_diagnostic_confidence} diagnostic confidence"
         )
     else:
         relationship_summary = (
@@ -373,15 +377,22 @@ def deterministic_recommendation(
             f"({diagnostics.structural_complexity_score:.3f})"
         ),
         (
+            f"classification_boundary={diagnostics.classification_boundary_signals.boundary_complexity}; "
+            f"boundary_score={diagnostics.classification_boundary_signals.boundary_complexity_score:.3f}; "
+            f"linear_boundary_probe_score={diagnostics.classification_boundary_signals.linear_boundary_probe_score:.3f}; "
+            f"linear_separability={diagnostics.classification_boundary_signals.linear_separability_score:.3f}; "
+            f"local_class_consistency={diagnostics.classification_boundary_signals.local_class_consistency:.3f}; "
+            f"nonlinear_advantage={diagnostics.classification_boundary_signals.nonlinear_advantage_score:.3f}; "
+            f"boundary_confidence={diagnostics.classification_boundary_signals.boundary_diagnostic_confidence}"
+        )
+        if task_type == "classification"
+        else "classification_boundary=not_applicable_for_regression",
+        (
             f"interaction_strength={diagnostics.interaction_signals.interaction_strength}; "
             f"interaction_score={diagnostics.interaction_signals.interaction_score:.3f}; "
             f"pairs_evaluated={diagnostics.interaction_signals.interaction_pairs_evaluated}; "
             f"strong_pair_count={diagnostics.interaction_signals.strong_interaction_pair_count}; "
             f"strong_pair_fraction={diagnostics.interaction_signals.strong_interaction_pair_fraction:.3f}"
-        ),
-        (
-            f"selected_score={top_score if top_score is not None else 'ineligible'}; "
-            f"runner_up={ranked[1] if len(ranked) > 1 else 'none'}"
         ),
     ]
     return DeterministicRecommendation(

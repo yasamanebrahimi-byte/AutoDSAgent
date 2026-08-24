@@ -285,6 +285,34 @@ class InteractionDiagnostics(StrictModel):
     top_interaction_pairs: list[InteractionPairEvidence] = Field(default_factory=list, max_length=5)
 
 
+class ClassificationBoundaryDiagnostics(StrictModel):
+    """Training-only evidence about the geometry of a classification boundary.
+
+    The linear probe fields are diagnostic estimates only.  They are not the
+    cross-validation result of a supported candidate model and must not be
+    interpreted as evidence that one final model family outperforms another.
+    """
+
+    boundary_complexity_score: float = Field(default=0.0, ge=0, le=1)
+    boundary_complexity: Literal["low", "moderate", "high"] = "low"
+    boundary_complexity_applicable: StrictBool = False
+    linear_boundary_probe_score: float = Field(default=0.0, ge=0, le=1)
+    linear_separability_score: float = Field(default=0.0, ge=0, le=1)
+    linear_probe_fold_std: float = Field(default=0.0, ge=0, le=1)
+    local_class_consistency: float = Field(default=0.0, ge=0, le=1)
+    local_structure_score: float = Field(default=0.0, ge=0, le=1)
+    nonlinear_advantage_score: float = Field(default=0.0, ge=0, le=1)
+    diagnostic_rows: int = Field(default=0, ge=0)
+    diagnostic_numeric_feature_count: int = Field(default=0, ge=0)
+    selected_numeric_features: list[str] = Field(default_factory=list, max_length=32)
+    diagnostic_cv_folds: int = Field(default=0, ge=0)
+    neighbor_k: int = Field(default=0, ge=0)
+    diagnostic_missing_fraction: float = Field(default=0.0, ge=0, le=1)
+    diagnostic_sample_to_feature_ratio: float = Field(default=0.0, ge=0)
+    boundary_diagnostic_confidence: ConfidenceLevel = "low"
+    boundary_diagnostic_reason: str = "unavailable"
+
+
 class DeterministicDiagnostics(StrictModel):
     """Compact, training-only facts used by the deterministic policy."""
 
@@ -333,6 +361,9 @@ class DeterministicDiagnostics(StrictModel):
     class_separation_strength: float = Field(default=0.0, ge=0, le=1)
     association_measure: str = Field(default="unspecified", min_length=1)
     nonlinearity_applicable: bool = True
+    classification_boundary_signals: ClassificationBoundaryDiagnostics = Field(
+        default_factory=ClassificationBoundaryDiagnostics
+    )
     interaction_signals: InteractionDiagnostics = Field(default_factory=InteractionDiagnostics)
 
 

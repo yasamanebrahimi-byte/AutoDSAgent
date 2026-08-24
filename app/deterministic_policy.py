@@ -105,6 +105,14 @@ DEFAULT_COMPATIBILITY_POINTS = _freeze_points(
         "nonlinearity:5": {"regularized_linear": 5},
         "nonlinearity:1": {"tree_ensemble": 1},
         "nonlinearity:-2": {"boosted_tree": -2},
+        "boundary_complexity:-8": {"linear": -8},
+        "boundary_complexity:-5": {"regularized_linear": -5},
+        "boundary_complexity:8": {"tree_ensemble": 8},
+        "boundary_complexity:10": {"boosted_tree": 10},
+        "boundary_complexity:-3": {"linear": -3},
+        "boundary_complexity:-1": {"regularized_linear": -1},
+        "boundary_complexity:4": {"tree_ensemble": 4},
+        "boundary_complexity:5": {"boosted_tree": 5},
         "interaction:-8": {"linear": -8},
         "interaction:-4": {"regularized_linear": -4},
         "interaction:10": {"tree_ensemble": 10},
@@ -166,6 +174,13 @@ class DeterministicPolicy:
     widespread_missing_feature_fraction: float = 0.40
     nonlinear_moderate_threshold: float = 0.15
     nonlinear_high_threshold: float = 0.35
+    classification_boundary_moderate_threshold: float = 0.10
+    classification_boundary_high_threshold: float = 0.20
+    boundary_probe_cv_folds: int = 3
+    boundary_probe_random_state: int = 1729
+    boundary_neighbor_k: int = 7
+    max_boundary_numeric_features: int = 16
+    max_boundary_rows: int = 5000
     interaction_moderate_threshold: float = 0.18
     interaction_high_threshold: float = 0.38
     interaction_strong_pair_threshold: float = 0.30
@@ -197,6 +212,7 @@ class DeterministicPolicy:
     structural_complexity_nonlinearity_strength_weight: float = 0.25
     structural_complexity_heterogeneity_weight: float = 0.15
     structural_complexity_weak_marginal_weight: float = 0.10
+    structural_complexity_boundary_weight: float = 0.35
     structural_complexity_interaction_weight: float = 0.20
     outlier_moderate_fraction: float = 0.05
     boosted_tree_min_samples: int = 300
@@ -385,6 +401,37 @@ def score_model_families(
             add("tree_ensemble", "nonlinearity", 1, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
             add("boosted_tree", "nonlinearity", -2, f"nonlinearity score {diagnostics.nonlinearity_score:.2f} is low")
 
+    boundary = diagnostics.classification_boundary_signals
+    if boundary.boundary_complexity_applicable and boundary.boundary_diagnostic_confidence in {"medium", "high"}:
+        if boundary.boundary_complexity == "high":
+            boundary_observation = (
+                f"high nonlinear-boundary evidence: local class consistency "
+                f"{boundary.local_class_consistency:.2f} exceeds the normalized linear "
+                f"separability score {boundary.linear_separability_score:.2f}; "
+                f"boundary complexity score {boundary.boundary_complexity_score:.2f}"
+            )
+            for method, points in {
+                "linear": -8,
+                "regularized_linear": -5,
+                "tree_ensemble": 8,
+                "boosted_tree": 10,
+            }.items():
+                add(method, "boundary_complexity", points, boundary_observation)
+        elif boundary.boundary_complexity == "moderate":
+            boundary_observation = (
+                f"moderate nonlinear-boundary evidence: local class consistency "
+                f"{boundary.local_class_consistency:.2f} is above normalized linear "
+                f"separability {boundary.linear_separability_score:.2f}; "
+                f"boundary complexity score {boundary.boundary_complexity_score:.2f}"
+            )
+            for method, points in {
+                "linear": -3,
+                "regularized_linear": -1,
+                "tree_ensemble": 4,
+                "boosted_tree": 5,
+            }.items():
+                add(method, "boundary_complexity", points, boundary_observation)
+
     interaction = diagnostics.interaction_signals
     if interaction.interaction_applicable:
         if interaction.interaction_strength == "high":
@@ -446,10 +493,18 @@ def score_model_families(
     else:
         points = {"linear": 2, "regularized_linear": 2, "tree_ensemble": 0, "boosted_tree": 0}
     if diagnostics.target.classification is not None:
-        complexity_observation = (
-            f"structural complexity score {complexity:.2f} reflects mixed/categorical structure "
-            "and weak marginal class association; it does not assert multiclass nonlinearity"
-        )
+        if boundary.boundary_complexity_applicable:
+            complexity_observation = (
+                f"structural complexity score {complexity:.2f} includes boundary score "
+                f"{boundary.boundary_complexity_score:.2f}; local class consistency "
+                f"{boundary.local_class_consistency:.2f} and linear separability "
+                f"{boundary.linear_separability_score:.2f} are separate from marginal association"
+            )
+        else:
+            complexity_observation = (
+                f"structural complexity score {complexity:.2f} reflects mixed/categorical structure "
+                "and weak marginal class association; numeric boundary geometry was unavailable"
+            )
     else:
         complexity_observation = (
             f"structural complexity score {complexity:.2f} suggests heterogeneous or nonlinear "
