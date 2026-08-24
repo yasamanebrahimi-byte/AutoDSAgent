@@ -247,6 +247,7 @@ def decide_soft_challenge(
     training_row_count: int | None = None,
     policy: SoftChallengePolicy | None = None,
     calibration_artifact: Mapping[str, Any] | None = None,
+    strategy: str = "calibrated",
 ) -> SoftChallengeDecision:
     """Decide whether a deterministic model-family disagreement merits intervention.
 
@@ -255,6 +256,8 @@ def decide_soft_challenge(
     reliability support from the frozen calibration artifact.
     """
 
+    if strategy not in {"calibrated", "high_confidence_only"}:
+        raise ValueError(f"Unsupported soft-challenge strategy: {strategy!r}")
     policy = policy or SoftChallengePolicy()
     artifact = calibration_artifact or load_calibration_artifact(policy.calibration_artifact_path)
     regime_key = calibration_regime_key(
@@ -298,6 +301,18 @@ def decide_soft_challenge(
 
     if agent_method == deterministic_method:
         return SoftChallengeDecision(decision="agree", decision_reason="model_family_agreement", **common)
+    if strategy == "high_confidence_only":
+        if deterministic_confidence == "high":
+            return SoftChallengeDecision(
+                decision="challenge",
+                decision_reason="high_confidence_only_strategy",
+                **common,
+            )
+        return SoftChallengeDecision(
+            decision="abstain",
+            decision_reason=f"{deterministic_confidence}_confidence_abstention",
+            **common,
+        )
     if deterministic_confidence == "low":
         return SoftChallengeDecision(
             decision="abstain",

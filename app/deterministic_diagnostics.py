@@ -366,6 +366,16 @@ def _regression_interaction_signals(
     )
 
 
+def _disabled_interaction_signals() -> InteractionDiagnostics:
+    """Represent an intentionally removed evidence source explicitly."""
+
+    return InteractionDiagnostics(
+        interaction_applicable=False,
+        interaction_strength="low",
+        diagnostic_reason="disabled_by_ablation",
+    )
+
+
 def _eta_squared(feature: pd.Series, target: pd.Series) -> float:
     """Return bounded numeric-feature/nominal-target association.
 
@@ -1067,26 +1077,32 @@ def compute_deterministic_diagnostics(
         numeric_names,
         categorical_names,
     )
-    classification_boundary = (
-        _classification_boundary_signals(
-            diagnostic_frame,
-            target_column,
-            numeric_names,
-            policy,
+    if task_type == "classification":
+        classification_boundary = (
+            _classification_boundary_signals(
+                diagnostic_frame,
+                target_column,
+                numeric_names,
+                policy,
+            )
+            if policy.enable_classification_boundary_diagnostics
+            else _empty_classification_boundary_signals("disabled_by_ablation")
         )
-        if task_type == "classification"
-        else ClassificationBoundaryDiagnostics()
-    )
-    interaction_signals = (
-        _regression_interaction_signals(
-            diagnostic_frame,
-            target_column,
-            numeric_names,
-            policy,
+    else:
+        classification_boundary = ClassificationBoundaryDiagnostics()
+    if task_type == "regression":
+        interaction_signals = (
+            _regression_interaction_signals(
+                diagnostic_frame,
+                target_column,
+                numeric_names,
+                policy,
+            )
+            if policy.enable_regression_interaction_diagnostics
+            else _disabled_interaction_signals()
         )
-        if task_type == "regression"
-        else InteractionDiagnostics()
-    )
+    else:
+        interaction_signals = InteractionDiagnostics()
     nonlinearity = relationship.nonlinearity_score
     pearson_spearman_gap = relationship.pearson_spearman_gap
     univariate_signal = relationship.univariate_signal

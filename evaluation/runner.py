@@ -16,8 +16,7 @@ from pydantic import BaseModel
 from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
-from app.llm import PROMPT_SCHEMA_VERSION, OpenAIAgents
-from app.reconciliation import LEGACY_RECONCILIATION_PROMPT_VERSION
+from app.llm import LLMUnavailable, PROMPT_SCHEMA_VERSION, OpenAIAgents
 from app.pipeline import (
     _fallback_agent_plan,
     _fallback_resolution,
@@ -75,16 +74,27 @@ class EvaluationConfig:
     reconciliation_mode: str = "blinded"
     order_swap: bool = False
     empirical_probe_enabled: bool = True
+    split_seeds: tuple[int, ...] = (42,)
+    require_live: bool = False
+    soft_challenge_strategy: str = "calibrated"
+    enable_regression_interaction_diagnostics: bool = True
+    enable_classification_boundary_diagnostics: bool = True
+    ablation_name: str | None = None
+    ablation_schema_version: str | None = None
 
     def __post_init__(self) -> None:
         if self.repetitions < 1:
             raise ValueError("repetitions must be at least one")
         if not 0.10 <= self.test_size <= 0.50:
             raise ValueError("test_size must be between 0.10 and 0.50")
-        if self.gate_mode not in {"llm_only", "always_reconcile", "selective"}:
-            raise ValueError("gate_mode must be 'llm_only', 'always_reconcile', or 'selective'.")
+        if self.gate_mode not in {"llm_only", "deterministic_only", "always_reconcile", "selective"}:
+            raise ValueError("Unsupported gate_mode.")
         if self.reconciliation_mode not in {"blinded", "legacy"}:
             raise ValueError("reconciliation_mode must be 'blinded' or 'legacy'.")
+        if not self.split_seeds:
+            raise ValueError("split_seeds must contain at least one seed.")
+        if self.soft_challenge_strategy not in {"calibrated", "high_confidence_only"}:
+            raise ValueError("Unsupported soft_challenge_strategy.")
 
 
 class _EvaluationGateAgent:
@@ -269,10 +279,13 @@ def _choose_source(
     training_profile: dict[str, Any],
     case: BenchmarkCase,
     warnings: list[str],
+    require_live: bool = False,
 ) -> tuple[AgentPlan, str, str, str, str | None]:
     if plan_factory is not None:
         return plan_factory(context), "mock", "mock", "mock", None
     if config.offline or not agents.available:
+        if require_live and not config.offline and not agents.available:
+            raise LLMUnavailable("OPENAI_API_KEY is not configured for a required live trial.")
         if not config.offline:
             warnings.append("OPENAI_API_KEY is unavailable; this trial used the offline fallback.")
         return (
@@ -309,7 +322,9 @@ def _choose_source(
             None,
         )
     except Exception as exc:
-        warnings.append(f"modeling agent fallback used: {type(exc).__name__}: {exc}")
+        if require_live:
+            raise
+        warnings.append(f"modeling agent fallback used: {_redact_error(exc)}")
         return (
             _fallback_agent_plan(
                 training_profile,
@@ -332,6 +347,63 @@ def _family_score(reference: dict[str, Any], method: str | None) -> float | None
     return float(value) if value is not None and candidate.get("status") == "evaluated" else None
 
 
+def _proposal_cache_key(
+    *,
+    case: BenchmarkCase,
+    perturbation_id: str,
+    split_seed: int,
+    llm_repetition: int,
+    model: str,
+    prompt_schema_version: str,
+    training_profile: dict[str, Any],
+) -> str:
+    """Identify only the evidence that is legal for the initial proposal."""
+
+    payload = {
+        "benchmark_case": case.name,
+        "perturbation": perturbation_id,
+        "split_seed": split_seed,
+        "llm_repetition": llm_repetition,
+        "model": model,
+        "initial_modeling_prompt_schema_version": prompt_schema_version,
+        "training_profile_digest": hashlib.sha256(
+            json.dumps(_jsonable(training_profile), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "approved_target": case.target_column,
+        "approved_task": case.expected_task_type,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _plan_from_cache_payload(payload: dict[str, Any]) -> AgentPlan | None:
+    values = payload.get("agent_plan") if isinstance(payload, dict) else None
+    if not isinstance(values, dict):
+        return None
+    try:
+        return AgentPlan.model_validate(values)
+    except Exception:
+        return None
+
+
+def _redact_error(error: Exception) -> str:
+    """Keep provider errors useful without allowing credential serialization."""
+
+    message = f"{type(error).__name__}: {error}"
+    import os
+
+    secret = os.getenv("OPENAI_API_KEY")
+    if secret:
+        message = message.replace(secret, "[REDACTED]")
+    return message
+
+
+def _write_proposal_cache(path: Path, cache: dict[str, dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for key in sorted(cache):
+            handle.write(json.dumps({"cache_key": key, **cache[key]}, sort_keys=True) + "\n")
+
+
 def _run_trial(
     case: BenchmarkCase,
     perturbation: Perturbation | None,
@@ -350,11 +422,14 @@ def _run_trial(
     initial_model_override: str | None = None,
     initial_request_status_override: str | None = None,
     initial_request_error_override: str | None = None,
+    requested_split_seed: int | None = None,
+    proposal_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # Repetitions are stochastic LLM repeats over identical evidence.  The
     # split seed is therefore a property of the case/experiment, not of the
     # repetition number.
-    split_seed = config.seed + case.random_seed
+    experimental_split_seed = config.seed if requested_split_seed is None else requested_split_seed
+    split_seed = experimental_split_seed + case.random_seed
     perturbation_seed = split_seed + 1009
     base_frame = case.load()
     split = freeze_supervised_split(
@@ -391,7 +466,11 @@ def _run_trial(
     )
     training_profile = profile_dataframe(training_frame)
     warnings: list[str] = []
-    trial_id = f"{case.name}:{perturbation_id}:{trial_number}"
+    trial_id = (
+        f"{case.name}:{perturbation_id}:split{experimental_split_seed}:llm{trial_number}"
+    )
+    if config.ablation_name:
+        trial_id = f"{trial_id}:{config.ablation_name}"
     if variant != "standard":
         trial_id = f"{trial_id}:{variant}"
     context = {
@@ -399,7 +478,7 @@ def _run_trial(
         "perturbation_id": perturbation_id,
         "trial": trial_number,
         "trial_id": trial_id,
-        "split_seed": split_seed,
+        "split_seed": experimental_split_seed,
         "target_column": case.target_column,
         "task_type": case.expected_task_type,
         "question": case.question,
@@ -409,6 +488,13 @@ def _run_trial(
         "evaluation_mode": "modeling_gate",
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "gate_mode": config.gate_mode,
+        "ablation_name": config.ablation_name,
+        "ablation_schema_version": config.ablation_schema_version,
+        "soft_challenge_strategy": config.soft_challenge_strategy,
+        "deterministic_diagnostic_config": {
+            "enable_regression_interaction_diagnostics": config.enable_regression_interaction_diagnostics,
+            "enable_classification_boundary_diagnostics": config.enable_classification_boundary_diagnostics,
+        },
         "question": case.question,
         "benchmark_target_constraint": case.target_column,
         "benchmark_task_constraint": case.expected_task_type,
@@ -419,7 +505,40 @@ def _run_trial(
         "previous_repetitions_included": False,
         "prompt_schema_version": config.prompt_schema_version,
     }
-    if initial_plan_override is None:
+    proposal_key = _proposal_cache_key(
+        case=case,
+        perturbation_id=perturbation_id,
+        split_seed=experimental_split_seed,
+        llm_repetition=trial_number,
+        model=config.model,
+        prompt_schema_version=config.prompt_schema_version,
+        training_profile=training_profile,
+    )
+    proposal_cache_hit = False
+    cached_proposal = proposal_cache.get(proposal_key) if proposal_cache is not None else None
+    cached_plan = _plan_from_cache_payload(cached_proposal or {})
+    can_use_cached = cached_plan is not None and not (
+        config.require_live and (cached_proposal or {}).get("source") not in {"openai", "mock"}
+    )
+    if initial_plan_override is None and can_use_cached:
+        plan = cached_plan
+        proposal_cache_hit = True
+        agent_source = str((cached_proposal or {}).get("source") or "cached")
+        agent_model = str((cached_proposal or {}).get("model") or config.model)
+        agent_request_status = "cached"
+        agent_request_error = None
+    elif config.gate_mode == "deterministic_only":
+        plan = _fallback_agent_plan(
+            training_profile,
+            case.question,
+            case.target_column,
+            case.expected_task_type,
+        )
+        agent_source = "deterministic_only"
+        agent_model = None
+        agent_request_status = "not_requested"
+        agent_request_error = None
+    elif initial_plan_override is None:
         plan, agent_source, agent_model, agent_request_status, agent_request_error = _choose_source(
             config=config,
             agents=agents,
@@ -428,6 +547,7 @@ def _run_trial(
             training_profile=training_profile,
             case=case,
             warnings=warnings,
+            require_live=config.require_live,
         )
     else:
         plan = initial_plan_override
@@ -448,15 +568,59 @@ def _run_trial(
     deterministic: DeterministicRecommendation | None = None
     deterministic_failure: str | None = None
     try:
+        policy = DeterministicPolicy(
+            enable_regression_interaction_diagnostics=config.enable_regression_interaction_diagnostics,
+            enable_classification_boundary_diagnostics=config.enable_classification_boundary_diagnostics,
+        )
         deterministic = deterministic_recommendation(
             training_frame,
             case.question,
             case.target_column,
             task_type=case.expected_task_type,
+            policy=policy,
         )
     except Exception as exc:
-        deterministic_failure = f"{type(exc).__name__}: {exc}"
-        warnings.append(f"Deterministic recommendation failed closed: {deterministic_failure}")
+        deterministic_failure = _redact_error(exc)
+        warnings.append(f"Deterministic recommendation failed closed: {_redact_error(exc)}")
+
+    if config.gate_mode == "deterministic_only" and deterministic is not None:
+        plan = AgentPlan(
+            target_column=deterministic.target_column,
+            task_type=deterministic.task_type,
+            recommended_method=deterministic.recommended_method,
+            preprocessing=deterministic.preprocessing,
+            reasoning=deterministic.reasoning,
+            confidence={"low": 0.35, "medium": 0.65, "high": 0.90}[deterministic.confidence],
+        )
+        initial_validation = _validate_initial_plan(
+            frame,
+            split,
+            plan,
+            expected_target=case.target_column,
+            expected_task=case.expected_task_type,
+            test_size=config.test_size,
+            random_state=split_seed,
+        )
+
+    if (
+        proposal_cache is not None
+        and not proposal_cache_hit
+        and config.gate_mode != "deterministic_only"
+        and agent_request_status not in {"failed", "failed_fallback"}
+    ):
+        proposal_cache[proposal_key] = {
+            "agent_plan": plan.model_dump(mode="json"),
+            "source": agent_source,
+            "model": agent_model,
+            "request_status": agent_request_status,
+            "benchmark_case": case.name,
+            "perturbation": perturbation_id,
+            "split_seed": experimental_split_seed,
+            "llm_repetition": trial_number,
+            "prompt_schema_version": config.prompt_schema_version,
+            "approved_target": case.target_column,
+            "approved_task": case.expected_task_type,
+        }
 
     comparison: dict[str, Any] | None = None
     target_disagreement = task_disagreement = method_disagreement = False
@@ -498,8 +662,8 @@ def _run_trial(
         reconciliation_invoked = agreement_status == "disagreement" and not (
             target_disagreement or task_disagreement
         )
-        if config.gate_mode == "llm_only":
-            agreement_status = "llm_only"
+        if config.gate_mode in {"llm_only", "deterministic_only"}:
+            agreement_status = config.gate_mode
             final_fields = _plan_fields(plan)
             final_validation = initial_validation.as_dict()
             final_valid = initial_validation.status == "passed"
@@ -541,6 +705,8 @@ def _run_trial(
                     soft_challenge_mode=config.gate_mode,
                     reconciliation_mode=config.reconciliation_mode,
                     proposal_order_override=proposal_order,
+                    soft_challenge_strategy=config.soft_challenge_strategy,
+                    strict_live=config.require_live,
                     empirical_probe_policy=EmpiricalProbePolicy(
                         enabled=config.empirical_probe_enabled,
                         random_state=split_seed,
@@ -569,12 +735,12 @@ def _run_trial(
                 final_valid = gate_result.get("overall_status") == "passed"
                 training_allowed = final_valid
             except InvariantViolation as exc:
-                gate_error = str(exc)
+                gate_error = _redact_error(exc)
                 reconciliation_status = "failed" if reconciliation_invoked else "not_invoked"
                 if exc.result is not None:
                     final_validation = exc.result.as_dict()
             except Exception as exc:
-                gate_error = f"{type(exc).__name__}: {exc}"
+                gate_error = _redact_error(exc)
                 reconciliation_status = "failed" if reconciliation_invoked else "not_invoked"
 
         if reconciliation_invoked and reconciliation_status == "succeeded":
@@ -779,18 +945,30 @@ def _run_trial(
         "trial_id": context["trial_id"],
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
-        "trial_status": "completed",
+        "trial_status": "failed" if config.require_live and gate_error else "completed",
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
-        "split_seed": split_seed,
+        "split_seed": experimental_split_seed,
+        "split_random_state": split_seed,
         "test_size": config.test_size,
         "split_contract": split.as_dict(),
         "agent_source": agent_source,
-        "requested_live_trial": not config.offline and plan_factory is None,
+        "requested_live_trial": (
+            not config.offline
+            and plan_factory is None
+            and config.gate_mode != "deterministic_only"
+        ),
         "agent_model": agent_model,
         "repository_commit": config.repository_commit,
         "agent_request_status": agent_request_status,
         "agent_request_error": agent_request_error,
         "live_request_failed": agent_request_status == "failed_fallback",
+        "initial_proposal_cache_key": proposal_key,
+        "initial_proposal_cache_hit": proposal_cache_hit,
+        "initial_modeling_call_made": (
+            not proposal_cache_hit
+            and config.gate_mode != "deterministic_only"
+            and initial_plan_override is None
+        ),
         "generation_settings": {"seed": None, "temperature": None},
         "prompt_schema_version": config.prompt_schema_version,
         "agent_initial_input": initial_input_artifact,
@@ -842,6 +1020,13 @@ def _run_trial(
         "preprocessing_comparison": comparison,
         "reconciliation_invoked": reconciliation_invoked,
         "reconciliation_status": reconciliation_status,
+        "reconciliation_api_call_made": bool(
+            reconciliation_invoked
+            and reconciliation_agent_source == "openai"
+        ),
+        "reconciliation_request_failed": bool(
+            reconciliation_invoked and reconciliation_status == "failed"
+        ),
         "reconciliation_agent_source": reconciliation_agent_source,
         "reconciliation_method_source": reconciliation_method_source,
         "reconciliation_preprocessing_source": reconciliation_preprocessing_source,
@@ -1006,6 +1191,7 @@ def _run_trial(
             else None
         ),
         "warnings": warnings,
+        "fallback_row": agent_source == "offline_fallback" or reconciliation_agent_source == "offline_fallback",
         "empirical_reference_cache_key": cache_key,
     }
     return _jsonable(record)
@@ -1050,10 +1236,12 @@ def _failed_trial_record(
     error: Exception,
     variant: str = "standard",
     order_swap_pair_id: str | None = None,
+    requested_split_seed: int | None = None,
 ) -> dict[str, Any]:
     """Persist an execution failure without inventing a modeling decision."""
 
-    split_seed = config.seed + case.random_seed
+    experimental_split_seed = config.seed if requested_split_seed is None else requested_split_seed
+    split_seed = experimental_split_seed + case.random_seed
     perturbation_id = perturbation.id if perturbation is not None else "clean"
     split = freeze_supervised_split(
         case.load(),
@@ -1062,7 +1250,9 @@ def _failed_trial_record(
         test_size=config.test_size,
         random_state=split_seed,
     )
-    trial_id = f"{case.name}:{perturbation_id}:{trial_number}"
+    trial_id = f"{case.name}:{perturbation_id}:split{experimental_split_seed}:llm{trial_number}"
+    if config.ablation_name:
+        trial_id = f"{trial_id}:{config.ablation_name}"
     if variant != "standard":
         trial_id = f"{trial_id}:{variant}"
     return {
@@ -1075,15 +1265,18 @@ def _failed_trial_record(
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
         "gate_mode": config.gate_mode,
+        "ablation_name": config.ablation_name,
+        "ablation_schema_version": config.ablation_schema_version,
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
-        "split_seed": split_seed,
+        "split_seed": experimental_split_seed,
+        "split_random_state": split_seed,
         "split_contract": split.as_dict(),
         "agent_source": "failed",
-        "requested_live_trial": not config.offline,
+        "requested_live_trial": not config.offline and config.gate_mode != "deterministic_only",
         "agent_model": config.model,
         "repository_commit": config.repository_commit,
         "agent_request_status": "failed",
-        "agent_request_error": f"{type(error).__name__}: {error}",
+        "agent_request_error": _redact_error(error),
         "live_request_failed": not config.offline,
         "prompt_schema_version": config.prompt_schema_version,
         "agent_initial": None,
@@ -1113,8 +1306,13 @@ def _failed_trial_record(
             "expected_validation_codes": [],
         },
         "validation_failure_codes": [],
-        "failure_reason": f"{type(error).__name__}: {error}",
+        "failure_reason": _redact_error(error),
         "warnings": ["Trial execution failed; no model-selection result was recorded."],
+        "initial_modeling_call_made": config.gate_mode != "deterministic_only",
+        "initial_proposal_cache_hit": False,
+        "fallback_row": False,
+        "reconciliation_api_call_made": False,
+        "reconciliation_request_failed": False,
     }
 
 
@@ -1159,9 +1357,43 @@ def run_evaluation(
     order_swap: bool = False,
     empirical_probe_enabled: bool = True,
     resume: bool = False,
+    split_seeds: Sequence[int] | None = None,
+    require_live: bool = False,
+    soft_challenge_strategy: str = "calibrated",
+    enable_regression_interaction_diagnostics: bool = True,
+    enable_classification_boundary_diagnostics: bool = True,
+    ablation_name: str | None = None,
+    ablation_schema_version: str | None = None,
+    ablation_spec: Any | None = None,
+    proposal_cache_path: str | Path | None = None,
+    empirical_reference_cache_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
+    spec_values: dict[str, Any] | None = None
+    if ablation_spec is not None:
+        spec_values = ablation_spec.as_dict() if hasattr(ablation_spec, "as_dict") else dict(ablation_spec)
+        gate_mode = spec_values.get("decision_mode", gate_mode)
+        soft_challenge_strategy = spec_values.get("soft_challenge_strategy", soft_challenge_strategy)
+        reconciliation_mode = spec_values.get("reconciliation_mode", reconciliation_mode)
+        empirical_probe_enabled = bool(spec_values.get("empirical_probe", empirical_probe_enabled))
+        enable_regression_interaction_diagnostics = bool(
+            spec_values.get(
+                "interaction_diagnostics",
+                enable_regression_interaction_diagnostics,
+            )
+        )
+        enable_classification_boundary_diagnostics = bool(
+            spec_values.get(
+                "classification_boundary_diagnostics",
+                enable_classification_boundary_diagnostics,
+            )
+        )
+        ablation_name = spec_values.get("name", ablation_name)
+        ablation_schema_version = spec_values.get("schema_version", ablation_schema_version)
+    if require_live and offline:
+        raise ValueError("require_live cannot be combined with offline mode.")
+    selected_split_seeds = tuple(int(value) for value in (split_seeds or [seed]))
     config = EvaluationConfig(
         repetitions=repetitions,
         seed=seed,
@@ -1175,11 +1407,14 @@ def run_evaluation(
         reconciliation_mode=reconciliation_mode,
         order_swap=order_swap,
         empirical_probe_enabled=empirical_probe_enabled,
-        prompt_schema_version=(
-            LEGACY_RECONCILIATION_PROMPT_VERSION
-            if reconciliation_mode == "legacy"
-            else PROMPT_SCHEMA_VERSION
-        ),
+        prompt_schema_version=PROMPT_SCHEMA_VERSION,
+        split_seeds=selected_split_seeds,
+        require_live=require_live,
+        soft_challenge_strategy=soft_challenge_strategy,
+        enable_regression_interaction_diagnostics=enable_regression_interaction_diagnostics,
+        enable_classification_boundary_diagnostics=enable_classification_boundary_diagnostics,
+        ablation_name=ablation_name,
+        ablation_schema_version=ablation_schema_version,
     )
     selected_cases = list(cases or default_benchmark_cases())
     if case_names:
@@ -1196,14 +1431,25 @@ def run_evaluation(
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,
         "seed": config.seed,
+        "split_seeds": list(config.split_seeds),
+        "llm_repetitions": config.repetitions,
         "test_size": config.test_size,
-        "agent_mode": "offline" if config.offline else "live_or_fallback",
+        "agent_mode": "offline" if config.offline else "live_required" if config.require_live else "live_or_fallback",
         "agent_model_requested": config.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
         "gate_mode": config.gate_mode,
         "reconciliation_mode": config.reconciliation_mode,
         "order_swap": config.order_swap,
         "empirical_probe_enabled": config.empirical_probe_enabled,
+        "require_live": config.require_live,
+        "soft_challenge_strategy": config.soft_challenge_strategy,
+        "diagnostic_configuration": {
+            "enable_regression_interaction_diagnostics": config.enable_regression_interaction_diagnostics,
+            "enable_classification_boundary_diagnostics": config.enable_classification_boundary_diagnostics,
+        },
+        "ablation_name": config.ablation_name,
+        "ablation_schema_version": config.ablation_schema_version,
+        "ablation_spec": spec_values,
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "reconciliation_mode_definitions": {
             "legacy": "source-labeled reconciliation prompt retained as an evaluation baseline",
@@ -1211,6 +1457,7 @@ def run_evaluation(
         },
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
+            "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
             "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
             "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
         },
@@ -1274,87 +1521,142 @@ def run_evaluation(
         }
         trials = []
         empirical_reference_cache = {}
+    empirical_reference_file = (
+        Path(empirical_reference_cache_path).resolve()
+        if empirical_reference_cache_path is not None
+        else None
+    )
+    if empirical_reference_file is not None and empirical_reference_file.is_file():
+        empirical_reference_cache = json.loads(
+            empirical_reference_file.read_text(encoding="utf-8")
+        )
+    proposal_cache: dict[str, dict[str, Any]] = {}
+    proposal_cache_file = Path(proposal_cache_path).resolve() if proposal_cache_path is not None else None
+    if proposal_cache_file is not None and proposal_cache_file.is_file():
+        for line in proposal_cache_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            key = item.pop("cache_key", None)
+            if key is not None and isinstance(item, dict):
+                proposal_cache[str(key)] = item
     agents = OpenAIAgents(model=model)
-    completed_trial_ids = {trial.get("trial_id") for trial in trials}
+    completed_trial_ids = {
+        trial.get("trial_id")
+        for trial in trials
+        if trial.get("trial_status") != "failed"
+    }
     for case in selected_cases:
         scenario_list: list[Perturbation | None] = [None]
         scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
-        for perturbation in scenario_list:
-            for trial_number in range(repetitions):
-                base_trial_id = f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:{trial_number}"
-                if config.order_swap:
-                    pair_id = base_trial_id
-                    variants = [
-                        ("order_ab", ("agent", "deterministic")),
-                        ("order_ba", ("deterministic", "agent")),
-                    ]
-                else:
-                    pair_id = None
-                    variants = [("standard", None)]
-                cached_pair_plan = None
-                cached_pair_source = None
-                cached_pair_model = None
-                cached_pair_request_status = None
-                cached_pair_request_error = None
-                if config.order_swap:
-                    prior_ab = next(
-                        (record for record in trials if record.get("trial_id") == f"{base_trial_id}:order_ab"),
-                        None,
+        for requested_split_seed in config.split_seeds:
+            for perturbation in scenario_list:
+                for trial_number in range(repetitions):
+                    base_trial_id = (
+                        f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:"
+                        f"split{requested_split_seed}:llm{trial_number}"
                     )
-                    if prior_ab is not None and prior_ab.get("trial_status") != "failed":
-                        cached_pair_plan = _cached_plan_from_trial(prior_ab)
-                        cached_pair_source = prior_ab.get("agent_source")
-                        cached_pair_model = prior_ab.get("agent_model")
-                        cached_pair_request_status = prior_ab.get("agent_request_status")
-                        cached_pair_request_error = prior_ab.get("agent_request_error")
-                for variant, proposal_order in variants:
-                    trial_id = base_trial_id if variant == "standard" else f"{base_trial_id}:{variant}"
-                    if trial_id in completed_trial_ids:
-                        continue
-                    try:
-                        trial = _run_trial(
-                            case,
-                            perturbation,
-                            trial_number,
-                            config,
-                            plan_factory=agent_plan_factory,
-                            reconciliation_factory=reconciliation_factory,
-                            agents=agents,
-                            empirical_reference_cache=empirical_reference_cache,
-                            variant=variant,
-                            proposal_order=proposal_order,
-                            order_swap_pair_id=pair_id,
-                            initial_plan_override=cached_pair_plan,
-                            initial_source_override=cached_pair_source,
-                            initial_model_override=cached_pair_model,
-                            initial_request_status_override=cached_pair_request_status,
-                            initial_request_error_override=cached_pair_request_error,
+                    if config.ablation_name:
+                        base_trial_id = f"{base_trial_id}:{config.ablation_name}"
+                    if config.order_swap:
+                        pair_id = base_trial_id
+                        variants = [
+                            ("order_ab", ("agent", "deterministic")),
+                            ("order_ba", ("deterministic", "agent")),
+                        ]
+                    else:
+                        pair_id = None
+                        variants = [("standard", None)]
+                    cached_pair_plan = None
+                    cached_pair_source = None
+                    cached_pair_model = None
+                    cached_pair_request_status = None
+                    cached_pair_request_error = None
+                    if config.order_swap:
+                        prior_ab = next(
+                            (record for record in trials if record.get("trial_id") == f"{base_trial_id}:order_ab"),
+                            None,
                         )
-                    except Exception as exc:
-                        trial = _failed_trial_record(
-                            case,
-                            perturbation,
-                            trial_number,
-                            config,
-                            exc,
-                            variant=variant,
-                            order_swap_pair_id=pair_id,
+                        if prior_ab is not None and prior_ab.get("trial_status") != "failed":
+                            cached_pair_plan = _cached_plan_from_trial(prior_ab)
+                            cached_pair_source = prior_ab.get("agent_source")
+                            cached_pair_model = prior_ab.get("agent_model")
+                            cached_pair_request_status = prior_ab.get("agent_request_status")
+                            cached_pair_request_error = prior_ab.get("agent_request_error")
+                    for variant, proposal_order in variants:
+                        trial_id = base_trial_id if variant == "standard" else f"{base_trial_id}:{variant}"
+                        if trial_id in completed_trial_ids:
+                            continue
+                        try:
+                            trial = _run_trial(
+                                case,
+                                perturbation,
+                                trial_number,
+                                config,
+                                plan_factory=agent_plan_factory,
+                                reconciliation_factory=reconciliation_factory,
+                                agents=agents,
+                                empirical_reference_cache=empirical_reference_cache,
+                                variant=variant,
+                                proposal_order=proposal_order,
+                                order_swap_pair_id=pair_id,
+                                initial_plan_override=cached_pair_plan,
+                                initial_source_override=cached_pair_source,
+                                initial_model_override=cached_pair_model,
+                                initial_request_status_override=cached_pair_request_status,
+                                initial_request_error_override=cached_pair_request_error,
+                                requested_split_seed=requested_split_seed,
+                                proposal_cache=proposal_cache,
+                            )
+                        except Exception as exc:
+                            trial = _failed_trial_record(
+                                case,
+                                perturbation,
+                                trial_number,
+                                config,
+                                exc,
+                                variant=variant,
+                                order_swap_pair_id=pair_id,
+                                requested_split_seed=requested_split_seed,
+                            )
+                        trials.append(trial)
+                        if trial.get("trial_status") != "failed":
+                            completed_trial_ids.add(trial_id)
+                        if config.order_swap and variant == "order_ab" and trial.get("trial_status") != "failed":
+                            cached_pair_plan = _cached_plan_from_trial(trial)
+                            cached_pair_source = trial.get("agent_source")
+                            cached_pair_model = trial.get("agent_model")
+                            cached_pair_request_status = trial.get("agent_request_status")
+                            cached_pair_request_error = trial.get("agent_request_error")
+                        _write_outputs(
+                            output_path,
+                            config_payload,
+                            trials,
+                            summarize_trials(trials, thresholds=config.thresholds),
+                            empirical_reference_cache,
                         )
-                    trials.append(trial)
-                    completed_trial_ids.add(trial_id)
-                    if config.order_swap and variant == "order_ab" and trial.get("trial_status") != "failed":
-                        cached_pair_plan = _cached_plan_from_trial(trial)
-                        cached_pair_source = trial.get("agent_source")
-                        cached_pair_model = trial.get("agent_model")
-                        cached_pair_request_status = trial.get("agent_request_status")
-                        cached_pair_request_error = trial.get("agent_request_error")
-                    _write_outputs(
-                        output_path,
-                        config_payload,
-                        trials,
-                        summarize_trials(trials, thresholds=config.thresholds),
-                        empirical_reference_cache,
-                    )
+                        if proposal_cache_file is not None:
+                            _write_proposal_cache(proposal_cache_file, proposal_cache)
+                        if empirical_reference_file is not None:
+                            empirical_reference_file.parent.mkdir(parents=True, exist_ok=True)
+                            empirical_reference_file.write_text(
+                                json.dumps(empirical_reference_cache, indent=2, sort_keys=True),
+                                encoding="utf-8",
+                            )
     summary = summarize_trials(trials, thresholds=config.thresholds)
     paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
-    return {"output_dir": str(output_path), "paths": paths, "summary": summary}
+    if proposal_cache_file is not None:
+        _write_proposal_cache(proposal_cache_file, proposal_cache)
+    if empirical_reference_file is not None:
+        empirical_reference_file.parent.mkdir(parents=True, exist_ok=True)
+        empirical_reference_file.write_text(
+            json.dumps(empirical_reference_cache, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    return {
+        "output_dir": str(output_path),
+        "paths": paths,
+        "summary": summary,
+        "trials": trials,
+        "config": config_payload,
+    }

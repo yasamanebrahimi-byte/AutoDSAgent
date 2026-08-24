@@ -725,6 +725,8 @@ def _validate_modeling_gate(
     soft_challenge_policy: SoftChallengePolicy | None = None,
     soft_challenge_mode: str = "selective",
     empirical_probe_policy: EmpiricalProbePolicy | None = None,
+    soft_challenge_strategy: str = "calibrated",
+    strict_live: bool = False,
 ) -> dict[str, Any]:
     """Validate the initial proposal before treating the deterministic output as a challenger.
 
@@ -818,6 +820,7 @@ def _validate_modeling_gate(
             else None
         ),
         policy=soft_challenge_policy,
+        strategy=soft_challenge_strategy,
     )
     if soft_challenge_mode == "always_reconcile" and method_disagreement:
         soft_decision = replace(
@@ -974,6 +977,7 @@ def _validate_modeling_gate(
                 warnings,
                 agent_sources,
                 offline=offline,
+                strict_live=strict_live,
             )
             if blinded_reconciliation is not None:
                 try:
@@ -1242,6 +1246,8 @@ def _validate_before_training(
     reconciliation_mode: str = "blinded",
     proposal_order_override: tuple[str, str] | None = None,
     empirical_probe_policy: EmpiricalProbePolicy | None = None,
+    soft_challenge_strategy: str = "calibrated",
+    strict_live: bool = False,
 ) -> dict[str, Any]:
     """Legacy combined-plan gate with explicit hard and soft decision artifacts."""
     if reconciliation_mode not in {"blinded", "legacy"}:
@@ -1332,6 +1338,7 @@ def _validate_before_training(
             else profile.get("rows")
         ),
         policy=soft_challenge_policy,
+        strategy=soft_challenge_strategy,
     )
     if (
         dataframe is None
@@ -1524,6 +1531,7 @@ def _validate_before_training(
             warnings,
             agent_sources,
             offline=offline,
+            strict_live=strict_live,
         )
         if blinded_reconciliation is not None:
             try:
@@ -1872,6 +1880,7 @@ def _call_or_fallback(
     warnings: list[str],
     agent_sources: dict[str, str],
     offline: bool,
+    strict_live: bool = False,
 ) -> Any:
     if offline:
         agent_sources[name] = "offline_fallback"
@@ -1879,6 +1888,9 @@ def _call_or_fallback(
     try:
         value = call()
     except Exception as exc:
+        if strict_live:
+            agent_sources[name] = "failed"
+            raise
         warnings.append(f"{name} agent fallback used: {exc}")
         agent_sources[name] = "offline_fallback"
         return fallback()

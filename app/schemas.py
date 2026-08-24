@@ -304,6 +304,7 @@ class InteractionDiagnostics(StrictModel):
     skipped_pair_count: int = Field(default=0, ge=0)
     skipped_pair_reasons: dict[str, int] = Field(default_factory=dict)
     top_interaction_pairs: list[InteractionPairEvidence] = Field(default_factory=list, max_length=5)
+    diagnostic_reason: str = "computed"
 
 
 class ClassificationBoundaryDiagnostics(StrictModel):

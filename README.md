@@ -332,6 +332,54 @@ python -m evaluation.run --live --repetitions 10 --output evaluation_results/liv
 
 The harness verifies configuration compatibility, skips completed trial IDs, writes after each completed trial, and refuses to overwrite an existing bundle without `--resume`. `empirical_reference.json` stores the in-run training-only reference cache so repeated identical-evidence trials do not recompute candidate CV.
 
+### Controlled paired ablation studies
+
+Use `evaluation.ablation` when comparing modeling-gate components. One initial modeling proposal is cached per benchmark case, perturbation, split seed, LLM repetition, model, prompt schema, training-profile digest, target, and task, then reused across all selected presets. Reconciliation responses are not shared between presets. The same split seed is reused across LLM repetitions; split-seed variation and LLM-repetition variation are recorded separately.
+
+Small offline smoke study:
+
+```powershell
+python -m evaluation.ablation `
+  --output evaluation_results/ablation_smoke `
+  --offline `
+  --split-seed 42 `
+  --split-seed 123 `
+  --repetitions 2 `
+  --ablation llm_only `
+  --ablation selective_calibrated `
+  --ablation interaction_boundary_aware `
+  --cases wine
+```
+
+Small strict-live study:
+
+```powershell
+python -m evaluation.ablation `
+  --output evaluation_results/ablation_live_smoke `
+  --split-seed 42 `
+  --repetitions 2 `
+  --ablation selective_calibrated `
+  --ablation full `
+  --require-live `
+  --cases wine
+```
+
+Recommended multi-seed study:
+
+```powershell
+python -m evaluation.ablation `
+  --output evaluation_results/ablation_full `
+  --split-seed 42 `
+  --split-seed 123 `
+  --split-seed 2027 `
+  --repetitions 10 `
+  --require-live
+```
+
+The default suite is versioned as `modeling-gate-ablation-v1` and includes `llm_only`, `deterministic_only`, `legacy_gate`, `blinded_always_reconcile`, `high_confidence_only`, `selective_calibrated`, `interaction_boundary_aware`, `empirical_probe`, and `full`. Select a subset by repeating `--ablation`; use `--resume` to retry failed/missing trials.
+
+An ablation bundle contains `config.json`, `proposal_cache.jsonl`, `empirical_reference_cache.json`, one directory per selected preset (`trials.jsonl`, `summary.json`, `summary.md`, and the per-preset reference artifact), plus `ablation_summary.json` and `ablation_summary.md`. The combined report includes gate-health metrics, dataset- and trial-weighted summaries inherited from the evaluation metrics, paired comparisons, API call counts, probe counts, split/repetition identity, and strict-live integrity counts. No API credential is written to any cache, configuration, trial, or report artifact.
+
 Modeling reconciliation uses the versioned blinded evidence-comparison contract documented in [`docs/reconciliation.md`](docs/reconciliation.md). On a selective `CHALLENGE`, the two proposals are presented symmetrically as Proposal A and Proposal B, with reproducible seeded ordering and source mapping retained only in the evaluation artifact. Use `--reconciliation-mode legacy` for the source-labeled evaluation baseline, `--reconciliation-mode blinded` for the default, and `--order-swap` for paired A/B versus B/A robustness trials.
 
 ### Metrics and interpretation

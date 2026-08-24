@@ -161,6 +161,9 @@ class DeterministicPolicy:
     """
 
     version: str = "4"
+    # Evaluation-only switches. Production keeps both evidence sources on.
+    enable_regression_interaction_diagnostics: bool = True
+    enable_classification_boundary_diagnostics: bool = True
     high_correlation_threshold: float = 0.80
     severe_correlation_threshold: float = 0.90
     low_sample_feature_ratio: float = 3.0
