@@ -155,11 +155,45 @@ def _reconciliation_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     agent_count = sum(record.get("reconciliation_method_source") == "agent" for record in sourced)
     deterministic_count = sum(record.get("reconciliation_method_source") == "deterministic" for record in sourced)
+    a_count = sum(record.get("selected_proposal") == "A" for record in successful)
+    b_count = sum(record.get("selected_proposal") == "B" for record in successful)
+    proposal_labeled = [
+        record for record in successful if record.get("selected_proposal") in {"A", "B"}
+    ]
+    a_rate = _rate(a_count, len(proposal_labeled))
+    b_rate = _rate(b_count, len(proposal_labeled))
+    pairs: dict[str, list[dict[str, Any]]] = {}
+    for record in proposal_labeled:
+        pair_id = record.get("order_swap_pair_id")
+        if pair_id is not None:
+            pairs.setdefault(str(pair_id), []).append(record)
+    pair_results: list[bool] = []
+    for pair in pairs.values():
+        sources = {
+            record.get("selected_proposal_source") or record.get("reconciliation_method_source")
+            for record in pair
+        }
+        if len(pair) >= 2 and len(sources) == 1 and None not in sources:
+            pair_results.append(True)
+        elif len(pair) >= 2:
+            pair_results.append(False)
     return {
         "reconciliation_sided_with_agent_count": agent_count,
         "reconciliation_sided_with_deterministic_count": deterministic_count,
         "reconciliation_sided_with_agent_rate": _rate(agent_count, len(sourced)),
         "reconciliation_sided_with_deterministic_rate": _rate(deterministic_count, len(sourced)),
+        "reconciliation_a_selected_count": a_count,
+        "reconciliation_b_selected_count": b_count,
+        "reconciliation_a_selected_rate": a_rate,
+        "reconciliation_b_selected_rate": b_rate,
+        "reconciliation_a_b_selection_imbalance": (
+            abs(a_rate - b_rate) if a_rate is not None and b_rate is not None else None
+        ),
+        "order_swap_pair_count": len(pair_results),
+        "order_swap_consistency_rate": _rate(sum(pair_results), len(pair_results)),
+        "order_swap_flip_rate": (
+            1.0 - (sum(pair_results) / len(pair_results)) if pair_results else None
+        ),
     }
 
 
@@ -394,6 +428,7 @@ def summarize_trials(
             "reconciliation_invocation_rate": _rate(
                 sum(bool(record.get("reconciliation_invoked")) for record in valid_records), len(valid_records)
             ),
+            **_reconciliation_rates(valid_records),
             "model_family_disagreement_rate": _rate(
                 sum(record.get("method_disagreement") is True for record in valid_records),
                 sum(record.get("deterministic_recommendation") is not None for record in valid_records),

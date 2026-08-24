@@ -330,7 +330,9 @@ Soft challenge: <code>{soft_challenge.get('status', 'not recorded')}</code>; dec
 
 Final selection source: <code>{final_decision.get('selected_source', 'not recorded')}</code>.
 
-Validation decision: {validation.get('justification', 'The proposals matched on target, task, and method.')}
+Reconciliation framing: <code>{validation.get('reconciliation_mode', 'not invoked')}</code>; proposal A originated from <code>{validation.get('proposal_a_source', 'not recorded')}</code>; proposal B originated from <code>{validation.get('proposal_b_source', 'not recorded')}</code>; selected proposal: <code>{validation.get('selected_proposal', 'not recorded')}</code>. Two independently generated modeling proposals were compared using shared training-only evidence; source identity was retained for audit and revealed only after selection.
+
+Reconciliation decision: {validation.get('justification', 'The proposals matched on target, task, and method.')}
 
 Holdout boundary: the formulation gate completed and was validated before the supervised split. Modeling-agent evidence, deterministic recommendation evidence, modeling reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation used training-partition evidence only. The EDA artifact contains <code>{eda.get('rows', 0)}</code> cleaned training rows and no holdout rows. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those guardrail checks are not planning evidence. The frozen holdout was scored once for final model evaluation.
 

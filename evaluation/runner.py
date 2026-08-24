@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.deterministic_policy import DeterministicPolicy
 from app.llm import PROMPT_SCHEMA_VERSION, OpenAIAgents
+from app.reconciliation import LEGACY_RECONCILIATION_PROMPT_VERSION
 from app.pipeline import (
     _fallback_agent_plan,
     _fallback_resolution,
@@ -60,6 +61,8 @@ class EvaluationConfig:
     prompt_schema_version: str = PROMPT_SCHEMA_VERSION
     repository_commit: str | None = None
     gate_mode: str = "selective"
+    reconciliation_mode: str = "blinded"
+    order_swap: bool = False
 
     def __post_init__(self) -> None:
         if self.repetitions < 1:
@@ -68,6 +71,8 @@ class EvaluationConfig:
             raise ValueError("test_size must be between 0.10 and 0.50")
         if self.gate_mode not in {"llm_only", "always_reconcile", "selective"}:
             raise ValueError("gate_mode must be 'llm_only', 'always_reconcile', or 'selective'.")
+        if self.reconciliation_mode not in {"blinded", "legacy"}:
+            raise ValueError("reconciliation_mode must be 'blinded' or 'legacy'.")
 
 
 class _EvaluationGateAgent:
@@ -325,6 +330,14 @@ def _run_trial(
     reconciliation_factory: ReconciliationFactory | None,
     agents: OpenAIAgents,
     empirical_reference_cache: dict[str, dict[str, Any]],
+    variant: str = "standard",
+    proposal_order: tuple[str, str] | None = None,
+    order_swap_pair_id: str | None = None,
+    initial_plan_override: AgentPlan | None = None,
+    initial_source_override: str | None = None,
+    initial_model_override: str | None = None,
+    initial_request_status_override: str | None = None,
+    initial_request_error_override: str | None = None,
 ) -> dict[str, Any]:
     # Repetitions are stochastic LLM repeats over identical evidence.  The
     # split seed is therefore a property of the case/experiment, not of the
@@ -366,11 +379,14 @@ def _run_trial(
     )
     training_profile = profile_dataframe(training_frame)
     warnings: list[str] = []
+    trial_id = f"{case.name}:{perturbation_id}:{trial_number}"
+    if variant != "standard":
+        trial_id = f"{trial_id}:{variant}"
     context = {
         "benchmark_case": case.name,
         "perturbation_id": perturbation_id,
         "trial": trial_number,
-        "trial_id": f"{case.name}:{perturbation_id}:{trial_number}",
+        "trial_id": trial_id,
         "split_seed": split_seed,
         "target_column": case.target_column,
         "task_type": case.expected_task_type,
@@ -390,15 +406,22 @@ def _run_trial(
         "previous_repetitions_included": False,
         "prompt_schema_version": config.prompt_schema_version,
     }
-    plan, agent_source, agent_model, agent_request_status, agent_request_error = _choose_source(
-        config=config,
-        agents=agents,
-        plan_factory=plan_factory,
-        context=context,
-        training_profile=training_profile,
-        case=case,
-        warnings=warnings,
-    )
+    if initial_plan_override is None:
+        plan, agent_source, agent_model, agent_request_status, agent_request_error = _choose_source(
+            config=config,
+            agents=agents,
+            plan_factory=plan_factory,
+            context=context,
+            training_profile=training_profile,
+            case=case,
+            warnings=warnings,
+        )
+    else:
+        plan = initial_plan_override
+        agent_source = initial_source_override or "cached_order_swap"
+        agent_model = initial_model_override or config.model
+        agent_request_status = initial_request_status_override or "cached"
+        agent_request_error = initial_request_error_override
     initial_validation = _validate_initial_plan(
         frame,
         split,
@@ -503,6 +526,8 @@ def _run_trial(
                     established_target=case.target_column,
                     established_task=case.expected_task_type,
                     soft_challenge_mode=config.gate_mode,
+                    reconciliation_mode=config.reconciliation_mode,
+                    proposal_order_override=proposal_order,
                 )
                 # The gate may also reconcile a hard-invalid initial proposal
                 # whose method-family comparison looks like agreement.  The
@@ -689,6 +714,8 @@ def _run_trial(
         "gate_mode": config.gate_mode,
         "trial": trial_number,
         "trial_id": context["trial_id"],
+        "evaluation_variant": variant,
+        "order_swap_pair_id": order_swap_pair_id,
         "trial_status": "completed",
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": split_seed,
@@ -755,6 +782,13 @@ def _run_trial(
         "reconciliation_agent_source": reconciliation_agent_source,
         "reconciliation_method_source": reconciliation_method_source,
         "reconciliation_preprocessing_source": reconciliation_preprocessing_source,
+        "reconciliation_mode": (gate_result or {}).get("reconciliation_mode"),
+        "reconciliation_prompt_version": (gate_result or {}).get("reconciliation_prompt_version"),
+        "proposal_order_seed": (gate_result or {}).get("proposal_order_seed"),
+        "proposal_a_source": (gate_result or {}).get("proposal_a_source"),
+        "proposal_b_source": (gate_result or {}).get("proposal_b_source"),
+        "selected_proposal": (gate_result or {}).get("selected_proposal"),
+        "selected_proposal_source": (gate_result or {}).get("selected_proposal_source"),
         "reconciliation": gate_result.get("reconciliation") if gate_result else None,
         "hard_validation": gate_result.get("hard_validation") if gate_result else {
             "status": "failed" if initial_validation.status == "failed" else "unavailable",
@@ -916,6 +950,8 @@ def _failed_trial_record(
     trial_number: int,
     config: EvaluationConfig,
     error: Exception,
+    variant: str = "standard",
+    order_swap_pair_id: str | None = None,
 ) -> dict[str, Any]:
     """Persist an execution failure without inventing a modeling decision."""
 
@@ -928,13 +964,18 @@ def _failed_trial_record(
         test_size=config.test_size,
         random_state=split_seed,
     )
+    trial_id = f"{case.name}:{perturbation_id}:{trial_number}"
+    if variant != "standard":
+        trial_id = f"{trial_id}:{variant}"
     return {
-        "trial_id": f"{case.name}:{perturbation_id}:{trial_number}",
+        "trial_id": trial_id,
         "benchmark_case": case.name,
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
         "trial": trial_number,
         "trial_status": "failed",
+        "evaluation_variant": variant,
+        "order_swap_pair_id": order_swap_pair_id,
         "gate_mode": config.gate_mode,
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": split_seed,
@@ -979,6 +1020,25 @@ def _failed_trial_record(
     }
 
 
+def _cached_plan_from_trial(record: dict[str, Any]) -> AgentPlan | None:
+    """Recover the first pair member's proposal for an order-swap rerun."""
+
+    values = record.get("agent_initial")
+    if not isinstance(values, dict):
+        return None
+    try:
+        return AgentPlan(
+            target_column=str(values["target"]),
+            task_type=values["task"],
+            recommended_method=values["method"],
+            preprocessing=values["preprocessing"],
+            reasoning=str(values.get("reasoning", "The cached order-swap proposal was retained.")),
+            confidence=float(values.get("confidence", 0.0)),
+        )
+    except Exception:
+        return None
+
+
 def run_evaluation(
     output_dir: str | Path,
     *,
@@ -997,6 +1057,8 @@ def run_evaluation(
     # pass gate_mode="selective" explicitly; the production pipeline defaults
     # to selective intervention.
     gate_mode: str = "always_reconcile",
+    reconciliation_mode: str = "blinded",
+    order_swap: bool = False,
     resume: bool = False,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
@@ -1011,6 +1073,13 @@ def run_evaluation(
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
         repository_commit=_repository_commit(),
         gate_mode=gate_mode,
+        reconciliation_mode=reconciliation_mode,
+        order_swap=order_swap,
+        prompt_schema_version=(
+            LEGACY_RECONCILIATION_PROMPT_VERSION
+            if reconciliation_mode == "legacy"
+            else PROMPT_SCHEMA_VERSION
+        ),
     )
     selected_cases = list(cases or default_benchmark_cases())
     if case_names:
@@ -1031,6 +1100,12 @@ def run_evaluation(
         "agent_model_requested": config.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
         "gate_mode": config.gate_mode,
+        "reconciliation_mode": config.reconciliation_mode,
+        "order_swap": config.order_swap,
+        "reconciliation_mode_definitions": {
+            "legacy": "source-labeled reconciliation prompt retained as an evaluation baseline",
+            "blinded": "source-neutral Proposal A/Proposal B evidence-comparison prompt",
+        },
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
             "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
@@ -1100,31 +1175,80 @@ def run_evaluation(
         scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
         for perturbation in scenario_list:
             for trial_number in range(repetitions):
-                trial_id = f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:{trial_number}"
-                if trial_id in completed_trial_ids:
-                    continue
-                try:
-                    trial = _run_trial(
-                        case,
-                        perturbation,
-                        trial_number,
-                        config,
-                        plan_factory=agent_plan_factory,
-                        reconciliation_factory=reconciliation_factory,
-                        agents=agents,
-                        empirical_reference_cache=empirical_reference_cache,
+                base_trial_id = f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:{trial_number}"
+                if config.order_swap:
+                    pair_id = base_trial_id
+                    variants = [
+                        ("order_ab", ("agent", "deterministic")),
+                        ("order_ba", ("deterministic", "agent")),
+                    ]
+                else:
+                    pair_id = None
+                    variants = [("standard", None)]
+                cached_pair_plan = None
+                cached_pair_source = None
+                cached_pair_model = None
+                cached_pair_request_status = None
+                cached_pair_request_error = None
+                if config.order_swap:
+                    prior_ab = next(
+                        (record for record in trials if record.get("trial_id") == f"{base_trial_id}:order_ab"),
+                        None,
                     )
-                except Exception as exc:
-                    trial = _failed_trial_record(case, perturbation, trial_number, config, exc)
-                trials.append(trial)
-                completed_trial_ids.add(trial_id)
-                _write_outputs(
-                    output_path,
-                    config_payload,
-                    trials,
-                    summarize_trials(trials, thresholds=config.thresholds),
-                    empirical_reference_cache,
-                )
+                    if prior_ab is not None and prior_ab.get("trial_status") != "failed":
+                        cached_pair_plan = _cached_plan_from_trial(prior_ab)
+                        cached_pair_source = prior_ab.get("agent_source")
+                        cached_pair_model = prior_ab.get("agent_model")
+                        cached_pair_request_status = prior_ab.get("agent_request_status")
+                        cached_pair_request_error = prior_ab.get("agent_request_error")
+                for variant, proposal_order in variants:
+                    trial_id = base_trial_id if variant == "standard" else f"{base_trial_id}:{variant}"
+                    if trial_id in completed_trial_ids:
+                        continue
+                    try:
+                        trial = _run_trial(
+                            case,
+                            perturbation,
+                            trial_number,
+                            config,
+                            plan_factory=agent_plan_factory,
+                            reconciliation_factory=reconciliation_factory,
+                            agents=agents,
+                            empirical_reference_cache=empirical_reference_cache,
+                            variant=variant,
+                            proposal_order=proposal_order,
+                            order_swap_pair_id=pair_id,
+                            initial_plan_override=cached_pair_plan,
+                            initial_source_override=cached_pair_source,
+                            initial_model_override=cached_pair_model,
+                            initial_request_status_override=cached_pair_request_status,
+                            initial_request_error_override=cached_pair_request_error,
+                        )
+                    except Exception as exc:
+                        trial = _failed_trial_record(
+                            case,
+                            perturbation,
+                            trial_number,
+                            config,
+                            exc,
+                            variant=variant,
+                            order_swap_pair_id=pair_id,
+                        )
+                    trials.append(trial)
+                    completed_trial_ids.add(trial_id)
+                    if config.order_swap and variant == "order_ab" and trial.get("trial_status") != "failed":
+                        cached_pair_plan = _cached_plan_from_trial(trial)
+                        cached_pair_source = trial.get("agent_source")
+                        cached_pair_model = trial.get("agent_model")
+                        cached_pair_request_status = trial.get("agent_request_status")
+                        cached_pair_request_error = trial.get("agent_request_error")
+                    _write_outputs(
+                        output_path,
+                        config_payload,
+                        trials,
+                        summarize_trials(trials, thresholds=config.thresholds),
+                        empirical_reference_cache,
+                    )
     summary = summarize_trials(trials, thresholds=config.thresholds)
     paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
     return {"output_dir": str(output_path), "paths": paths, "summary": summary}

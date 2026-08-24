@@ -330,6 +330,8 @@ python -m evaluation.run --live --repetitions 10 --output evaluation_results/liv
 
 The harness verifies configuration compatibility, skips completed trial IDs, writes after each completed trial, and refuses to overwrite an existing bundle without `--resume`. `empirical_reference.json` stores the in-run training-only reference cache so repeated identical-evidence trials do not recompute candidate CV.
 
+Modeling reconciliation uses the versioned blinded evidence-comparison contract documented in [`docs/reconciliation.md`](docs/reconciliation.md). On a selective `CHALLENGE`, the two proposals are presented symmetrically as Proposal A and Proposal B, with reproducible seeded ordering and source mapping retained only in the evaluation artifact. Use `--reconciliation-mode legacy` for the source-labeled evaluation baseline, `--reconciliation-mode blinded` for the default, and `--order-swap` for paired A/B versus B/A robustness trials.
+
 ### Metrics and interpretation
 
 The primary live denominator is `agent_source == "openai"`. The summary separately reports requested live trials, successful OpenAI trials, offline fallbacks, failed executions, provider-request failures, and mock trials. Operational/all-source metrics remain available for safety and pipeline coverage, but conclusions about LLM behavior use the OpenAI-only view.

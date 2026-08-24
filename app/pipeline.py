@@ -22,6 +22,13 @@ from app.llm import OpenAIAgents
 from app.modeling import fit_selected_model
 from app.preprocessing import compare_preprocessing_plans, requirements_from_records
 from app.reporting import render_code, render_report, write_json
+from app.reconciliation import (
+    BLINDED_RECONCILIATION_MODE,
+    BLINDED_RECONCILIATION_PROMPT_VERSION,
+    LEGACY_RECONCILIATION_PROMPT_VERSION,
+    build_blinded_reconciliation,
+    infer_selected_proposal,
+)
 from app.schemas import (
     AgentPlan,
     CleaningPlan,
@@ -39,7 +46,7 @@ from app.schemas import (
     ReportDraft,
     SoftChallengeArtifact,
 )
-from app.soft_challenge import SoftChallengeDecision, SoftChallengePolicy, decide_soft_challenge
+from app.soft_challenge import SoftChallengePolicy, decide_soft_challenge
 from app.validation import (
     DeterministicRecommendationUnavailable,
     FrozenSplit,
@@ -812,6 +819,9 @@ def _validate_modeling_gate(
     )
 
     resolution: ModelingResolution | None = None
+    blinded_reconciliation = None
+    selected_proposal = None
+    selected_proposal_source = None
     if (
         not hard_reconciliation_required
         and not soft_reconciliation_required
@@ -839,6 +849,20 @@ def _validate_modeling_gate(
             status = "disagreement_abstained"
             resolution = None
         else:
+            blinded_reconciliation = build_blinded_reconciliation(
+                reconciliation_profile,
+                modeling_plan,
+                deterministic,
+                target_column=approved_target,
+                task_type=approved_task,
+                preprocessing_comparison=preprocessing_comparison,
+                preprocessing_requirements=requirements.as_dict(),
+                hard_validation={
+                    "agent": _reconciliation_hard_summary(agent_hard_validation),
+                    "deterministic": _reconciliation_hard_summary(challenger_hard_validation),
+                },
+                order_seed=random_state,
+            )
             resolution = _call_or_fallback(
                 "modeling_reconciliation",
                 lambda: agents.reconcile_modeling(
@@ -847,6 +871,11 @@ def _validate_modeling_gate(
                     modeling_plan,
                     {
                         **deterministic.model_dump(mode="json"),
+                        "_reconciliation_order_seed": blinded_reconciliation.proposal_order_seed,
+                        "_reconciliation_proposal_order": [
+                            blinded_reconciliation.proposal_a_source,
+                            blinded_reconciliation.proposal_b_source,
+                        ],
                         "preprocessing_comparison": preprocessing_comparison,
                         "preprocessing_requirements": requirements.as_dict(),
                         "hard_validation": {
@@ -867,6 +896,18 @@ def _validate_modeling_gate(
                 agent_sources,
                 offline=offline,
             )
+            if blinded_reconciliation is not None:
+                try:
+                    selected_proposal, selected_proposal_source = infer_selected_proposal(
+                        resolution,
+                        blinded_reconciliation,
+                    )
+                except ValueError as exc:
+                    raise InvariantViolation(
+                        f"[reconciliation_selected_proposal_mismatch] {exc}"
+                    ) from exc
+                if selected_proposal is not None and resolution.selected_proposal is None:
+                    resolution = resolution.model_copy(update={"selected_proposal": selected_proposal})
             selected_method = resolution.selected_method
             selected_preprocessing = resolution.selected_preprocessing
             justification = resolution.justification
@@ -938,7 +979,9 @@ def _validate_modeling_gate(
     reconciliation_preprocessing_source = None
     if resolution is not None:
         reconciliation_method_source = (
-            "agent"
+            selected_proposal_source
+            if selected_proposal_source in {"agent", "deterministic"}
+            else "agent"
             if selected_method == modeling_plan.recommended_method
             else "deterministic"
             if selected_method == deterministic.recommended_method
@@ -971,6 +1014,23 @@ def _validate_modeling_gate(
         reconciliation_status="succeeded" if resolution is not None else "not_invoked",
         reconciliation_method_source=reconciliation_method_source,
         reconciliation_preprocessing_source=reconciliation_preprocessing_source,
+        reconciliation_mode=(
+            BLINDED_RECONCILIATION_MODE if blinded_reconciliation is not None else None
+        ),
+        reconciliation_prompt_version=(
+            BLINDED_RECONCILIATION_PROMPT_VERSION if blinded_reconciliation is not None else None
+        ),
+        proposal_order_seed=(
+            blinded_reconciliation.proposal_order_seed if blinded_reconciliation is not None else None
+        ),
+        proposal_a_source=(
+            blinded_reconciliation.proposal_a_source if blinded_reconciliation is not None else None
+        ),
+        proposal_b_source=(
+            blinded_reconciliation.proposal_b_source if blinded_reconciliation is not None else None
+        ),
+        selected_proposal=selected_proposal,
+        selected_proposal_source=selected_proposal_source,
         decision=soft_decision.decision,
         status_detail=soft_decision.status if soft_status != "invalid" else "invalid",
         decision_reason=soft_decision.decision_reason,
@@ -993,6 +1053,8 @@ def _validate_modeling_gate(
         "recommended_method": selected_method,
         "preprocessing": selected_preprocessing.model_dump(mode="json"),
         "selected_source": final_source,
+        "selected_proposal": selected_proposal,
+        "selected_proposal_source": selected_proposal_source,
     }
     gate_artifact = ModelingGateArtifact(
         hard_validation=hard_artifact,
@@ -1013,6 +1075,17 @@ def _validate_modeling_gate(
         "approved_preprocessing": selected_preprocessing.model_dump(mode="json"),
         "preprocessing_comparison": preprocessing_comparison,
         "reconciliation": resolution.model_dump(mode="json") if resolution else None,
+        "reconciliation_mode": BLINDED_RECONCILIATION_MODE if blinded_reconciliation else None,
+        "reconciliation_prompt_version": (
+            BLINDED_RECONCILIATION_PROMPT_VERSION if blinded_reconciliation else None
+        ),
+        "proposal_order_seed": (
+            blinded_reconciliation.proposal_order_seed if blinded_reconciliation else None
+        ),
+        "proposal_a_source": blinded_reconciliation.proposal_a_source if blinded_reconciliation else None,
+        "proposal_b_source": blinded_reconciliation.proposal_b_source if blinded_reconciliation else None,
+        "selected_proposal": selected_proposal,
+        "selected_proposal_source": selected_proposal_source,
         "preprocessing_requirements": requirements.as_dict(),
         "deterministic_validation": deterministic_validation.as_dict(),
         "initial_hard_validation": agent_hard_validation.as_dict(),
@@ -1066,8 +1139,12 @@ def _validate_before_training(
     established_task: str | None = None,
     soft_challenge_policy: SoftChallengePolicy | None = None,
     soft_challenge_mode: str = "selective",
+    reconciliation_mode: str = "blinded",
+    proposal_order_override: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Legacy combined-plan gate with explicit hard and soft decision artifacts."""
+    if reconciliation_mode not in {"blinded", "legacy"}:
+        raise ValueError("reconciliation_mode must be 'blinded' or 'legacy'.")
     requirements = None
     agent_hard_validation: ValidationResult | None = None
     challenger_hard_validation: ValidationResult | None = None
@@ -1171,6 +1248,9 @@ def _validate_before_training(
     )
     hard_reconciliation_required = agent_hard_status == "failed" or challenger_hard_status == "failed"
     resolution: ConflictResolution | None = None
+    blinded_reconciliation = None
+    selected_proposal = None
+    selected_proposal_source = None
     if (
         not hard_reconciliation_required
         and not soft_reconciliation_required
@@ -1201,14 +1281,52 @@ def _validate_before_training(
         checks = ["agent_plan_preserved_after_selective_abstention"]
         status = "disagreement_abstained"
     else:
+        reconciliation_input: dict[str, Any]
+        if reconciliation_mode == "blinded":
+            blinded_reconciliation = build_blinded_reconciliation(
+                reconciliation_profile or profile,
+                agent_plan,
+                deterministic,
+                target_column=agent_plan.target_column,
+                task_type=agent_plan.task_type,
+                preprocessing_comparison=preprocessing_comparison,
+                preprocessing_requirements=requirements.as_dict() if requirements else None,
+                hard_validation={
+                    "agent": _reconciliation_hard_summary(agent_hard_validation),
+                    "deterministic": _reconciliation_hard_summary(challenger_hard_validation),
+                },
+                order_seed=random_state,
+                proposal_order=proposal_order_override,
+            )
+            reconciliation_input = blinded_reconciliation.payload
+        else:
+            reconciliation_input = {
+                "reconciliation_mode": "legacy",
+                "legacy_profile": reconciliation_profile or profile,
+            }
         resolution = _call_or_fallback(
             "reconciliation",
             lambda: agents.reconcile(
                 question,
-                reconciliation_profile or profile,
+                reconciliation_profile or profile
+                if reconciliation_mode == "blinded"
+                else reconciliation_input,
                 agent_plan,
                 {
                     **deterministic.model_dump(mode="json"),
+                    "_reconciliation_order_seed": (
+                        blinded_reconciliation.proposal_order_seed
+                        if blinded_reconciliation is not None
+                        else None
+                    ),
+                    "_reconciliation_proposal_order": list(proposal_order_override)
+                    if proposal_order_override is not None
+                    else [
+                        blinded_reconciliation.proposal_a_source,
+                        blinded_reconciliation.proposal_b_source,
+                    ]
+                    if blinded_reconciliation is not None
+                    else None,
                     "preprocessing_comparison": preprocessing_comparison,
                     "preprocessing_requirements": requirements.as_dict() if requirements else None,
                     "hard_validation": {
@@ -1229,6 +1347,18 @@ def _validate_before_training(
             agent_sources,
             offline=offline,
         )
+        if blinded_reconciliation is not None:
+            try:
+                selected_proposal, selected_proposal_source = infer_selected_proposal(
+                    resolution,
+                    blinded_reconciliation,
+                )
+            except ValueError as exc:
+                raise InvariantViolation(
+                    f"[reconciliation_selected_proposal_mismatch] {exc}"
+                ) from exc
+            if selected_proposal is not None and resolution.selected_proposal is None:
+                resolution = resolution.model_copy(update={"selected_proposal": selected_proposal})
         selected_method = resolution.selected_method
         selected_target = resolution.selected_target_column
         selected_task = resolution.selected_task_type
@@ -1359,7 +1489,9 @@ def _validate_before_training(
     reconciliation_preprocessing_source = None
     if resolution is not None:
         reconciliation_method_source = (
-            "agent"
+            selected_proposal_source
+            if selected_proposal_source in {"agent", "deterministic"}
+            else "agent"
             if selected_method == agent_plan.recommended_method
             else "deterministic"
             if selected_method == deterministic.recommended_method
@@ -1396,6 +1528,31 @@ def _validate_before_training(
         reconciliation_status="succeeded" if resolution is not None else "not_invoked",
         reconciliation_method_source=reconciliation_method_source,
         reconciliation_preprocessing_source=reconciliation_preprocessing_source,
+        reconciliation_mode=(
+            BLINDED_RECONCILIATION_MODE
+            if blinded_reconciliation is not None
+            else "legacy_reconciliation"
+            if resolution is not None and reconciliation_mode == "legacy"
+            else None
+        ),
+        reconciliation_prompt_version=(
+            BLINDED_RECONCILIATION_PROMPT_VERSION
+            if blinded_reconciliation is not None
+            else LEGACY_RECONCILIATION_PROMPT_VERSION
+            if resolution is not None and reconciliation_mode == "legacy"
+            else None
+        ),
+        proposal_order_seed=(
+            blinded_reconciliation.proposal_order_seed if blinded_reconciliation is not None else None
+        ),
+        proposal_a_source=(
+            blinded_reconciliation.proposal_a_source if blinded_reconciliation is not None else None
+        ),
+        proposal_b_source=(
+            blinded_reconciliation.proposal_b_source if blinded_reconciliation is not None else None
+        ),
+        selected_proposal=selected_proposal,
+        selected_proposal_source=selected_proposal_source,
         decision=soft_decision.decision,
         status_detail=soft_decision.status if soft_status != "invalid" else "invalid",
         decision_reason=soft_decision.decision_reason,
@@ -1418,6 +1575,8 @@ def _validate_before_training(
         "recommended_method": selected_method,
         "preprocessing": selected_preprocessing.model_dump(mode="json"),
         "selected_source": final_source,
+        "selected_proposal": selected_proposal,
+        "selected_proposal_source": selected_proposal_source,
     }
     return {
         "status": status,
@@ -1433,6 +1592,27 @@ def _validate_before_training(
         "approved_preprocessing": selected_preprocessing.model_dump(mode="json"),
         "preprocessing_comparison": preprocessing_comparison,
         "reconciliation": resolution.model_dump(mode="json") if resolution is not None else None,
+        "reconciliation_mode": (
+            BLINDED_RECONCILIATION_MODE
+            if blinded_reconciliation
+            else "legacy_reconciliation"
+            if resolution is not None and reconciliation_mode == "legacy"
+            else None
+        ),
+        "reconciliation_prompt_version": (
+            BLINDED_RECONCILIATION_PROMPT_VERSION
+            if blinded_reconciliation
+            else LEGACY_RECONCILIATION_PROMPT_VERSION
+            if resolution is not None and reconciliation_mode == "legacy"
+            else None
+        ),
+        "proposal_order_seed": (
+            blinded_reconciliation.proposal_order_seed if blinded_reconciliation else None
+        ),
+        "proposal_a_source": blinded_reconciliation.proposal_a_source if blinded_reconciliation else None,
+        "proposal_b_source": blinded_reconciliation.proposal_b_source if blinded_reconciliation else None,
+        "selected_proposal": selected_proposal,
+        "selected_proposal_source": selected_proposal_source,
         "preprocessing_requirements": requirements.as_dict() if requirements else None,
         "deterministic_validation": final_validation_payload if dataframe is not None else None,
         "initial_hard_validation": agent_validation_payload,

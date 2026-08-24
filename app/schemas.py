@@ -12,6 +12,7 @@ FormulationStatus = Literal["proposed", "uncertain", "failed"]
 Method = Literal["linear", "regularized_linear", "tree_ensemble", "boosted_tree"]
 ScoreEffect = Literal["favors", "penalizes", "limits"]
 ConfidenceLevel = Literal["low", "medium", "high"]
+ProposalLabel = Literal["A", "B"]
 CleaningAction = Literal[
     "trim_strings",
     "drop_exact_duplicates",
@@ -156,6 +157,16 @@ class ModelingResolution(StrictModel):
     checks: list[str] = Field(min_length=1, max_length=12)
     justification: str = Field(min_length=20, max_length=1600)
     confidence: float = Field(ge=0, le=1)
+    # The label is intentionally optional for backward-compatible mocks and
+    # legacy artifacts.  Live blinded reconciliation is instructed to return
+    # it, and the pipeline infers it from the selected contract when absent.
+    selected_proposal: Optional[ProposalLabel] = None
+    proposal_a_strengths: list[str] = Field(default_factory=list, max_length=8)
+    proposal_a_weaknesses: list[str] = Field(default_factory=list, max_length=8)
+    proposal_b_strengths: list[str] = Field(default_factory=list, max_length=8)
+    proposal_b_weaknesses: list[str] = Field(default_factory=list, max_length=8)
+    decisive_evidence: list[str] = Field(default_factory=list, max_length=8)
+    selection_confidence: Optional[ConfidenceLevel] = None
 
 
 class HardValidationArtifact(StrictModel):
@@ -189,6 +200,13 @@ class SoftChallengeArtifact(StrictModel):
     reconciliation_status: str = "not_invoked"
     reconciliation_method_source: Optional[str] = None
     reconciliation_preprocessing_source: Optional[str] = None
+    reconciliation_mode: Optional[str] = None
+    reconciliation_prompt_version: Optional[str] = None
+    proposal_order_seed: Optional[int] = None
+    proposal_a_source: Optional[Literal["agent", "deterministic"]] = None
+    proposal_b_source: Optional[Literal["agent", "deterministic"]] = None
+    selected_proposal: Optional[ProposalLabel] = None
+    selected_proposal_source: Optional[Literal["agent", "deterministic"]] = None
     # ``status`` retains the legacy disagreement/agreement projection.  The
     # explicit decision fields below are authoritative for selective policy
     # behavior and distinguish an abstention from an agreement.
@@ -408,6 +426,13 @@ class ConflictResolution(StrictModel):
     checks: list[str] = Field(min_length=1, max_length=8)
     justification: str = Field(min_length=20, max_length=1600)
     confidence: float = Field(ge=0, le=1)
+    selected_proposal: Optional[ProposalLabel] = None
+    proposal_a_strengths: list[str] = Field(default_factory=list, max_length=8)
+    proposal_a_weaknesses: list[str] = Field(default_factory=list, max_length=8)
+    proposal_b_strengths: list[str] = Field(default_factory=list, max_length=8)
+    proposal_b_weaknesses: list[str] = Field(default_factory=list, max_length=8)
+    decisive_evidence: list[str] = Field(default_factory=list, max_length=8)
+    selection_confidence: Optional[ConfidenceLevel] = None
 
 
 class CleaningPlan(StrictModel):

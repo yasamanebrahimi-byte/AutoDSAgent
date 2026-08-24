@@ -25,12 +25,17 @@ from app.schemas import (
     ReportDraft,
     StrictModel,
 )
+from app.reconciliation import (
+    BLINDED_RECONCILIATION_MODE,
+    BLINDED_RECONCILIATION_PROMPT_VERSION,
+    build_blinded_reconciliation,
+)
 
 
 # Bump this when the modeling/reconciliation input contract changes.  The
 # evaluation harness records it beside every trial so a result bundle can be
 # interpreted without preserving provider-specific request metadata.
-PROMPT_SCHEMA_VERSION = "2026-08-23.formulation-modeling-gates.v2"
+PROMPT_SCHEMA_VERSION = BLINDED_RECONCILIATION_PROMPT_VERSION
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -200,34 +205,83 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
         modeling_plan: ModelingPlan,
         deterministic: dict[str, Any],
     ) -> ModelingResolution:
+        if profile.get("reconciliation_mode") == "legacy":
+            return self._structured(
+                "modeling_resolution",
+                ModelingResolution,
+                """You are the modeling-gate reconciliation agent. An independent
+                modeling proposal and an independent deterministic recommendation disagree.
+                Inspect both recommendations and the training-only evidence, then choose
+                exactly one of the two proposed methods. The deterministic recommendation is
+                advisory; its compatibility scores are heuristic evidence, not probabilities,
+                cross-validation results, or empirical performance. Do not use holdout values,
+                empirical-reference rankings, or candidate-model CV results. Return a complete
+                supported preprocessing contract and do not invent a third method.""",
+                {
+                    "question": question,
+                    "training_only_profile": profile.get("legacy_profile", {}),
+                    "modeling_plan": modeling_plan.model_dump(mode="json"),
+                    "deterministic_recommendation": deterministic,
+                },
+            )
+        if profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
+            blinded_payload = profile
+        else:
+            blinded_payload = build_blinded_reconciliation(
+                profile,
+                modeling_plan,
+                deterministic,
+                target_column=deterministic.get("target_column"),
+                task_type=deterministic.get("task_type"),
+                preprocessing_comparison=deterministic.get("preprocessing_comparison"),
+                preprocessing_requirements=deterministic.get("preprocessing_requirements"),
+                hard_validation={
+                    "agent": (
+                        (deterministic.get("hard_validation") or {}).get("agent")
+                        or (deterministic.get("hard_validation") or {}).get("agent_proposal")
+                        or {}
+                    ),
+                    "deterministic": (
+                        (deterministic.get("hard_validation") or {}).get("deterministic")
+                        or (deterministic.get("hard_validation") or {}).get("deterministic_challenger")
+                        or {}
+                    ),
+                },
+                order_seed=int(deterministic.get("_reconciliation_order_seed") or 0),
+                proposal_order=(
+                    tuple(deterministic["_reconciliation_proposal_order"])
+                    if deterministic.get("_reconciliation_proposal_order")
+                    else None
+                ),
+            ).payload
         return self._structured(
             "modeling_resolution",
             ModelingResolution,
-            """You are the modeling-gate reconciliation agent. Choose only one of
-            the two proposed model families and one complete supported preprocessing contract.
-            Target and task are immutable approved context and are not semantic decisions in
-            this call. The hard deterministic safety/executability checks have already been
-            run for the proposals; treat those checks as authoritative. In the normal
-            soft-challenge case, both proposals have passed hard validation and the remaining
-            question is advisory model-family compatibility. The deterministic recommendation
-            is advisory, and its numerical compatibility scores are heuristic evidence: they are not probabilities, not
-            cross-validation results, and not empirical performance estimates. A versioned
-            empirical calibration may justify why challenging in a similar training-only
-            regime is historically useful, but it does not estimate the performance of either
-            specific model on this dataset. This challenge passed the threshold for
-            reconsideration; it does not prove that the deterministic recommendation is correct.
-            Disagreement does not mean the initial agent is wrong. Preserve the initial plan unless the
-            actual training-only evidence identifies a convincing methodological reason to
-            prefer the alternative. Compare the evidence for both proposals and choose only
-            one of the two proposed methods; never invent a third model family. If a proposal
-            failed a hard check, correct or reject that proposal rather than treating the
-            failure as a soft preference. Use training-only evidence; never use holdout values,
-            CV results, or an empirical reference. Explain material preprocessing differences.""",
+            """You are comparing two independently generated modeling proposals.
+            They are deliberately presented as Proposal A and Proposal B; do not infer,
+            mention, or favor their origins. Target and task are immutable approved context.
+            Choose exactly one of Proposal A or Proposal B, return its model family and a
+            complete supported preprocessing contract, and never invent Proposal C.
+
+            First provide a concise, two-sided critique: strengths and weaknesses for A,
+            strengths and weaknesses for B, including the strongest case against each.
+            Then list the decisive observed evidence and select A or B. The output must be
+            methodological justification, not hidden chain-of-thought. If evidence is close,
+            still select one proposal and prefer the one whose assumptions are less fragile
+            and whose complexity is more proportional to the observed evidence; do not use a
+            universal simplicity or complexity rule.
+
+            Distinguish observed dataset evidence from each proposal's interpretation. The
+            compatibility diagnostics in the input are heuristic structural evidence only.
+            They are not probabilities, cross-validation results, empirical performance,
+            expected accuracy/RMSE, or proof that either proposal is better. Do not use holdout
+            values, candidate-model CV results, empirical-reference rankings, or historical
+            challenge reliability. Hard validation outcomes describe safety constraints, not
+            comparative predictive quality. Re-check preprocessing, leakage, immutable context,
+            supported methods, and the complete contract before returning the selected plan.""",
             {
                 "question": question,
-                "training_only_profile": profile,
-                "modeling_plan": modeling_plan.model_dump(mode="json"),
-                "deterministic_recommendation": deterministic,
+                **blinded_payload,
             },
         )
 
@@ -251,39 +305,80 @@ coerce_numeric_strings.""",
         agent_plan: AgentPlan,
         deterministic: dict[str, Any],
     ) -> ConflictResolution:
+        if profile.get("reconciliation_mode") == "legacy":
+            return self._structured(
+                "conflict_resolution",
+                ConflictResolution,
+                """You are the validation agent. An independent planning proposal and an
+                independent deterministic recommender disagree. Inspect both recommendations
+                and the dataset evidence, then choose exactly one of the two proposed methods.
+                The deterministic compatibility scores are heuristic evidence, not probabilities,
+                cross-validation results, or empirical performance estimates. Do not use holdout
+                values, empirical-reference rankings, or candidate-model CV results. Return a
+                complete supported preprocessing contract and do not invent a third method.""",
+                {
+                    "question": question,
+                    "profile": profile.get("legacy_profile", {}),
+                    "agent_plan": agent_plan.model_dump(mode="json"),
+                    "deterministic_recommendation": deterministic,
+                },
+            )
+        if profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
+            blinded_payload = profile
+        else:
+            blinded_payload = build_blinded_reconciliation(
+                profile,
+                agent_plan,
+                deterministic,
+                target_column=agent_plan.target_column,
+                task_type=agent_plan.task_type,
+                preprocessing_comparison=deterministic.get("preprocessing_comparison"),
+                preprocessing_requirements=deterministic.get("preprocessing_requirements"),
+                hard_validation={
+                    "agent": (
+                        (deterministic.get("hard_validation") or {}).get("agent")
+                        or (deterministic.get("hard_validation") or {}).get("agent_proposal")
+                        or {}
+                    ),
+                    "deterministic": (
+                        (deterministic.get("hard_validation") or {}).get("deterministic")
+                        or (deterministic.get("hard_validation") or {}).get("deterministic_challenger")
+                        or {}
+                    ),
+                },
+                order_seed=int(deterministic.get("_reconciliation_order_seed") or 0),
+                proposal_order=(
+                    tuple(deterministic["_reconciliation_proposal_order"])
+                    if deterministic.get("_reconciliation_proposal_order")
+                    else None
+                ),
+            ).payload
         return self._structured(
             "conflict_resolution",
             ConflictResolution,
-            """You are the validation agent. An independent planning agent and an
-            independent deterministic recommender disagree. Inspect both recommendations
-            and the dataset evidence, then choose exactly one of the two proposed methods.
-            Both proposals have already passed hard deterministic safety/executability
-            validation when this is a soft challenge. The deterministic recommendation is
-            an advisory model-family compatibility assessment. Its numerical compatibility
-            scores are heuristic evidence, not probabilities, cross-validation results, or
-            empirical performance estimates. The selective policy has only established that
-            challenging in a similar training-only regime has enough historical support; it
-            has not proved this deterministic recommendation is correct or predicted this
-            dataset's performance. Disagreement does not mean the initial agent is wrong.
-            Preserve the initial plan unless the actual training-only evidence identifies a
-            convincing methodological reason to prefer the alternative. Compare the evidence
-            for both proposals. Use diagnostics and score-contribution evidence as auditable
-            structural reasoning, not as proof that a method is best. Do not use holdout
-            values, cross-validation results, or empirical-reference rankings even if they
-            appear elsewhere in the surrounding application. Return a complete
-            supported preprocessing contract. Re-check that the
-            target exists, the task matches the target, all observed missing/infinite values
-            are handled, identifiers and unsupported feature types remain excluded, unknown
-            categories are safe, and all learned transformations stay inside the pipeline.
-            Your justification must explicitly discuss every material preprocessing
-            difference as well as any target/task/method difference. Do not invent a method
-            or preprocessing strategy outside the typed schema, and choose only one of the
-            two proposed model families.""",
+            """You are comparing two independently generated modeling proposals.
+            They are deliberately presented as Proposal A and Proposal B; do not infer,
+            mention, or favor their origins. Choose exactly one proposal and one complete
+            supported preprocessing contract. Never invent Proposal C.
+
+            Before selecting, give a concise two-sided critique: strengths and weaknesses for
+            A and B, including the strongest case against each. Then identify the decisive
+            observed evidence and select A or B. Distinguish shared dataset facts from each
+            proposal's interpretation. Near ties still require one selection based on the
+            proposal with less fragile assumptions and complexity proportional to the evidence;
+            do not use a universal simplicity or complexity rule.
+
+            Compatibility diagnostics are heuristic structural evidence only. They are not
+            probabilities, cross-validation results, empirical performance, expected
+            accuracy/RMSE, or proof that either proposal is better. Do not use holdout values,
+            candidate-model CV results, empirical-reference rankings, or historical challenge
+            reliability. Re-check target/task immutability, leakage, supported methods, all
+            observed missing/infinite values, safe unknown-category handling, and that learned
+            transformations remain inside the training pipeline. Explicitly discuss material
+            preprocessing differences. Return only a proposal represented in the input.""",
             {
                 "question": question,
-                "profile": profile,
-                "agent_plan": agent_plan.model_dump(mode="json"),
-                "deterministic_recommendation": deterministic,
+                **blinded_payload,
             },
         )
 

@@ -22,6 +22,17 @@ def main() -> None:
         default="selective",
         help="Compare the initial agent, legacy always-reconcile gate, or selective intervention gate.",
     )
+    parser.add_argument(
+        "--reconciliation-mode",
+        choices=("blinded", "legacy"),
+        default="blinded",
+        help="Use source-neutral blinded reconciliation or the legacy prompt baseline.",
+    )
+    parser.add_argument(
+        "--order-swap",
+        action="store_true",
+        help="Run paired A/B and B/A reconciliation trials on identical evidence.",
+    )
     parser.add_argument("--case", action="append", dest="cases", help="Benchmark case name; repeatable.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use the documented offline fallback.")
@@ -42,6 +53,8 @@ def main() -> None:
         include_perturbations=args.include_perturbations,
         case_names=args.cases,
         gate_mode=args.gate_mode,
+        reconciliation_mode=args.reconciliation_mode,
+        order_swap=args.order_swap,
         resume=args.resume,
     )
     print(json.dumps(result, indent=2, default=str))
