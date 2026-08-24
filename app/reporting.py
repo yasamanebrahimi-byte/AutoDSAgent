@@ -221,6 +221,9 @@ def render_report(
     agreement = "Agreement" if validation["status"] == "agreement" else "Disagreement investigated"
     chosen = validation["selected_method"]
     deterministic_validation = validation.get("deterministic_validation") or {}
+    hard_validation = validation.get("hard_validation") or {}
+    soft_challenge = validation.get("soft_challenge") or {}
+    final_decision = validation.get("final") or {}
     validation_checks = deterministic_validation.get("checks", [])
     passed_checks = sum(1 for check in validation_checks if check.get("passed"))
     excluded_features = deterministic_validation.get("excluded_features", [])
@@ -289,9 +292,11 @@ The workflow first validated what supervised problem to solve, before creating a
 - Target source: <code>{formulation_final.get('target_source', 'not recorded')}</code>; mutable: <code>{formulation_final.get('target_is_mutable', 'not recorded')}</code>
 - Justification: {formulation_final.get('justification', 'not recorded')}
 
-## Modeling validation gate: {agreement}
+## Modeling decision gate: {agreement}
 
 The workflow intentionally made a modeling decision before fitting any model.
+
+Hard deterministic validation is authoritative for safety and executability. The deterministic model-family recommendation is an advisory soft challenger; disagreement alone is not an invalid plan.
 
 | Source | Approved formulation | Method |
 | --- | --- | --- |
@@ -319,7 +324,13 @@ Selected-family score contributions:
 
 {contribution_lines}
 
-Validation decision: {validation.get('justification', 'The recommendations matched on target, task, and method.')}
+Hard validation: <code>{hard_validation.get('status', 'not recorded')}</code>; intervention required: <code>{hard_validation.get('intervention_required', False)}</code>; initial proposal hard-invalid: <code>{hard_validation.get('initial_hard_invalid', False)}</code>.
+
+Soft challenge: <code>{soft_challenge.get('status', 'not recorded')}</code>; method disagreement: <code>{soft_challenge.get('method_disagreement', False)}</code>; preprocessing disagreement: <code>{soft_challenge.get('preprocessing_disagreement', False)}</code>; deterministic confidence: <code>{soft_challenge.get('deterministic_confidence', deterministic.confidence)}</code>; reconciliation invoked: <code>{soft_challenge.get('reconciliation_invoked', False)}</code>.
+
+Final selection source: <code>{final_decision.get('selected_source', 'not recorded')}</code>.
+
+Validation decision: {validation.get('justification', 'The proposals matched on target, task, and method.')}
 
 Holdout boundary: the formulation gate completed and was validated before the supervised split. Modeling-agent evidence, deterministic recommendation evidence, modeling reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation used training-partition evidence only. The EDA artifact contains <code>{eda.get('rows', 0)}</code> cleaned training rows and no holdout rows. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those guardrail checks are not planning evidence. The frozen holdout was scored once for final model evaluation.
 

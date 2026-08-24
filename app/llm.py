@@ -30,7 +30,7 @@ from app.schemas import (
 # Bump this when the modeling/reconciliation input contract changes.  The
 # evaluation harness records it beside every trial so a result bundle can be
 # interpreted without preserving provider-specific request metadata.
-PROMPT_SCHEMA_VERSION = "2026-08-23.formulation-modeling-gates.v1"
+PROMPT_SCHEMA_VERSION = "2026-08-23.formulation-modeling-gates.v2"
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -204,10 +204,21 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
             "modeling_resolution",
             ModelingResolution,
             """You are the modeling-gate reconciliation agent. Choose only one of
-the two proposed model families and one complete supported preprocessing contract.
-Target and task are immutable approved context and are not semantic decisions in
-this call. Use training-only evidence; never use holdout values, CV results, or an
-empirical reference. Explain material preprocessing differences.""",
+            the two proposed model families and one complete supported preprocessing contract.
+            Target and task are immutable approved context and are not semantic decisions in
+            this call. The hard deterministic safety/executability checks have already been
+            run for the proposals; treat those checks as authoritative. In the normal
+            soft-challenge case, both proposals have passed hard validation and the remaining
+            question is advisory model-family compatibility. The deterministic recommendation
+            is advisory, and its numerical compatibility scores are not probabilities, not
+            cross-validation results, and not empirical performance estimates. Disagreement
+            does not mean the initial agent is wrong. Preserve the initial plan unless the
+            actual training-only evidence identifies a convincing methodological reason to
+            prefer the alternative. Compare the evidence for both proposals and choose only
+            one of the two proposed methods; never invent a third model family. If a proposal
+            failed a hard check, correct or reject that proposal rather than treating the
+            failure as a soft preference. Use training-only evidence; never use holdout values,
+            CV results, or an empirical reference. Explain material preprocessing differences.""",
             {
                 "question": question,
                 "training_only_profile": profile,
@@ -242,18 +253,25 @@ coerce_numeric_strings.""",
             """You are the validation agent. An independent planning agent and an
             independent deterministic recommender disagree. Inspect both recommendations
             and the dataset evidence, then choose exactly one of the two proposed methods.
-            Deterministic method scores are bounded compatibility points, not probabilities
-            or empirical performance. Use diagnostics and score-contribution evidence as
-            auditable structural reasoning, not as proof that a method is best. Do not use
-            holdout values, cross-validation results, or empirical-reference rankings even
-            if they appear elsewhere in the surrounding application. Return a complete
+            Both proposals have already passed hard deterministic safety/executability
+            validation when this is a soft challenge. The deterministic recommendation is
+            an advisory model-family compatibility assessment. Its numerical compatibility
+            scores are not probabilities, not cross-validation results, and not empirical
+            performance estimates. Disagreement does not mean the initial agent is wrong.
+            Preserve the initial plan unless the actual training-only evidence identifies a
+            convincing methodological reason to prefer the alternative. Compare the evidence
+            for both proposals. Use diagnostics and score-contribution evidence as auditable
+            structural reasoning, not as proof that a method is best. Do not use holdout
+            values, cross-validation results, or empirical-reference rankings even if they
+            appear elsewhere in the surrounding application. Return a complete
             supported preprocessing contract. Re-check that the
-target exists, the task matches the target, all observed missing/infinite values
-are handled, identifiers and unsupported feature types remain excluded, unknown
-categories are safe, and all learned transformations stay inside the pipeline.
-Your justification must explicitly discuss every material preprocessing
-difference as well as any target/task/method difference. Do not invent a method
-or preprocessing strategy outside the typed schema.""",
+            target exists, the task matches the target, all observed missing/infinite values
+            are handled, identifiers and unsupported feature types remain excluded, unknown
+            categories are safe, and all learned transformations stay inside the pipeline.
+            Your justification must explicitly discuss every material preprocessing
+            difference as well as any target/task/method difference. Do not invent a method
+            or preprocessing strategy outside the typed schema, and choose only one of the
+            two proposed model families.""",
             {
                 "question": question,
                 "profile": profile,

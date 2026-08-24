@@ -162,6 +162,65 @@ def _reconciliation_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _initial_hard_invalid(record: dict[str, Any]) -> bool:
+    artifact = record.get("hard_validation") or {}
+    if "initial_hard_invalid" in artifact:
+        return bool(artifact["initial_hard_invalid"])
+    if record.get("initial_hard_invalid") is not None:
+        return bool(record["initial_hard_invalid"])
+    return record.get("agent_initial_valid") is False
+
+
+def _hard_intervention(record: dict[str, Any]) -> bool:
+    artifact = record.get("hard_validation") or {}
+    if "intervention_required" in artifact:
+        return bool(artifact["intervention_required"])
+    if record.get("hard_validation_intervened") is not None:
+        return bool(record["hard_validation_intervened"])
+    return record.get("unsafe_plan_intercepted") is True
+
+
+def _final_hard_invalid(record: dict[str, Any]) -> bool:
+    if record.get("final_hard_invalid") is not None:
+        return bool(record["final_hard_invalid"])
+    return record.get("final_valid") is False
+
+
+def _soft_status(record: dict[str, Any]) -> str | None:
+    artifact = record.get("soft_challenge") or {}
+    if artifact.get("status") in {"agreement", "disagreement", "invalid", "unavailable"}:
+        return str(artifact["status"])
+    if record.get("soft_challenge_status") in {"agreement", "disagreement", "invalid", "unavailable"}:
+        return str(record["soft_challenge_status"])
+    if record.get("agreement_status") in {"agreement", "disagreement"}:
+        return str(record["agreement_status"])
+    return None
+
+
+def _soft_challenges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in records
+        if _soft_status(record) == "disagreement"
+        and (
+            record.get("hard_validation_status") == "passed"
+            or record.get("agent_initial_valid") is True
+            or not record.get("hard_validation")
+        )
+    ]
+
+
+def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dict[str, int]:
+    challenges = _soft_challenges(records)
+    outcomes = Counter(_outcome(record, tolerance) for record in challenges)
+    return {
+        "improved": outcomes.get("improved", 0),
+        "worsened": outcomes.get("worsened", 0),
+        "neutral": outcomes.get("tie", 0),
+        "not_comparable": outcomes.get("not_comparable", 0),
+    }
+
+
 def summarize_trials(
     trials: list[dict[str, Any]],
     *,
@@ -185,6 +244,7 @@ def summarize_trials(
     disagreements = [record for record in deterministic_available if record.get("agreement_status") == "disagreement"]
     recon = [record for record in completed if record.get("reconciliation_invoked")]
     recon_success = [record for record in recon if record.get("reconciliation_status") == "succeeded"]
+    soft_challenge_records = _soft_challenges(completed)
     intercepted = [record for record in initial_invalid if record.get("unsafe_plan_intercepted") is True]
     intentionally_unsafe = [
         record for record in completed
@@ -210,6 +270,7 @@ def summarize_trials(
         valid_records = [record for record in records if record.get("trial_status") != "failed"]
         initial_valid_records = [record for record in valid_records if record.get("agent_initial_valid") is True]
         final_valid_records = [record for record in valid_records if record.get("final_valid") is True]
+        soft_challenge_records = _soft_challenges(valid_records)
         agent_matches, agent_denominator = method_match(valid_records, "agent_initial_method")
         gated_matches, gated_denominator = method_match(valid_records, "final_method")
         paired = [
@@ -241,6 +302,17 @@ def summarize_trials(
             "agent_initial_valid_count": len(initial_valid_records),
             "agent_initial_invalid_count": sum(record.get("agent_initial_valid") is False for record in valid_records),
             "agent_initial_validity_rate": _rate(len(initial_valid_records), len(valid_records)),
+            "initial_hard_invalid_proposal_count": sum(
+                _initial_hard_invalid(record) for record in valid_records
+            ),
+            "hard_validation_intervention_count": sum(
+                _hard_intervention(record) for record in valid_records
+            ),
+            "hard_validation_interception_rate": _rate(
+                sum(_hard_intervention(record) for record in valid_records),
+                sum(_initial_hard_invalid(record) for record in valid_records),
+            ),
+            "final_hard_invalid_count": sum(_final_hard_invalid(record) for record in valid_records),
             "agreement_rate": _rate(
                 sum(record.get("agreement_status") == "agreement" for record in valid_records),
                 sum(record.get("agreement_status") in {"agreement", "disagreement"} for record in valid_records),
@@ -256,7 +328,47 @@ def summarize_trials(
             "reconciliation_invocation_rate": _rate(
                 sum(bool(record.get("reconciliation_invoked")) for record in valid_records), len(valid_records)
             ),
+            "model_family_disagreement_rate": _rate(
+                sum(record.get("method_disagreement") is True for record in valid_records),
+                sum(record.get("deterministic_recommendation") is not None for record in valid_records),
+            ),
+            "preprocessing_disagreement_rate": _rate(
+                sum(record.get("preprocessing_disagreement") is True for record in valid_records),
+                sum(record.get("deterministic_recommendation") is not None for record in valid_records),
+            ),
+            "soft_challenge_count": len(soft_challenge_records),
+            "soft_challenge_reconciliation_invocation_count": sum(
+                bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
+            ),
+            "soft_challenge_reconciliation_invocation_rate": _rate(
+                sum(bool(record.get("reconciliation_invoked")) for record in soft_challenge_records),
+                len(soft_challenge_records),
+            ),
             **_reconciliation_rates(valid_records),
+            "soft_challenge_reconciliation_sided_with_agent_count": _reconciliation_rates(
+                soft_challenge_records
+            )["reconciliation_sided_with_agent_count"],
+            "soft_challenge_reconciliation_sided_with_deterministic_count": _reconciliation_rates(
+                soft_challenge_records
+            )["reconciliation_sided_with_deterministic_count"],
+            "soft_challenge_reconciliation_sided_with_agent_rate": _reconciliation_rates(
+                soft_challenge_records
+            )["reconciliation_sided_with_agent_rate"],
+            "soft_challenge_reconciliation_sided_with_deterministic_rate": _reconciliation_rates(
+                soft_challenge_records
+            )["reconciliation_sided_with_deterministic_rate"],
+            "soft_challenge_outcome_counts": _soft_outcome_counts(
+                valid_records, float(configured["paired_normalized_regret"])
+            ),
+            "soft_challenge_improved_count": _soft_outcome_counts(
+                valid_records, float(configured["paired_normalized_regret"])
+            )["improved"],
+            "soft_challenge_worsened_count": _soft_outcome_counts(
+                valid_records, float(configured["paired_normalized_regret"])
+            )["worsened"],
+            "soft_challenge_neutral_count": _soft_outcome_counts(
+                valid_records, float(configured["paired_normalized_regret"])
+            )["neutral"],
             "unsafe_plan_interception_count": sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
             "unsafe_plan_interception_rate": _rate(
                 sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
@@ -394,11 +506,58 @@ def summarize_trials(
         "agent_initial_valid_count": len(initial_valid),
         "agent_initial_invalid_count": len(initial_invalid),
         "agent_initial_validity_rate": _rate(len(initial_valid), len(completed)),
+        "initial_hard_invalid_proposal_count": sum(_initial_hard_invalid(record) for record in completed),
+        "hard_validation_intervention_count": sum(_hard_intervention(record) for record in completed),
+        "hard_validation_interception_rate": _rate(
+            sum(_hard_intervention(record) for record in completed),
+            sum(_initial_hard_invalid(record) for record in completed),
+        ),
+        "final_hard_invalid_count": sum(_final_hard_invalid(record) for record in completed),
         "agreement_rate": _rate(len(agreement), len(deterministic_available)),
         "disagreement_rate": _rate(len(disagreements), len(deterministic_available)),
         "reconciliation_success_rate": _rate(len(recon_success), len(recon)),
         "reconciliation_invocation_rate": _rate(len(recon), len(completed)),
+        "model_family_disagreement_rate": _rate(
+            sum(record.get("method_disagreement") is True for record in deterministic_available),
+            len(deterministic_available),
+        ),
+        "preprocessing_disagreement_rate": _rate(
+            sum(record.get("preprocessing_disagreement") is True for record in deterministic_available),
+            len(deterministic_available),
+        ),
+        "soft_challenge_count": len(soft_challenge_records),
+        "soft_challenge_reconciliation_invocation_count": sum(
+            bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
+        ),
+        "soft_challenge_reconciliation_invocation_rate": _rate(
+            sum(bool(record.get("reconciliation_invoked")) for record in soft_challenge_records),
+            len(soft_challenge_records),
+        ),
         **_reconciliation_rates(completed),
+        "soft_challenge_reconciliation_sided_with_agent_count": _reconciliation_rates(
+            soft_challenge_records
+        )["reconciliation_sided_with_agent_count"],
+        "soft_challenge_reconciliation_sided_with_deterministic_count": _reconciliation_rates(
+            soft_challenge_records
+        )["reconciliation_sided_with_deterministic_count"],
+        "soft_challenge_reconciliation_sided_with_agent_rate": _reconciliation_rates(
+            soft_challenge_records
+        )["reconciliation_sided_with_agent_rate"],
+        "soft_challenge_reconciliation_sided_with_deterministic_rate": _reconciliation_rates(
+            soft_challenge_records
+        )["reconciliation_sided_with_deterministic_rate"],
+        "soft_challenge_outcome_counts": _soft_outcome_counts(
+            completed, float(configured["paired_normalized_regret"])
+        ),
+        "soft_challenge_improved_count": _soft_outcome_counts(
+            completed, float(configured["paired_normalized_regret"])
+        )["improved"],
+        "soft_challenge_worsened_count": _soft_outcome_counts(
+            completed, float(configured["paired_normalized_regret"])
+        )["worsened"],
+        "soft_challenge_neutral_count": _soft_outcome_counts(
+            completed, float(configured["paired_normalized_regret"])
+        )["neutral"],
         "unsafe_plan_interception_count": len(intercepted),
         "unsafe_plan_interception_rate": _rate(len(intercepted), len(initial_invalid)),
         "validation_interception_count": len(intentionally_unsafe_intercepted),

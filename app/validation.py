@@ -180,18 +180,28 @@ class ValidationResult:
 class InvariantViolation(ValueError):
     """Raised when deterministic validation forbids a training run."""
 
-    def __init__(self, message: str, result: ValidationResult | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        result: ValidationResult | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.result = result
+        self.metadata = metadata or {}
 
     @classmethod
-    def from_result(cls, result: ValidationResult) -> "InvariantViolation":
+    def from_result(
+        cls,
+        result: ValidationResult,
+        metadata: dict[str, Any] | None = None,
+    ) -> "InvariantViolation":
         first = result.failed_checks[0] if result.failed_checks else None
         if first is None:
             message = "Deterministic validation failed; correct the approved modeling plan."
         else:
             message = f"[{first.code}] {first.message}"
-        return cls(message, result)
+        return cls(message, result, metadata)
 
 
 class DeterministicRecommendationUnavailable(InvariantViolation):

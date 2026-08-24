@@ -158,6 +158,50 @@ class ModelingResolution(StrictModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class HardValidationArtifact(StrictModel):
+    """Machine-readable safety/executability result for a modeling gate.
+
+    Hard validation is deliberately represented separately from model-family
+    comparison.  The nested proposal results make it possible to audit which
+    plan failed an invariant without treating a challenger disagreement as a
+    validation failure.
+    """
+
+    status: Literal["passed", "failed", "unavailable"]
+    intervention_required: StrictBool
+    initial_hard_invalid: StrictBool = False
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+    initial_proposal: dict[str, Any] = Field(default_factory=dict)
+    deterministic_challenger: dict[str, Any] = Field(default_factory=dict)
+    final_plan: dict[str, Any] = Field(default_factory=dict)
+
+
+class SoftChallengeArtifact(StrictModel):
+    """Advisory deterministic model-family comparison metadata."""
+
+    status: Literal["agreement", "disagreement", "invalid", "unavailable"]
+    agent_method: Optional[Method] = None
+    deterministic_method: Optional[Method] = None
+    deterministic_confidence: Optional[ConfidenceLevel] = None
+    method_disagreement: StrictBool = False
+    preprocessing_disagreement: StrictBool = False
+    reconciliation_invoked: StrictBool = False
+    reconciliation_status: str = "not_invoked"
+    reconciliation_method_source: Optional[str] = None
+    reconciliation_preprocessing_source: Optional[str] = None
+    scores_are_probabilities: StrictBool = False
+    scores_are_cross_validation_results: StrictBool = False
+    scores_are_empirical_performance_estimates: StrictBool = False
+
+
+class ModelingGateArtifact(StrictModel):
+    """Explicit hard-vs-soft-vs-final modeling decision artifact."""
+
+    hard_validation: HardValidationArtifact
+    soft_challenge: SoftChallengeArtifact
+    final: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentPlan(StrictModel):
     """Legacy combined plan retained for evaluation and API compatibility.
 

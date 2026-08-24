@@ -492,6 +492,10 @@ def _run_trial(
                     established_target=case.target_column,
                     established_task=case.expected_task_type,
                 )
+                # The gate may also reconcile a hard-invalid initial proposal
+                # whose method-family comparison looks like agreement.  The
+                # artifact is the source of truth for invocation metadata.
+                reconciliation_invoked = gate_result.get("reconciliation") is not None
                 reconciliation_status = (
                     "succeeded" if reconciliation_invoked else "not_invoked"
                 )
@@ -701,6 +705,16 @@ def _run_trial(
         "deterministic_preprocessing": deterministic.preprocessing.model_dump(mode="json") if deterministic else None,
         "deterministic_failure": deterministic_failure,
         "agreement_status": agreement_status,
+        "hard_validation_status": (
+            (gate_result or {}).get("hard_validation", {}).get("status")
+            if gate_result
+            else ("failed" if initial_validation.status == "failed" else "unavailable")
+        ),
+        "soft_challenge_status": (
+            (gate_result or {}).get("soft_challenge", {}).get("status")
+            if gate_result
+            else "unavailable"
+        ),
         "target_disagreement": target_disagreement,
         "task_disagreement": task_disagreement,
         "method_disagreement": method_disagreement,
@@ -715,6 +729,29 @@ def _run_trial(
         "reconciliation_method_source": reconciliation_method_source,
         "reconciliation_preprocessing_source": reconciliation_preprocessing_source,
         "reconciliation": gate_result.get("reconciliation") if gate_result else None,
+        "hard_validation": gate_result.get("hard_validation") if gate_result else {
+            "status": "failed" if initial_validation.status == "failed" else "unavailable",
+            "intervention_required": initial_validation.status == "failed",
+            "initial_hard_invalid": initial_validation.status == "failed",
+            "checks": initial_validation.as_dict().get("checks", []),
+            "initial_proposal": initial_validation.as_dict(),
+            "deterministic_challenger": {},
+            "final_plan": final_validation or {},
+        },
+        "soft_challenge": gate_result.get("soft_challenge") if gate_result else {
+            "status": "unavailable",
+            "agent_method": plan.recommended_method,
+            "deterministic_method": deterministic.recommended_method if deterministic else None,
+            "deterministic_confidence": deterministic.confidence if deterministic else None,
+            "method_disagreement": method_disagreement,
+            "preprocessing_disagreement": preprocessing_disagreement,
+            "reconciliation_invoked": False,
+            "reconciliation_status": "not_invoked",
+        },
+        "final_decision": gate_result.get("final") if gate_result else {
+            **final_fields,
+            "selected_source": None,
+        },
         "final_target": final_fields["target"],
         "final_task": final_fields["task"],
         "final_method": final_fields["method"],
@@ -734,6 +771,12 @@ def _run_trial(
         "proceeded_unchanged": proceeded_unchanged,
         "gate_changed_initial_plan": final_valid and not proceeded_unchanged,
         "deterministic_validation_intervened": unsafe_plan_intercepted,
+        "hard_validation_intervened": bool(
+            (gate_result or {}).get("hard_validation", {}).get("intervention_required")
+            or unsafe_plan_intercepted
+        ),
+        "initial_hard_invalid": initial_validation.status == "failed",
+        "final_hard_invalid": final_valid is False,
         "empirical_best_method": reference.get("best_method"),
         "empirical_reference_method": reference.get("best_method"),
         "empirical_reference": reference,
@@ -935,7 +978,7 @@ def run_evaluation(
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
     stable_config = {
-        "config_version": "2026-08-21.evaluation.v2",
+        "config_version": "2026-08-23.evaluation.v3-hard-soft-gate",
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,

@@ -150,6 +150,9 @@ def test_invalid_agent_proposal_is_persisted_and_not_fitted(tmp_path: Path):
     assert trial["agent_initial_cv_metric"] is None
     assert trial["agent_initial_holdout_metrics"] == {}
     assert trial["unsafe_plan_intercepted"] is True
+    assert trial["hard_validation"]["intervention_required"] is True
+    assert trial["hard_validation"]["initial_proposal"]["status"] == "failed"
+    assert trial["final_hard_invalid"] is False
     assert result["summary"]["agent_initial_invalid_count"] == 1
 
 
@@ -175,6 +178,40 @@ def test_disagreement_and_reconciliation_fields_are_recorded(tmp_path: Path):
     assert trial["reconciliation_invoked"] is True
     assert trial["reconciliation_status"] == "succeeded"
     assert trial["reconciliation_method_source"] == "deterministic"
+    assert trial["hard_validation"]["status"] == "passed"
+    assert trial["soft_challenge"]["status"] == "disagreement"
+
+
+def test_valid_soft_challenge_can_side_with_agent(tmp_path: Path):
+    case = _case(_classification_frame(), "agent_wins_soft_challenge")
+
+    def agent_plan(context):
+        del context
+        return _plan(method="tree_ensemble")
+
+    def agent_resolution(context, agent, deterministic):
+        del context, deterministic
+        return ConflictResolution(
+            selected_target_column=agent.target_column,
+            selected_task_type=agent.task_type,
+            selected_method=agent.recommended_method,
+            selected_preprocessing=agent.preprocessing,
+            checks=["both_hard_validated", "agent_preserved"],
+            justification="Both proposals passed hard safety validation and the initial agent plan remains a defensible choice for the observed evidence.",
+            confidence=0.75,
+        )
+
+    run_evaluation(
+        tmp_path / "evaluation",
+        cases=[case],
+        agent_plan_factory=agent_plan,
+        reconciliation_factory=agent_resolution,
+    )
+    trial = _read_trials(tmp_path / "evaluation")[0]
+    assert trial["soft_challenge"]["status"] == "disagreement"
+    assert trial["hard_validation"]["status"] == "passed"
+    assert trial["reconciliation_method_source"] == "agent"
+    assert trial["final_method"] == trial["agent_initial_method"]
 
 
 def test_preprocessing_only_disagreement_is_material(tmp_path: Path):
