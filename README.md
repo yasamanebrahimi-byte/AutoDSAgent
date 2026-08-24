@@ -4,12 +4,12 @@ AutoDS Agent is a compact, auditable agent-vs-deterministic machine-learning wor
 
 The central idea is simple:
 
-1. Establish the target and task type. A supplied target is validated directly; an omitted target is inferred from the question and dataset schema.
-2. Freeze one deterministic supervised train/holdout partition using positional row membership, the configured seed, and stratification when required.
-3. Give the independent modeling agent and deterministic recommender the same compact profile built from training rows only.
-4. A validation gate compares both independent plans before any model is fit. Disagreement triggers a second agent call that investigates the deterministic recommendation using the same training-only evidence.
-5. Fit and freeze structural-cleaning decisions from training rows only, transform the training and holdout partitions independently while preserving original row positions, then compute EDA and plots from cleaned training rows only. The EDA agent interprets those training-only summaries before the approved model is fit.
-6. Specialist calls write the final report. All data transformations, metrics, plots, and saved model artifacts remain deterministic and inspectable.
+1. Build a compact raw-data formulation profile from the question and schema.
+2. Have a dedicated formulation agent and an independent deterministic formulation engine separately propose the target and supported task type.
+3. Compare those proposals, reconcile disagreements, and validate the approved formulation before any supervised split exists.
+4. Freeze one deterministic train/holdout partition using positional row membership, the configured seed, and stratification when required.
+5. Give the post-split modeling agent and deterministic recommender the same training-only profile. This second, distinct gate validates model family and preprocessing while target/task remain immutable context.
+6. Fit and freeze structural-cleaning decisions from training rows only, transform partitions independently, compute training-only EDA, and evaluate the approved model once on the untouched holdout.
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
@@ -17,9 +17,12 @@ The agent recommendation can never substitute for a failed deterministic recomme
 
 ### Agent roles
 
-- Modeling agent: independently proposes the target, classification/regression task, preprocessing, and model family.
-- Deterministic validator: independently checks the target/schema and recommends a fitting family before training.
-- Reconciliation agent: investigates only disagreements and records the final choice with evidence.
+- Formulation agent: independently proposes only the target, classification/regression task, reasoning, and confidence before the split.
+- Deterministic formulation engine: independently infers target/task from the question and raw schema with auditable evidence and fail-closed uncertainty.
+- Formulation reconciliation agent: investigates target/task disagreements before split construction.
+- Modeling agent: independently proposes only model family and preprocessing after the approved split.
+- Deterministic recommender: recommends a fitting family from the frozen training partition only.
+- Modeling reconciliation agent: investigates only model/preprocessing disagreements after the split.
 - Cleaning agent: selects safe structural cleaning actions from an allow-list.
 - EDA agent: interprets deterministic summaries and plots without inventing measurements.
 - Report agent: turns the saved evidence into the final narrative and next steps.
@@ -43,7 +46,7 @@ The code is deliberately small:
 
 ```text
 app/
-  deterministic.py  # profile, task inference, public recommendation, cleaning, EDA, plots
+  deterministic.py  # formulation, profile, task inference, model recommendation, cleaning, EDA
   deterministic_diagnostics.py  # compact training-only structural and target diagnostics
   deterministic_policy.py  # versioned thresholds, compatibility scoring, eligibility
   validation.py     # fail-closed target, leakage, preprocessing, and split/CV invariants
@@ -62,9 +65,20 @@ The important control flow is:
 CSV + question
     |
     v
-target/task establishment
-    |
-    v
+compact formulation profile
+    |                  \
+    +--> independent formulation agent
+    +--> deterministic formulation engine
+                         |
+                         v
+                 FORMULATION GATE
+                         |
+              disagreement -> formulation reconciliation
+                         |
+                         v
+                 approved target/task
+                         |
+                         v
 freeze supervised train/holdout partition
     |
     +---- holdout locked until final evaluation
@@ -73,11 +87,12 @@ freeze supervised train/holdout partition
 training-only profile
     |                  \
     +--> independent modeling agent
-    |                   \ mismatch
-    +--> deterministic recommender -> reconciliation agent
-    |
-    v
-VALIDATION GATE
+    +--> deterministic model recommender
+                         |
+                         v
+                  MODELING GATE
+                         |
+                disagreement -> reconciliation
     |
     v
 structural cleaning -> training-only EDA + plots
@@ -89,7 +104,7 @@ training-only CV + preprocessing
 one final holdout evaluation -> report + artifacts
 ```
 
-Target establishment is the one unavoidable pre-split stage: the target and task are needed to construct the correct supervised split, especially a stratified classification split. It does not choose a model family. After target/task establishment, the holdout membership is frozen before any model-family, preprocessing, reconciliation, structural-cleaning, or model-selection reasoning. Modeling-agent planning, deterministic diagnostics/recommendation, reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation use training-partition evidence only. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those checks are guardrails rather than planning evidence. The holdout is reserved for the one final model evaluation.
+Problem formulation is its own pre-split gate: the LLM and deterministic paths receive only the compact raw formulation profile, user question, and any explicit user target constraint. They do not receive each other's proposal, model-family recommendations, holdout values, or later empirical evidence. If no target is supplied, deterministic inference uses defensible normalized question/name matches and fails closed when evidence is missing or ambiguous; it never silently chooses the last column. If a target is supplied, it is recorded as `user_supplied` and `target_is_mutable=false`, and reconciliation cannot change it. Only after formulation validation passes is the supervised split frozen. Modeling-agent planning, deterministic model recommendation, modeling reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation then use training-partition evidence only. The holdout is reserved for the one final model evaluation.
 
 The deterministic recommendation is intentionally not a model-selection benchmark or a second predictive model. Policy version 4 profiles only the frozen training partition and scores the compatibility of `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree` using explicit, auditable factors: dataset scale, usable feature count, sample-to-feature ratio, numeric/categorical/binary composition, exclusions, missingness pattern, categorical cardinality and estimated one-hot expansion, candidate post-preprocessing dimensionality, numeric multicollinearity, task-aware relationship signals, a bounded structural-complexity heuristic, numeric outlier burden, and task-appropriate target balance or robustness diagnostics. Regression uses Pearson/Spearman and binned-target nonlinearity evidence; classification uses label-order-invariant eta-squared/Cramér's V class association and keeps nominal multiclass nonlinearity neutral. Compatibility scores are bounded policy points, not probabilities and not claims of optimality. The recommendation persists the score for every family, ranked methods, eligibility and safety reasons, diagnostics, score contributions, confidence/margin, preprocessing contract, and policy version. It remains independent of the LLM, holdout, empirical reference, and prior live results.
 

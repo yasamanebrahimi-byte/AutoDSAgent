@@ -71,6 +71,10 @@ if approved["selected_method"] != METHOD:
     raise RuntimeError("Recorded method does not match the reproduction contract.")
 if decision.get("gate_completed_before_training") is not True:
     raise RuntimeError("The original run did not complete its validation gate.")
+if decision.get("formulation_gate_status") != "completed":
+    raise RuntimeError("The original run did not complete the formulation gate.")
+if decision.get("split_frozen_after_formulation_gate") is not True:
+    raise RuntimeError("The original run does not prove that the split followed formulation approval.")
 if decision.get("holdout_policy", {{}}).get("frozen_before_modeling_recommendations") is not True:
     raise RuntimeError("The original run does not contain the frozen-holdout policy.")
 recorded_split = decision.get("split_contract")
@@ -207,11 +211,14 @@ def render_report(
     def bullets(items: list[str]) -> str:
         return "\n".join(f"- {item}" for item in items)
 
-    agreement = (
-        "Agreement"
-        if validation["status"] == "agreement"
-        else "Disagreement investigated"
-    )
+    formulation = validation.get("formulation", {})
+    formulation_agent = formulation.get("agent_initial") or {}
+    formulation_deterministic = formulation.get("deterministic") or {}
+    formulation_comparison = formulation.get("comparison") or {}
+    formulation_final = formulation.get("final") or {}
+    formulation_reconciliation = formulation.get("reconciliation")
+    formulation_status = formulation.get("status", "not recorded")
+    agreement = "Agreement" if validation["status"] == "agreement" else "Disagreement investigated"
     chosen = validation["selected_method"]
     deterministic_validation = validation.get("deterministic_validation") or {}
     validation_checks = deterministic_validation.get("checks", [])
@@ -249,15 +256,48 @@ def render_report(
 
 {question}
 
-## Validation gate: {agreement}
+## Problem formulation gate: {formulation_status}
+
+The workflow first validated what supervised problem to solve, before creating any train/holdout split.
+
+### User question
+
+{question}
+
+### Agent formulation
+
+- Target: <code>{formulation_agent.get('target_column', 'not recorded')}</code>
+- Task: <code>{formulation_agent.get('task_type', 'not recorded')}</code>
+- Reasoning: {formulation_agent.get('reasoning', 'not recorded')}
+- Confidence: <code>{formulation_agent.get('confidence', 'not recorded')}</code>
+
+### Deterministic formulation
+
+- Target: <code>{formulation_deterministic.get('target_column', 'not recorded')}</code>
+- Task: <code>{formulation_deterministic.get('task_type', 'not recorded')}</code>
+- Reasoning: {formulation_deterministic.get('reasoning', 'not recorded')}
+- Evidence: <code>{json.dumps(formulation_deterministic.get('evidence', []), sort_keys=True)}</code>
+
+### Formulation result
+
+- Target agreement: <code>{formulation_comparison.get('target_agreement', 'not recorded')}</code>
+- Task agreement: <code>{formulation_comparison.get('task_agreement', 'not recorded')}</code>
+- Result: <strong>{'Disagreement investigated' if formulation_status != 'agreement' else 'Agreement'}</strong>
+- Reconciliation: <code>{json.dumps(formulation_reconciliation, sort_keys=True) if formulation_reconciliation else 'not invoked'}</code>
+- Approved target: <code>{formulation_final.get('target_column', 'not recorded')}</code>
+- Approved task: <code>{formulation_final.get('task_type', 'not recorded')}</code>
+- Target source: <code>{formulation_final.get('target_source', 'not recorded')}</code>; mutable: <code>{formulation_final.get('target_is_mutable', 'not recorded')}</code>
+- Justification: {formulation_final.get('justification', 'not recorded')}
+
+## Modeling validation gate: {agreement}
 
 The workflow intentionally made a modeling decision before fitting any model.
 
-| Source | Target | Task | Method |
-| --- | --- | --- | --- |
-| Independent agent | <code>{agent_plan.target_column}</code> | <code>{agent_plan.task_type}</code> | <code>{agent_plan.recommended_method}</code> |
-| Deterministic recommender | <code>{deterministic.target_column}</code> | <code>{deterministic.task_type}</code> | <code>{deterministic.recommended_method}</code> |
-| Final approved plan | <code>{validation['selected_target_column']}</code> | <code>{validation['selected_task_type']}</code> | <code>{chosen}</code> |
+| Source | Approved formulation | Method |
+| --- | --- | --- |
+| Modeling agent | <code>{validation.get('selected_target_column')}</code> / <code>{validation.get('selected_task_type')}</code> | <code>{agent_plan.recommended_method}</code> |
+| Deterministic recommender | <code>{deterministic.target_column}</code> / <code>{deterministic.task_type}</code> | <code>{deterministic.recommended_method}</code> |
+| Final approved plan | <code>{validation['selected_target_column']}</code> / <code>{validation['selected_task_type']}</code> | <code>{chosen}</code> |
 
 Deterministic reasoning: {deterministic.reasoning}
 
@@ -281,7 +321,7 @@ Selected-family score contributions:
 
 Validation decision: {validation.get('justification', 'The recommendations matched on target, task, and method.')}
 
-Holdout boundary: target/task establishment completed before the supervised split. Modeling-agent evidence, deterministic recommendation evidence, reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation used training-partition evidence only. The EDA artifact contains <code>{eda.get('rows', 0)}</code> cleaned training rows and no holdout rows. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those guardrail checks are not planning evidence. The frozen holdout was scored once for final model evaluation.
+Holdout boundary: the formulation gate completed and was validated before the supervised split. Modeling-agent evidence, deterministic recommendation evidence, modeling reconciliation, preprocessing requirements, structural-cleaning decisions, pre-evaluation EDA and plots, and cross-validation used training-partition evidence only. The EDA artifact contains <code>{eda.get('rows', 0)}</code> cleaned training rows and no holdout rows. The fail-closed validation gate may inspect the full raw or cleaned frame only to enforce target, schema, feasibility, and frozen-membership invariants; those guardrail checks are not planning evidence. The frozen holdout was scored once for final model evaluation.
 
 Deterministic contract: <code>{deterministic_validation.get('status', 'not recorded')}</code> ({passed_checks}/{len(validation_checks)} checks passed); target rows removed: <code>{deterministic_validation.get('target_rows_removed', 0)}</code>; direct leakage detected: <code>{deterministic_validation.get('direct_leakage_detected', False)}</code>.
 

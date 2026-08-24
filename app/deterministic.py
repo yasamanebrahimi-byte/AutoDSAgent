@@ -13,7 +13,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from app.schemas import CleaningSpecification, DeterministicRecommendation, Method, TaskType
+from app.schemas import (
+    CleaningSpecification,
+    DeterministicFormulation,
+    DeterministicRecommendation,
+    Method,
+    TaskType,
+)
 from app.deterministic_policy import DeterministicPolicy
 
 
@@ -105,15 +111,43 @@ def choose_target(
         if target_hint not in dataframe.columns:
             raise ValueError(f"Target column '{target_hint}' is not present in the dataset.")
         return target_hint
-    normalized_question = re.sub(r"[^a-z0-9]+", " ", question.lower())
-    exact = [
-        str(column)
-        for column in dataframe.columns
-        if str(column).lower() in normalized_question
-    ]
-    if exact:
-        return exact[0]
-    return str(dataframe.columns[-1])
+    normalized_question = _normalize_name(question)
+    question_tokens = set(normalized_question.split())
+    padded_question = f" {normalized_question} "
+    candidates: list[tuple[int, str]] = []
+    for column in dataframe.columns:
+        name = str(column)
+        normalized_name = _normalize_name(name)
+        if not normalized_name:
+            continue
+        # A normalized full-column match is the strongest defensible signal.
+        # A single-token match is also accepted, but only when it is unique.
+        if f" {normalized_name} " in padded_question:
+            score = 3
+        elif len(normalized_name.split()) == 1 and normalized_name in question_tokens:
+            score = 2
+        else:
+            continue
+        # Identifier-like columns are safe only when the question explicitly
+        # names them; a full normalized match above is such an explicit request.
+        candidates.append((score, name))
+    if not candidates:
+        raise ValueError(
+            "Could not infer a defensible target from the question and schema. "
+            "Provide target_column explicitly."
+        )
+    best_score = max(score for score, _ in candidates)
+    best = [name for score, name in candidates if score == best_score]
+    if len(best) != 1:
+        raise ValueError(
+            "Target inference is ambiguous; multiple columns match the question: "
+            f"{', '.join(best)}. Provide target_column explicitly."
+        )
+    return best[0]
+
+
+def _normalize_name(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
 
 
 def infer_task(dataframe: pd.DataFrame, target_column: str) -> TaskType:
@@ -142,8 +176,79 @@ def establish_target_task(
 ) -> tuple[str, TaskType]:
     """Perform only the target/task work needed before a supervised split."""
 
-    target_column = choose_target(dataframe, question, target_hint)
-    return target_column, infer_task(dataframe, target_column)
+    formulation = deterministic_formulation(dataframe, question, target_hint)
+    if formulation.target_column is None or formulation.task_type is None:
+        raise ValueError(formulation.reasoning)
+    return formulation.target_column, formulation.task_type
+
+
+def deterministic_formulation(
+    dataframe: pd.DataFrame,
+    question: str,
+    target_hint: str | None = None,
+) -> DeterministicFormulation:
+    """Independently formulate target/task before any supervised split.
+
+    This function intentionally performs no model-family diagnostics, fitting,
+    CV, or holdout construction.  Its evidence is limited to schema and target
+    value facts needed to choose between the two supported task types.
+    """
+
+    target_source = "user_supplied" if target_hint else "inferred"
+    try:
+        target_column = choose_target(dataframe, question, target_hint)
+        task_type = infer_task(dataframe, target_column)
+    except Exception as exc:
+        return DeterministicFormulation(
+            target_column=target_hint if target_hint in dataframe.columns else None,
+            task_type=None,
+            status="failed" if target_hint and target_hint not in dataframe.columns else "uncertain",
+            reasoning=f"Deterministic formulation failed closed: {exc}",
+            evidence=["no_arbitrary_last_column_fallback"],
+            confidence=0.0,
+            target_source="user_supplied" if target_hint else "uncertain",
+        )
+
+    target = dataframe[target_column]
+    non_null = target.dropna()
+    numeric = pd.to_numeric(non_null, errors="coerce")
+    numeric_fraction = float(numeric.notna().mean()) if len(non_null) else 0.0
+    unique = int(non_null.nunique())
+    unique_fraction = unique / max(len(non_null), 1)
+    semantic = semantic_type(target)
+    evidence = [
+        f"target_column={target_column}",
+        f"target_source={target_source}",
+        f"target_dtype={target.dtype}",
+        f"target_semantic_type={semantic}",
+        f"valid_target_rows={len(non_null)}",
+        f"unique_values={unique}",
+        f"unique_value_fraction={unique_fraction:.4f}",
+        f"numeric_or_coercible_fraction={numeric_fraction:.4f}",
+        "model_selection_diagnostics_not_used",
+    ]
+    if task_type == "classification":
+        reasoning = (
+            f"The target '{target_column}' is treated as classification because its "
+            f"semantic type is {semantic}, or its numeric values are low-cardinality "
+            f"label-like ({unique} unique values across {len(non_null)} valid rows)."
+        )
+    else:
+        reasoning = (
+            f"The target '{target_column}' is treated as regression because it is "
+            f"numeric/coercible ({numeric_fraction:.3f} valid numeric fraction) and has "
+            f"{unique} distinct values across {len(non_null)} valid rows, rather than "
+            "appearing to be a low-cardinality label."
+        )
+    return DeterministicFormulation(
+        target_column=target_column,
+        task_type=task_type,
+        status="proposed",
+        reasoning=reasoning,
+        evidence=evidence,
+        confidence=0.9 if target_hint else 0.75,
+        target_source=target_source,
+    )
 
 
 def deterministic_recommendation(

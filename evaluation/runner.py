@@ -267,12 +267,20 @@ def _choose_source(
             None,
         )
     try:
+        modeling_plan = agents.modeling_plan(
+            training_profile,
+            case.question,
+            case.target_column,
+            case.expected_task_type,
+        )
         return (
-            agents.modeling_plan(
-                training_profile,
-                case.question,
-                case.target_column,
-                case.expected_task_type,
+            AgentPlan(
+                target_column=case.target_column,
+                task_type=case.expected_task_type,
+                recommended_method=modeling_plan.recommended_method,
+                preprocessing=modeling_plan.preprocessing,
+                reasoning=modeling_plan.reasoning,
+                confidence=modeling_plan.confidence,
             ),
             "openai",
             agents.model,
@@ -366,9 +374,10 @@ def _run_trial(
         "training_profile": training_profile,
     }
     initial_input_artifact = {
+        "evaluation_mode": "modeling_gate",
         "question": case.question,
-        "target_hint": case.target_column,
-        "established_task_type": case.expected_task_type,
+        "benchmark_target_constraint": case.target_column,
+        "benchmark_task_constraint": case.expected_task_type,
         "training_profile": training_profile,
         "holdout_included": False,
         "deterministic_recommendation_included": False,
@@ -652,6 +661,7 @@ def _run_trial(
         "benchmark_case": case.name,
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
+        "evaluation_mode": "modeling_gate",
         "trial": trial_number,
         "trial_id": context["trial_id"],
         "trial_status": "completed",
@@ -676,6 +686,8 @@ def _run_trial(
         },
         "agent_initial_target": initial_fields["target"],
         "agent_initial_task": initial_fields["task"],
+        "agent_initial_target_source": "benchmark_constraint_for_modeling_gate",
+        "agent_initial_task_source": "benchmark_constraint_for_modeling_gate",
         "agent_initial_method": initial_fields["method"],
         "agent_initial_preprocessing": initial_fields["preprocessing"],
         "agent_initial_valid": initial_validation.status == "passed",

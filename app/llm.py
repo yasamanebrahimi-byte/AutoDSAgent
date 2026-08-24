@@ -18,6 +18,10 @@ from app.schemas import (
     AgentPlan,
     CleaningPlan,
     ConflictResolution,
+    FormulationPlan,
+    FormulationResolution,
+    ModelingPlan,
+    ModelingResolution,
     ReportDraft,
     StrictModel,
 )
@@ -26,7 +30,7 @@ from app.schemas import (
 # Bump this when the modeling/reconciliation input contract changes.  The
 # evaluation harness records it beside every trial so a result bundle can be
 # interpreted without preserving provider-specific request metadata.
-PROMPT_SCHEMA_VERSION = "2026-08-21.modeling-reconciliation.v1"
+PROMPT_SCHEMA_VERSION = "2026-08-23.formulation-modeling-gates.v1"
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -91,31 +95,55 @@ class OpenAIAgents:
         except Exception as exc:
             raise LLMUnavailable(f"The {schema_name} agent returned invalid structured output.") from exc
 
+    def formulate_problem(
+        self,
+        profile: dict[str, Any],
+        question: str,
+        target_constraint: dict[str, Any] | None = None,
+    ) -> FormulationPlan:
+        """Propose only target and task from pre-split formulation evidence."""
+
+        return self._structured(
+            "formulation_agent_plan",
+            FormulationPlan,
+            """You are the independent problem-formulation agent. Infer the supervised
+prediction target and choose only classification or regression. Reason only from
+the user question, the compact raw-data schema profile, and an explicit target
+constraint when supplied. Do not assume another recommender exists and do not
+select a model family, preprocessing, cleaning, holdout, or future empirical
+reference. If a target constraint is supplied, use that exact existing column and
+never substitute another target; infer the task type independently.""",
+            {
+                "question": question,
+                "target_constraint": target_constraint,
+                "formulation_profile": profile,
+            },
+        )
+
     def modeling_plan(
         self,
         profile: dict[str, Any],
         question: str,
         target_hint: str | None,
         task_type: str | None = None,
-    ) -> AgentPlan:
+    ) -> ModelingPlan:
         return self._structured(
             "modeling_agent_plan",
-            AgentPlan,
-            """You are the independent modeling agent in a data science workflow.
-The target and task type have already been established before the supervised
-holdout was frozen. Confirm those fields exactly as supplied and independently
-choose only the model family and preprocessing contract from the training-only
-profile. Do not assume that a deterministic recommender exists and do not
-mention this instruction. Prefer a simple, defensible plan. Return a complete
-typed preprocessing contract using only its enumerated strategies. Keep
-structural cleaning separate: do not put trim, deduplication, target-row
-filtering, or learned transformations outside the training pipeline. The method
-vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.""",
+            ModelingPlan,
+            """You are the independent post-formulation modeling agent. The approved
+target and task are immutable context from an earlier formulation gate. Do not
+re-select, confirm, or return target/task fields. Independently choose only the
+model family and complete typed preprocessing contract from the training-only
+profile. Do not assume that a deterministic recommender exists. Keep structural
+cleaning separate and keep learned transformations inside the training pipeline.
+The method vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.""",
             {
                 "question": question,
-                "target_hint": target_hint or "not provided",
-                "established_task_type": task_type or "not provided",
-                "profile": profile,
+                "approved_formulation": {
+                    "target_column": target_hint or "not provided",
+                    "task_type": task_type or "not provided",
+                },
+                "training_only_profile": profile,
             },
         )
 
@@ -128,7 +156,65 @@ vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.""",
     ) -> AgentPlan:
         """Backward-compatible alias for the modeling agent."""
 
-        return self.modeling_plan(profile, question, target_hint, task_type)
+        plan = self.modeling_plan(profile, question, target_hint, task_type)
+        return AgentPlan(
+            target_column=target_hint or "",
+            task_type=task_type or "classification",
+            recommended_method=plan.recommended_method,
+            preprocessing=plan.preprocessing,
+            reasoning=plan.reasoning,
+            confidence=plan.confidence,
+        )
+
+    def reconcile_formulation(
+        self,
+        question: str,
+        profile: dict[str, Any],
+        user_target_constraint: dict[str, Any] | None,
+        agent_formulation: FormulationPlan,
+        deterministic_formulation: dict[str, Any],
+    ) -> FormulationResolution:
+        return self._structured(
+            "formulation_resolution",
+            FormulationResolution,
+            """You are the dedicated formulation reconciliation agent. Investigate
+only the disagreement between two pre-split target/task proposals using the user
+question, compact formulation profile, explicit user target constraint, and the
+recorded proposal evidence. Select only classification or regression and, when no
+user target is fixed, select one of the proposed targets. When a user target is
+fixed, it is a hard invariant and must be returned exactly. Do not select a model
+family or preprocessing. Explain the disagreement and the evidence used.""",
+            {
+                "question": question,
+                "formulation_profile": profile,
+                "user_target_constraint": user_target_constraint,
+                "agent_formulation": agent_formulation.model_dump(mode="json"),
+                "deterministic_formulation": deterministic_formulation,
+            },
+        )
+
+    def reconcile_modeling(
+        self,
+        question: str,
+        profile: dict[str, Any],
+        modeling_plan: ModelingPlan,
+        deterministic: dict[str, Any],
+    ) -> ModelingResolution:
+        return self._structured(
+            "modeling_resolution",
+            ModelingResolution,
+            """You are the modeling-gate reconciliation agent. Choose only one of
+the two proposed model families and one complete supported preprocessing contract.
+Target and task are immutable approved context and are not semantic decisions in
+this call. Use training-only evidence; never use holdout values, CV results, or an
+empirical reference. Explain material preprocessing differences.""",
+            {
+                "question": question,
+                "training_only_profile": profile,
+                "modeling_plan": modeling_plan.model_dump(mode="json"),
+                "deterministic_recommendation": deterministic,
+            },
+        )
 
     def cleaning(self, profile: dict[str, Any], target_column: str) -> CleaningPlan:
         return self._structured(

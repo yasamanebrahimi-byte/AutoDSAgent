@@ -9,8 +9,8 @@ from typing import Any, Callable
 import pandas as pd
 
 from app.deterministic import (
+    deterministic_formulation,
     deterministic_recommendation,
-    establish_target_task,
     eda_summary,
     fit_cleaning_spec,
     make_plots,
@@ -25,7 +25,13 @@ from app.schemas import (
     AgentPlan,
     CleaningPlan,
     ConflictResolution,
+    DeterministicFormulation,
     DeterministicRecommendation,
+    FormulationComparison,
+    FormulationPlan,
+    FormulationResolution,
+    ModelingPlan,
+    ModelingResolution,
     PreprocessingContract,
     ReportDraft,
 )
@@ -39,6 +45,7 @@ from app.validation import (
     training_partition_frame,
     training_profile_frame,
     validated_row_positions,
+    validate_formulation,
     validate_training_plan,
 )
 
@@ -73,6 +80,13 @@ def run_analysis(
     agents = OpenAIAgents(api_key=api_key, model=model)
     warnings: list[str] = []
     agent_sources: dict[str, str] = {}
+    formulation_agent: FormulationPlan | None = None
+    deterministic_formulation_result: DeterministicFormulation | None = None
+    formulation_resolution: FormulationResolution | None = None
+    formulation_validation: dict[str, Any] | None = None
+    modeling_plan: ModelingPlan | None = None
+    # Legacy combined shape is kept only for report/evaluation compatibility;
+    # runtime decisions use the separate formulation/modeling objects above.
     agent_plan: AgentPlan | None = None
     deterministic: DeterministicRecommendation | None = None
     validation: dict[str, Any] | None = None
@@ -82,12 +96,32 @@ def run_analysis(
     established_target: str | None = None
     established_task: str | None = None
     decision_payload: dict[str, Any] = {
+        "formulation": {
+            "user_target_constraint": None,
+            "agent_initial": None,
+            "deterministic": None,
+            "comparison": None,
+            "reconciliation": None,
+            "final": None,
+            "status": "not_completed",
+        },
+        "modeling_gate": {
+            "agent_initial": None,
+            "deterministic": None,
+            "comparison": None,
+            "reconciliation": None,
+            "final": None,
+            "status": "not_completed",
+        },
         "agent_plan": None,
         "deterministic_recommendation": None,
         "validation": None,
         "warnings": warnings,
         "agent_sources": agent_sources,
         "gate_completed_before_training": False,
+        "formulation_gate_status": "not_completed",
+        "split_frozen_after_formulation_gate": False,
+        "modeling_gate_status": "not_completed",
         "validation_gate_status": "not_completed",
         "model_training_occurred": False,
         "holdout_policy": {
@@ -104,18 +138,161 @@ def run_analysis(
         },
     }
     try:
-        # Target/task establishment is the one deliberately pre-split stage.
-        # No model family or preprocessing recommendation is made here.
-        try:
-            established_target, established_task = establish_target_task(
+        # Formulation is deliberately complete before a split exists.  Both
+        # initial paths receive only raw compact schema evidence and an
+        # explicit user target constraint, never each other's proposal.
+        formulation_profile = profile_dataframe(dataframe)
+        write_json(run_dir / "formulation_profile.json", formulation_profile)
+        user_target_constraint = (
+            {
+                "target_column": target_column,
+                "target_source": "user_supplied",
+                "target_is_mutable": False,
+            }
+            if target_column
+            else {
+                "target_column": None,
+                "target_source": "inferred",
+                "target_is_mutable": True,
+            }
+        )
+        decision_payload["formulation"]["user_target_constraint"] = user_target_constraint
+        formulation_agent = _call_or_fallback(
+            "formulation",
+            lambda: agents.formulate_problem(
+                formulation_profile,
+                question,
+                user_target_constraint if target_column else None,
+            ),
+            lambda: _fallback_formulation_plan(
                 dataframe,
+                formulation_profile,
                 question,
                 target_column,
+            ),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        if target_column and formulation_agent.target_column != target_column:
+            # The external proposal is retained in the warning, but the
+            # explicit user constraint is enforced as an immutable invariant.
+            warnings.append(
+                "Formulation agent proposed a different target; explicit user target constraint was enforced."
             )
-        except Exception as exc:
-            raise InvariantViolation(
-                f"[target_task_establishment_failed] Could not establish a valid target/task before freezing the holdout: {exc}"
-            ) from exc
+            formulation_agent = formulation_agent.model_copy(
+                update={
+                    "target_column": target_column,
+                    "reasoning": (
+                        formulation_agent.reasoning
+                        + " Explicit user target constraint enforced by deterministic guardrail."
+                    )[:1200],
+                }
+            )
+        deterministic_formulation_result = deterministic_formulation(
+            dataframe,
+            question,
+            target_column,
+        )
+        decision_payload["formulation"]["agent_initial"] = formulation_agent.model_dump(mode="json")
+        decision_payload["formulation"]["deterministic"] = deterministic_formulation_result.model_dump(mode="json")
+        if deterministic_formulation_result.status != "proposed":
+            failed = validate_formulation(
+                dataframe,
+                deterministic_formulation_result.target_column or "",
+                deterministic_formulation_result.task_type or "unsupported",
+                user_target=target_column,
+                test_size=test_size,
+                random_state=random_state,
+            )
+            failed.add_failure(
+                "deterministic_formulation_is_defensible",
+                deterministic_formulation_result.reasoning,
+                {"evidence": deterministic_formulation_result.evidence},
+            )
+            raise InvariantViolation.from_result(failed)
+
+        formulation_comparison = _compare_formulations(
+            formulation_agent,
+            deterministic_formulation_result,
+            target_column,
+        )
+        decision_payload["formulation"]["comparison"] = formulation_comparison.model_dump(mode="json")
+        if formulation_comparison.overall_agreement:
+            established_target = target_column or formulation_agent.target_column
+            established_task = formulation_agent.task_type
+            formulation_status = "agreement"
+            formulation_justification = (
+                "The independent formulation agent and deterministic formulation engine agreed "
+                "on the target and supported task before split construction."
+            )
+        else:
+            formulation_resolution = _call_or_fallback(
+                "formulation_reconciliation",
+                lambda: agents.reconcile_formulation(
+                    question,
+                    formulation_profile,
+                    user_target_constraint if target_column else None,
+                    formulation_agent,
+                    deterministic_formulation_result.model_dump(mode="json"),
+                ),
+                lambda: _fallback_formulation_resolution(
+                    formulation_agent,
+                    deterministic_formulation_result,
+                    target_column,
+                ),
+                warnings,
+                agent_sources,
+                offline=offline,
+            )
+            established_target = formulation_resolution.selected_target_column
+            established_task = formulation_resolution.selected_task_type
+            formulation_status = "disagreement_resolved"
+            formulation_justification = formulation_resolution.justification
+            _validate_formulation_resolution(
+                formulation_resolution,
+                formulation_agent,
+                deterministic_formulation_result,
+                target_column,
+            )
+        formulation_validation_result = validate_formulation(
+            dataframe,
+            established_target,
+            established_task,
+            user_target=target_column,
+            test_size=test_size,
+            random_state=random_state,
+        )
+        formulation_validation_result.raise_if_failed()
+        formulation_validation = formulation_validation_result.as_dict()
+        decision_payload["formulation"].update(
+            {
+                "reconciliation": formulation_resolution.model_dump(mode="json")
+                if formulation_resolution is not None
+                else None,
+                "final": {
+                    "target_column": established_target,
+                    "task_type": established_task,
+                    "target_source": "user_supplied" if target_column else "inferred",
+                    "target_is_mutable": target_column is None,
+                    "justification": formulation_justification,
+                },
+                "validation": formulation_validation,
+                "status": formulation_status,
+            }
+        )
+        # Deprecated compatibility projection for consumers of the pre-gate
+        # artifact contract. The authoritative record is decision.formulation.
+        decision_payload["target_establishment"] = {
+            "deprecated_compatibility_alias": True,
+            "target_column": established_target,
+            "task_type": established_task,
+            "target_source": "user_supplied" if target_column else "inferred",
+            "target_is_mutable": target_column is None,
+            "completed_before_holdout_freeze": True,
+            "authoritative_artifact": "formulation",
+        }
+        decision_payload["formulation_gate_status"] = "completed"
         split = freeze_supervised_split(
             dataframe,
             established_target,
@@ -133,14 +310,9 @@ def run_analysis(
         )
         planning_profile = profile_dataframe(planning_frame)
         write_json(run_dir / "planning_profile.json", planning_profile)
-        decision_payload["target_establishment"] = {
-            "target_column": established_target,
-            "task_type": established_task,
-            "target_source": "user_supplied" if target_column else "deterministic_schema_and_question",
-            "completed_before_holdout_freeze": True,
-        }
+        decision_payload["split_frozen_after_formulation_gate"] = True
         decision_payload["split_contract"] = split.as_dict()
-        agent_plan = _call_or_fallback(
+        modeling_plan = _call_or_fallback(
             "modeling",
             lambda: agents.modeling_plan(
                 planning_profile,
@@ -148,7 +320,7 @@ def run_analysis(
                 established_target,
                 established_task,
             ),
-            lambda: _fallback_agent_plan(
+            lambda: _fallback_modeling_plan(
                 planning_profile,
                 question,
                 established_target,
@@ -158,7 +330,14 @@ def run_analysis(
             agent_sources,
             offline=offline,
         )
-        _ensure_established_target_task(agent_plan, established_target, established_task)
+        agent_plan = AgentPlan(
+            target_column=established_target,
+            task_type=established_task,
+            recommended_method=modeling_plan.recommended_method,
+            preprocessing=modeling_plan.preprocessing,
+            reasoning=modeling_plan.reasoning,
+            confidence=modeling_plan.confidence,
+        )
         deterministic = _deterministic_recommendation_or_fail(
             planning_frame,
             question,
@@ -166,11 +345,11 @@ def run_analysis(
             warnings,
             task_type=established_task,
         )
-        validation = _validate_before_training(
+        validation = _validate_modeling_gate(
             agents,
             planning_profile,
             question,
-            agent_plan,
+            modeling_plan,
             deterministic,
             warnings,
             agent_sources,
@@ -181,12 +360,15 @@ def run_analysis(
             reconciliation_profile=planning_profile,
             split=split,
             row_positions=list(range(len(dataframe))),
-            established_target=established_target,
-            established_task=established_task,
+            approved_target=established_target,
+            approved_task=established_task,
         )
+        validation["formulation"] = decision_payload["formulation"]
+        decision_payload["modeling_gate_status"] = "completed"
         decision_payload.update(
             {
                 "agent_plan": agent_plan.model_dump(mode="json"),
+                "modeling_gate": validation.get("modeling_gate", {}),
                 "deterministic_recommendation": deterministic.model_dump(mode="json"),
                 "deterministic_policy_version": deterministic.policy_version,
                 "validation": validation,
@@ -345,6 +527,7 @@ def run_analysis(
 
         decision_payload["gate_completed_before_training"] = True
         decision_payload["validation_gate_status"] = "completed"
+        decision_payload["modeling_gate_status"] = "completed"
         decision_payload["warnings"] = warnings
         decision_payload["agent_sources"] = agent_sources
         write_json(run_dir / "decision.json", decision_payload)
@@ -386,6 +569,7 @@ def run_analysis(
         )
         artifact_names = [
             "profile.json",
+            "formulation_profile.json",
             "planning_profile.json",
             "decision.json",
             "cleaning.json",
@@ -433,6 +617,9 @@ def run_analysis(
             "agent_sources": agent_sources,
             "warnings": warnings,
             "validation_status": validation["status"],
+            "formulation_gate_status": decision_payload["formulation_gate_status"],
+            "split_frozen_after_formulation_gate": decision_payload["split_frozen_after_formulation_gate"],
+            "modeling_gate_status": decision_payload["modeling_gate_status"],
             "selected_method": validation["selected_method"],
             "deterministic_policy_version": deterministic.policy_version,
             "artifacts": artifact_names,
@@ -484,6 +671,9 @@ def run_analysis(
                 "api_used": any(source == "openai" for source in agent_sources.values()),
                 "deterministic_policy_version": deterministic.policy_version if deterministic else None,
                 "gate_completed_before_training": False,
+                "formulation_gate_status": decision_payload["formulation_gate_status"],
+                "split_frozen_after_formulation_gate": decision_payload["split_frozen_after_formulation_gate"],
+                "modeling_gate_status": decision_payload["modeling_gate_status"],
                 "model_training_occurred": False,
             },
         )
@@ -491,6 +681,159 @@ def run_analysis(
         if model_path.exists():
             model_path.unlink()
         raise
+
+
+def _validate_modeling_gate(
+    agents: OpenAIAgents,
+    profile: dict[str, Any],
+    question: str,
+    modeling_plan: ModelingPlan,
+    deterministic: DeterministicRecommendation,
+    warnings: list[str],
+    agent_sources: dict[str, str],
+    offline: bool,
+    dataframe: pd.DataFrame,
+    test_size: float,
+    random_state: int,
+    reconciliation_profile: dict[str, Any],
+    split: FrozenSplit,
+    row_positions: list[int],
+    approved_target: str,
+    approved_task: str,
+) -> dict[str, Any]:
+    records = [
+        record
+        for record in reconciliation_profile.get("column_details", [])
+        if str(record.get("name")) != approved_target
+    ]
+    requirements = requirements_from_records(
+        records,
+        approved_task,
+        deterministic.recommended_method,
+    )
+    preprocessing_comparison = compare_preprocessing_plans(
+        modeling_plan.preprocessing,
+        deterministic.preprocessing,
+        requirements,
+    )
+    same = (
+        modeling_plan.recommended_method == deterministic.recommended_method
+        and preprocessing_comparison["status"] == "agreement"
+    )
+    resolution: ModelingResolution | None = None
+    if same:
+        selected_method = deterministic.recommended_method
+        selected_preprocessing = deterministic.preprocessing
+        justification = (
+            "The independent modeling agent and deterministic recommender agreed on "
+            "model family and material preprocessing behavior after the formulation gate."
+        )
+        status = "agreement"
+    else:
+        resolution = _call_or_fallback(
+            "modeling_reconciliation",
+            lambda: agents.reconcile_modeling(
+                question,
+                reconciliation_profile,
+                modeling_plan,
+                {
+                    **deterministic.model_dump(mode="json"),
+                    "preprocessing_comparison": preprocessing_comparison,
+                    "preprocessing_requirements": requirements.as_dict(),
+                },
+            ),
+            lambda: _fallback_modeling_resolution(modeling_plan, deterministic),
+            warnings,
+            agent_sources,
+            offline=offline,
+        )
+        selected_method = resolution.selected_method
+        selected_preprocessing = resolution.selected_preprocessing
+        justification = resolution.justification
+        status = "disagreement_resolved"
+        if selected_method not in {modeling_plan.recommended_method, deterministic.recommended_method}:
+            raise InvariantViolation(
+                "[reconciliation_method_is_proposed] Modeling reconciliation invented an unsupported method."
+            )
+
+    deterministic_validation = validate_training_plan(
+        dataframe,
+        approved_target,
+        approved_task,
+        selected_method,
+        test_size=test_size,
+        random_state=random_state,
+        preprocessing=selected_preprocessing,
+        split=split,
+        row_positions=row_positions,
+    )
+    deterministic_validation.add_check(
+        "approved_formulation_is_immutable",
+        split.target_column == approved_target and split.task_type == approved_task,
+        {
+            "approved_target": approved_target,
+            "approved_task": approved_task,
+            "split_target": split.target_column,
+            "split_task": split.task_type,
+        },
+        "Modeling validation must use the immutable formulation approved before split construction.",
+    )
+    deterministic_validation.add_check(
+        "modeling_reconciliation_method_is_proposed",
+        same or selected_method in {modeling_plan.recommended_method, deterministic.recommended_method},
+        {
+            "selected_method": selected_method,
+            "proposed_methods": sorted({modeling_plan.recommended_method, deterministic.recommended_method}),
+        },
+        "Modeling reconciliation may select only one of the two proposed methods.",
+    )
+    deterministic_validation.add_check(
+        "preprocessing_requirements_recorded",
+        True,
+        requirements.as_dict(),
+        "Preprocessing requirements were derived from the training-only profile after formulation.",
+    )
+    deterministic_validation.raise_if_failed()
+    validation = {
+        "status": status,
+        "overall_status": "passed",
+        "selected_target_column": approved_target,
+        "selected_task_type": approved_task,
+        "selected_method": selected_method,
+        "justification": justification,
+        "checks": deterministic_validation.as_dict()["checks"],
+        "confidence": 1.0 if same else resolution.confidence,
+        "agent_preprocessing": modeling_plan.preprocessing.model_dump(mode="json"),
+        "deterministic_preprocessing": deterministic.preprocessing.model_dump(mode="json"),
+        "approved_preprocessing": selected_preprocessing.model_dump(mode="json"),
+        "preprocessing_comparison": preprocessing_comparison,
+        "reconciliation": resolution.model_dump(mode="json") if resolution else None,
+        "preprocessing_requirements": requirements.as_dict(),
+        "deterministic_validation": deterministic_validation.as_dict(),
+        "agent_method": modeling_plan.recommended_method,
+        "deterministic_method": deterministic.recommended_method,
+        "deterministic_policy_version": deterministic.policy_version,
+        "deterministic_recommendation_evidence": deterministic.model_dump(mode="json"),
+    }
+    validation["modeling_gate"] = {
+        "agent_initial": modeling_plan.model_dump(mode="json"),
+        "deterministic": deterministic.model_dump(mode="json"),
+        "comparison": {
+            "method_agreement": modeling_plan.recommended_method == deterministic.recommended_method,
+            "preprocessing_agreement": preprocessing_comparison["status"] == "agreement",
+            "overall_agreement": same,
+            "status": "agreement" if same else "disagreement",
+        },
+        "reconciliation": resolution.model_dump(mode="json") if resolution else None,
+        "final": {
+            "target_column": approved_target,
+            "task_type": approved_task,
+            "recommended_method": selected_method,
+            "preprocessing": selected_preprocessing.model_dump(mode="json"),
+        },
+        "status": status,
+    }
+    return validation
 
 
 def _validate_before_training(
@@ -745,17 +1088,155 @@ def _call_or_fallback(
     return value
 
 
+def _fallback_formulation_plan(
+    dataframe: pd.DataFrame,
+    profile: dict[str, Any],
+    question: str,
+    target_hint: str | None,
+) -> FormulationPlan:
+    del profile
+    result = deterministic_formulation(dataframe, question, target_hint)
+    if result.status != "proposed" or result.target_column is None or result.task_type is None:
+        failed = validate_formulation(
+            dataframe,
+            result.target_column or target_hint or "",
+            result.task_type or "unsupported",
+            user_target=target_hint,
+        )
+        failed.add_failure(
+            "formulation_agent_fallback_failed_closed",
+            result.reasoning,
+            {"evidence": result.evidence},
+        )
+        raise InvariantViolation.from_result(failed)
+    return FormulationPlan(
+        target_column=result.target_column,
+        task_type=result.task_type,
+        reasoning=(
+            "Offline fallback uses the deterministic schema formulation as a local heuristic; "
+            "this is not evidence of independent LLM reasoning. "
+            + result.reasoning
+        )[:1200],
+        confidence=0.4,
+    )
+
+
+def _compare_formulations(
+    agent: FormulationPlan,
+    deterministic: DeterministicFormulation,
+    user_target: str | None,
+) -> FormulationComparison:
+    target_agreement = (
+        user_target is not None
+        or (deterministic.target_column is not None and agent.target_column == deterministic.target_column)
+    )
+    task_agreement = deterministic.task_type is not None and agent.task_type == deterministic.task_type
+    differences: list[str] = []
+    if not target_agreement:
+        differences.append("target_disagreement")
+    if not task_agreement:
+        differences.append("task_disagreement")
+    overall = target_agreement and task_agreement
+    return FormulationComparison(
+        target_agreement=target_agreement,
+        task_agreement=task_agreement,
+        overall_agreement=overall,
+        status="agreement" if overall else "disagreement",
+        differences=differences,
+    )
+
+
+def _fallback_formulation_resolution(
+    agent: FormulationPlan,
+    deterministic: DeterministicFormulation,
+    user_target: str | None,
+) -> FormulationResolution:
+    target = user_target or deterministic.target_column or agent.target_column
+    task = deterministic.task_type or agent.task_type
+    return FormulationResolution(
+        selected_target_column=target,
+        selected_task_type=task,
+        checks=["deterministic_schema_evidence_checked", "user_target_constraint_checked"],
+        justification=(
+            "Offline formulation reconciliation selected the deterministic schema-based proposal "
+            "and preserved any explicit user target constraint; no LLM reconciliation evidence is claimed."
+        ),
+        confidence=0.4,
+    )
+
+
+def _validate_formulation_resolution(
+    resolution: FormulationResolution,
+    agent: FormulationPlan,
+    deterministic: DeterministicFormulation,
+    user_target: str | None,
+) -> None:
+    proposed_targets = {agent.target_column}
+    if deterministic.target_column:
+        proposed_targets.add(deterministic.target_column)
+    proposed_tasks = {agent.task_type}
+    if deterministic.task_type:
+        proposed_tasks.add(deterministic.task_type)
+    if user_target is not None and resolution.selected_target_column != user_target:
+        raise InvariantViolation(
+            "[user_target_constraint_violated] Formulation reconciliation cannot override an explicit user target."
+        )
+    if user_target is None and resolution.selected_target_column not in proposed_targets:
+        raise InvariantViolation(
+            "[reconciliation_target_is_proposed] Formulation reconciliation selected a target not proposed by either initial path."
+        )
+    if resolution.selected_task_type not in proposed_tasks:
+        raise InvariantViolation(
+            "[reconciliation_task_is_proposed] Formulation reconciliation selected a task not proposed by either initial path."
+        )
+
+
+def _fallback_modeling_plan(
+    profile: dict[str, Any],
+    question: str,
+    target_hint: str,
+    task_type_hint: str,
+) -> ModelingPlan:
+    del question
+    features = [record for record in profile["column_details"] if record["name"] != target_hint]
+    has_categories = any(
+        record["semantic_type"] in {"categorical", "boolean"} for record in features
+    )
+    method = "tree_ensemble" if has_categories else "regularized_linear"
+    preprocessing = requirements_from_records(features, task_type_hint, method).expected_contract
+    return ModelingPlan(
+        recommended_method=method,
+        preprocessing=preprocessing,
+        reasoning="Offline fallback selects a supported model family from the training-only schema profile; target and task remain immutable formulation context.",
+        confidence=0.4,
+    )
+
+
+def _fallback_modeling_resolution(
+    modeling_plan: ModelingPlan,
+    deterministic: DeterministicRecommendation,
+) -> ModelingResolution:
+    return ModelingResolution(
+        selected_method=deterministic.recommended_method,
+        selected_preprocessing=deterministic.preprocessing,
+        checks=["deterministic_model_evidence_checked", "preprocessing_contract_checked"],
+        justification="Offline modeling reconciliation selected the deterministic model recommendation; no LLM modeling reconciliation evidence is claimed.",
+        confidence=0.5,
+    )
+
+
 def _fallback_agent_plan(
     profile: dict[str, Any],
     question: str,
     target_hint: str | None,
     task_type_hint: str | None = None,
 ) -> AgentPlan:
-    columns = [record["name"] for record in profile["column_details"]]
-    target = target_hint or next(
-        (column for column in columns if column.lower() in question.lower()),
-        columns[-1],
-    )
+    if not target_hint:
+        raise ValueError(
+            "The legacy combined-plan fallback requires an explicit target; "
+            "use the dedicated formulation fallback for target inference."
+        )
+    target = target_hint
     target_record = next(
         (record for record in profile["column_details"] if record["name"] == target),
         {"semantic_type": "unknown"},

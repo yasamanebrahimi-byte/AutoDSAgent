@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
 TaskType = Literal["classification", "regression"]
+FormulationStatus = Literal["proposed", "uncertain", "failed"]
 Method = Literal["linear", "regularized_linear", "tree_ensemble", "boosted_tree"]
 ScoreEffect = Literal["favors", "penalizes", "limits"]
 ConfidenceLevel = Literal["low", "medium", "high"]
@@ -103,7 +104,66 @@ class PreprocessingContract(StrictModel):
         return self
 
 
+class FormulationPlan(StrictModel):
+    """One independent proposal for the supervised problem definition."""
+
+    target_column: str
+    task_type: TaskType
+    reasoning: str = Field(min_length=20, max_length=1200)
+    confidence: float = Field(ge=0, le=1)
+
+
+class DeterministicFormulation(StrictModel):
+    """Auditable, non-ML evidence for target and task formulation."""
+
+    target_column: Optional[str] = None
+    task_type: Optional[TaskType] = None
+    status: FormulationStatus = "proposed"
+    reasoning: str = Field(min_length=20, max_length=1600)
+    evidence: list[str] = Field(default_factory=list, max_length=16)
+    confidence: float = Field(ge=0, le=1)
+    target_source: Literal["user_supplied", "inferred", "uncertain"] = "inferred"
+
+
+class FormulationComparison(StrictModel):
+    target_agreement: bool
+    task_agreement: bool
+    overall_agreement: bool
+    status: Literal["agreement", "disagreement", "invalid"]
+    differences: list[str] = Field(default_factory=list, max_length=8)
+
+
+class FormulationResolution(StrictModel):
+    selected_target_column: str
+    selected_task_type: TaskType
+    checks: list[str] = Field(min_length=1, max_length=12)
+    justification: str = Field(min_length=20, max_length=1600)
+    confidence: float = Field(ge=0, le=1)
+
+
+class ModelingPlan(StrictModel):
+    """Post-split model-family proposal; target/task are immutable context."""
+
+    recommended_method: Method
+    preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
+    reasoning: str = Field(min_length=20, max_length=1200)
+    confidence: float = Field(ge=0, le=1)
+
+
+class ModelingResolution(StrictModel):
+    selected_method: Method
+    selected_preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
+    checks: list[str] = Field(min_length=1, max_length=12)
+    justification: str = Field(min_length=20, max_length=1600)
+    confidence: float = Field(ge=0, le=1)
+
+
 class AgentPlan(StrictModel):
+    """Legacy combined plan retained for evaluation and API compatibility.
+
+    Runtime production orchestration uses FormulationPlan plus ModelingPlan.
+    """
+
     target_column: str = Field(description="The outcome column to predict.")
     task_type: TaskType
     recommended_method: Method

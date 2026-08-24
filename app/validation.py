@@ -208,6 +208,114 @@ class DeterministicRecommendationUnavailable(InvariantViolation):
         )
 
 
+def validate_formulation(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    task_type: str,
+    *,
+    user_target: str | None = None,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> ValidationResult:
+    """Validate target/task without constructing or freezing a split.
+
+    This is the hard pre-split formulation boundary.  It deliberately does
+    not accept a model family, preprocessing contract, training profile, or
+    empirical evidence.
+    """
+
+    result = ValidationResult(
+        target_column=str(target_column),
+        task_type=str(task_type),
+        method="not_selected",
+    )
+    column_names = [str(column) for column in dataframe.columns]
+    duplicate_names = sorted({name for name in column_names if column_names.count(name) > 1})
+    result.add_check(
+        "columns_have_unique_names",
+        not duplicate_names,
+        {"duplicate_columns": duplicate_names},
+        "Column names must be unique before formulation can be approved.",
+    )
+    positions = [index for index, name in enumerate(column_names) if name == str(target_column)]
+    result.add_check(
+        "target_exists",
+        bool(positions),
+        {"target_column": str(target_column), "matching_columns": len(positions)},
+        "The proposed target must exist in the raw dataset.",
+    )
+    result.add_check(
+        "target_resolves_once",
+        len(positions) == 1,
+        {"target_column": str(target_column), "matching_columns": len(positions)},
+        "The proposed target must resolve to exactly one source column.",
+    )
+    result.add_check(
+        "task_is_supported",
+        task_type in SUPPORTED_TASKS,
+        {"task_type": str(task_type), "supported_tasks": sorted(SUPPORTED_TASKS)},
+        "Only classification and regression are supported.",
+    )
+    result.add_check(
+        "user_target_is_immutable",
+        user_target is None or str(target_column) == str(user_target),
+        {"user_target": user_target, "selected_target": str(target_column)},
+        "An explicit user target is a hard constraint and cannot be overridden.",
+    )
+    if len(positions) != 1 or task_type not in SUPPORTED_TASKS or duplicate_names:
+        result.add_failure(
+            "formulation_validation_can_proceed",
+            "Formulation cannot be validated until the target and task are supported and unambiguous.",
+            {},
+        )
+        return result
+
+    target = dataframe.iloc[:, positions[0]].copy()
+    valid_mask, normalized, evidence = _normalize_target(target, str(task_type))
+    result.target_rows_removed = int((~valid_mask).sum())
+    result.valid_target_rows = int(valid_mask.sum())
+    result.add_check(
+        "target_has_valid_observations",
+        result.valid_target_rows >= (8 if task_type == "classification" else 4),
+        {"valid_target_rows": result.valid_target_rows, **evidence},
+        "The approved target must have enough usable observations for the supervised protocol.",
+    )
+    if task_type == "classification":
+        classes = normalized.loc[valid_mask]
+        class_counts = classes.value_counts()
+        result.add_check(
+            "classification_has_feasible_classes",
+            len(class_counts) >= 2,
+            {"class_count": int(len(class_counts)), "class_counts": {str(k): int(v) for k, v in class_counts.items()}},
+            "Classification requires at least two valid classes.",
+        )
+        split_evidence = _validate_split_and_cv(
+            classes.reset_index(drop=True), "classification", test_size, random_state
+        )
+    else:
+        result.add_check(
+            "regression_target_is_numeric_and_finite",
+            evidence["invalid_nonnumeric_rows"] == 0 and evidence["nonfinite_rows"] == 0,
+            evidence,
+            "Regression targets must be finite and numeric or safely coercible without invalid rows.",
+        )
+        split_evidence = _validate_split_and_cv(
+            normalized.loc[valid_mask].reset_index(drop=True), "regression", test_size, random_state
+        )
+    result.add_check(
+        "split_strategy_is_feasible",
+        all(check["passed"] for check in split_evidence.get("checks", [])),
+        split_evidence,
+        "The final task must support the configured supervised split and CV protocol before the split is frozen.",
+    )
+    result.split = {
+        "strategy": "stratified" if task_type == "classification" else "seeded_random",
+        "validation_only": True,
+        "evidence": split_evidence,
+    }
+    return result
+
+
 def validate_training_plan(
     dataframe: pd.DataFrame,
     target_column: str,

@@ -53,7 +53,7 @@ def render_summary_markdown(
         f"- Requested model: `{config.get('agent_model_requested', 'n/a')}`; prompt/schema version: `{config.get('prompt_schema_version', 'n/a')}`.",
         f"- Repository commit: `{config.get('repository_commit') or 'unavailable'}`.",
         "- Each repetition keeps the case, frozen train/holdout membership, and training-only profile fixed; the intended varying factor is the stochastic LLM response.",
-        "- `agent_initial` is the independent modeling response before deterministic recommendation or reconciliation. `gated_final` is the approved plan after comparison, optional reconciliation, and deterministic validation.",
+        "- These rows are `modeling_gate` evaluations: benchmark target/task values are fixed context, while `agent_initial` represents only the post-split model-family and preprocessing proposal. `gated_final` is the approved plan after comparison, optional reconciliation, and deterministic validation. Formulation accuracy requires a separate formulation-gate evaluation mode.",
         "- `empirical_reference` is an evaluation-only ranking of the four supported families using training-only CV; it is not an oracle and never enters runtime decisions.",
         "",
         "## Trial Coverage",
