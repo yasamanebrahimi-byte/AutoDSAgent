@@ -13,7 +13,7 @@ The central idea is simple:
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
-The agent recommendation can never substitute for a failed deterministic recommendation. If the independent deterministic recommender is unavailable, the run fails closed before model training. A recorded agreement means both independent recommendation paths completed successfully and materially agreed.
+The agent recommendation can never substitute for a failed deterministic recommendation. If the independent deterministic recommender is unavailable, the run fails closed before model training. A recorded agreement means both independent recommendation paths completed successfully and materially agreed. For post-split modeling disagreements, the default selective policy uses development-only calibration to challenge only sufficiently reliable disagreements and abstains on low-confidence, unsupported, or unreliable cases; hard validation failures still force reconciliation.
 
 ### Agent roles
 
@@ -111,6 +111,8 @@ The deterministic recommendation is intentionally not a model-selection benchmar
 The policy uses the same canonical categorical-cardinality and one-hot safety limits as `app.preprocessing`. Linear and regularized-linear families use the production one-hot path; boosted trees use the production ordinal path. Candidate one-hot families are marked ineligible when the estimated encoded dimension exceeds the canonical safe bound; this is distinct from merely ranking a valid family lower. The validation gate remains the fail-closed authority after recommendation. In classification, `linear` uses unregularized logistic regression (`penalty=None`) while `regularized_linear` uses L2-regularized logistic regression; regression uses `LinearRegression` versus `Ridge`. Boosted trees can rank first when nonlinear evidence, adequate sample size, and manageable effective dimensionality jointly support them, but the policy does not force that outcome.
 
 The policy can be wrong and is evaluated separately against the evaluation-only empirical CV reference. That reference never enters runtime recommendation or reconciliation, and the holdout is never used for model-family recommendation.
+
+Selective modeling intervention is implemented in `app/soft_challenge.py`. The runtime loads the frozen `app/soft_challenge_calibration.json` artifact, buckets training-only regimes by task, dimensionality, complexity, and raw score margin, then records an explicit `agree`, `challenge`, or `abstain` decision with support, reliability, regret, and catastrophic-prevention evidence. Calibration artifacts are generated offline from policy-development records only; final-evaluation records are rejected by the calibration builder.
 
 If the deterministic recommender fails, the validation gate remains incomplete and the run stops before training; the agent plan is retained for auditability, but it is never copied into a deterministic recommendation.
 
@@ -270,8 +272,9 @@ The repository includes a separate, evaluation-only harness for the central rese
 It compares three auditable conditions:
 
 ```text
-agent_initial  →  the independent proposal before reconciliation
-gated_final    →  the existing deterministic validation/reconciliation path
+llm_only       →  the independent proposal without a modeling gate
+always_reconcile →  reconcile every material modeling disagreement
+selective      →  challenge only calibrated disagreements; abstain otherwise
 empirical reference →  post-hoc training-only CV across all supported families
 ```
 
@@ -285,7 +288,7 @@ establish target/task
   → build training-only profile
   → agent_initial
   → deterministic recommendation
-  → compare / reconcile
+  → decide agree / challenge / abstain; reconcile only when challenged
   → deterministic validation gate
   → model training
 ```
@@ -304,6 +307,9 @@ The default local suite needs no network download:
 ```powershell
 # Small offline smoke test
 python -m evaluation.run --offline --case wine --repetitions 1 --output evaluation_results/live_smoke
+
+# Explicit gate modes: llm_only, always_reconcile, or selective (default)
+python -m evaluation.run --offline --gate-mode selective --case wine --repetitions 1 --output evaluation_results/selective_smoke
 
 # Main live study: 10 independent OpenAI responses per case
 python -m evaluation.run --live --repetitions 10 --output evaluation_results/live_main
@@ -329,6 +335,8 @@ The primary live denominator is `agent_source == "openai"`. The summary separate
 The empirical reference ranks all four supported families using identical training-only CV folds whenever possible. Classification retains macro F1, balanced accuracy, and accuracy; regression retains RMSE, MAE, and R². The ranking is frozen before either method is scored on the untouched holdout. It is a benchmark under this candidate set and CV design, not an oracle or universal optimum.
 
 For each comparable trial, normalized regret is larger-is-worse: classification regret is `max(0, best_macro_f1 - selected_macro_f1)`; regression regret is `max(0, selected_rmse - best_rmse) / max(abs(best_rmse), 1e-12)`. A gate outcome is `improved`, `worsened`, or `tie` when gated regret differs from initial regret by more than the configured tolerance (`0.02` by default); otherwise it is a tie. Paired CV improvement is `gated_macro_f1 - initial_macro_f1` for classification and `initial_rmse - gated_rmse` for regression, so positive always means gating helped. The summary reports mean, median, standard deviation, counts, method distributions, modal-method frequency, pairwise consistency, reference-match rates, reconciliation sides, and dataset-level breakdowns.
+
+Selective runs additionally report disagreement count, challenge and abstention rates, conditional intervention precision, mean challenge regret delta, abstained agent-better cases, catastrophic-regret rate and prevention, and potentially unnecessary interventions. The raw deterministic score margin is retained as a heuristic feature; it is never treated as a probability or empirical performance estimate.
 
 “Potentially unnecessary intervention” is intentionally cautious: the initial plan was valid, the agent and deterministic methods disagreed, the final method changed, and the initial method was within the task-specific reference tolerance. It does not prove that the gate was universally wrong. Holdout results are retained as a descriptive external check, not used to label the gate outcome.
 

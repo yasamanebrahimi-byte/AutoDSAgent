@@ -1,0 +1,40 @@
+# Frozen Deterministic Policy Final Evaluation
+
+- Evaluation role: `final_evaluation`
+- Frozen policy version: `4`
+- Benchmark suite: `2`
+- Unique datasets: **2**
+- Split seeds: `[42]`
+- Git commit: `4f9fed67a0a31743b8f84f1d60ff34f9bb324e65`
+
+## Frozen evaluation protocol
+
+Only final-evaluation cases are accepted. Diagnostics and empirical-reference CV use each case's training partition; the holdout is scored after the policy decision and cannot modify policy parameters.
+
+## Policy quality metrics
+
+- Mean dataset-level normalized regret: `0.007508680990055638`
+- Median dataset-level normalized regret: `0.007508680990055638`
+- Empirical-reference match rate: `0.0`
+- Catastrophic-regret rate: `0.0`
+- Top-2 compatibility success: `0.0`
+- Family-selection distribution: `{"regularized_linear": {"count": 2, "rate": 1.0}}`
+
+## Per-dataset final results
+
+| Dataset | Seeds | Mean regret | Catastrophic rate | Top-2 rate | Selected families |
+|---|---:|---:|---:|---:|---|
+| `digits_subset` | 1 | 0.008039459708091501 | 0.0 | 0.0 | regularized_linear |
+| `wine` | 1 | 0.006977902272019776 | 0.0 | 0.0 | regularized_linear |
+
+## Final holdout metrics
+
+- `digits_subset`: `{'accuracy': 0.9666666666666667, 'balanced_accuracy': 0.9666666666666666, 'macro_f1': 0.9664606667702642, 'weighted_f1': 0.9664606667702642}`
+- `wine`: `{'accuracy': 0.9722222222222222, 'balanced_accuracy': 0.9666666666666667, 'macro_f1': 0.9709618874773139, 'weighted_f1': 0.9719701552732407}`
+
+## Largest policy failure cases
+
+- `digits_subset` seed `42`: deterministic `regularized_linear`, empirical best `tree_ensemble`, regret `0.008039459708091501`.
+- `wine` seed `42`: deterministic `regularized_linear`, empirical best `tree_ensemble`, regret `0.006977902272019776`.
+
+Final benchmark results are descriptive evidence for the frozen policy. They are not used to tune or rewrite the policy version evaluated here.

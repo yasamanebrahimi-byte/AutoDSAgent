@@ -189,6 +189,24 @@ class SoftChallengeArtifact(StrictModel):
     reconciliation_status: str = "not_invoked"
     reconciliation_method_source: Optional[str] = None
     reconciliation_preprocessing_source: Optional[str] = None
+    # ``status`` retains the legacy disagreement/agreement projection.  The
+    # explicit decision fields below are authoritative for selective policy
+    # behavior and distinguish an abstention from an agreement.
+    decision: Literal["agree", "challenge", "abstain"] = "agree"
+    status_detail: Literal["agreement", "challenged", "abstained", "invalid", "unavailable"] = "agreement"
+    decision_reason: Optional[str] = None
+    policy_version: str = "v1"
+    calibration_artifact_version: Optional[str] = None
+    calibration_regime: Optional[str] = None
+    calibration_support: int = Field(default=0, ge=0)
+    empirical_reliability: Optional[float] = Field(default=None, ge=0, le=1)
+    challenge_win_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    challenge_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    mean_regret_delta: Optional[float] = None
+    catastrophic_regret_prevention_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    catastrophic_regret_support: int = Field(default=0, ge=0)
+    score_margin: Optional[float] = Field(default=None, ge=0)
+    training_row_count: Optional[int] = Field(default=None, ge=0)
     scores_are_probabilities: StrictBool = False
     scores_are_cross_validation_results: StrictBool = False
     scores_are_empirical_performance_estimates: StrictBool = False
@@ -243,6 +261,9 @@ class DeterministicDiagnostics(StrictModel):
     """Compact, training-only facts used by the deterministic policy."""
 
     rows: int = Field(ge=0)
+    # Explicit alias for runtime/calibration consumers.  ``rows`` remains for
+    # compatibility with existing artifacts and tests.
+    training_row_count: Optional[int] = Field(default=None, ge=0)
     usable_features: int = Field(ge=0)
     excluded_features: int = Field(ge=0)
     excluded_feature_types: dict[str, int] = Field(default_factory=dict)

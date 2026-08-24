@@ -29,11 +29,17 @@ from evaluation.benchmarks import (
 )
 from evaluation.empirical_reference import evaluate_empirical_reference, evaluate_holdout_plan
 from evaluation.metrics import normalized_regret
+from app.soft_challenge import (
+    SOFT_CHALLENGE_CALIBRATION_SCHEMA_VERSION,
+    SoftChallengePolicy,
+    calibration_regime_key,
+)
 
 
 CALIBRATION_SCHEMA_VERSION = "1"
 DEFAULT_SPLIT_SEEDS: tuple[int, ...] = (42, 123, 2027)
 CATASTROPHIC_REGRET_THRESHOLD = 0.10
+SOFT_CHALLENGE_OUTCOME_TOLERANCE = 0.02
 PROMOTION_MIN_REGRET_IMPROVEMENT = 0.005
 PROMOTION_MIN_CATASTROPHIC_IMPROVEMENT = 0.02
 POLICY_SELECTION_RULE = (
@@ -183,6 +189,24 @@ def _metric_value(record: dict[str, Any], field: str) -> float | None:
     return float(value) if value is not None else None
 
 
+def _development_agent_method(training_profile: dict[str, Any], target_column: str) -> str:
+    """Use the existing offline modeling baseline as a fixed development proxy.
+
+    Calibration must be reproducible without a live LLM.  The proxy mirrors the
+    repository's offline modeling fallback and is explicitly labeled in the
+    artifact; callers can also build calibration from real evaluation records.
+    """
+
+    features = [
+        record
+        for record in training_profile.get("column_details", [])
+        if record.get("name") != target_column
+    ]
+    return "tree_ensemble" if any(
+        record.get("semantic_type") in {"categorical", "boolean"} for record in features
+    ) else "regularized_linear"
+
+
 def _evaluate_case_seed(
     case: BenchmarkCase,
     candidate: PolicyCandidate,
@@ -236,6 +260,30 @@ def _evaluate_case_seed(
         else None
     )
     regret = normalized_regret(case.expected_task_type, best_score, selected_score)
+    agent_method = _development_agent_method(training_profile, case.target_column)
+    agent_result = reference.get("candidate_metrics", {}).get(agent_method, {})
+    agent_score = (
+        agent_result.get("primary_mean")
+        if agent_result.get("status") == "evaluated"
+        else None
+    )
+    agent_regret = normalized_regret(case.expected_task_type, best_score, agent_score)
+    method_disagreement = agent_method != selected_method
+    regret_delta = (
+        float(agent_regret - regret)
+        if method_disagreement and agent_regret is not None and regret is not None
+        else None
+    )
+    if regret_delta is None:
+        challenge_outcome = "not_comparable"
+    elif regret_delta > SOFT_CHALLENGE_OUTCOME_TOLERANCE:
+        challenge_outcome = "improved"
+    elif regret_delta < -SOFT_CHALLENGE_OUTCOME_TOLERANCE:
+        challenge_outcome = "worsened"
+    else:
+        challenge_outcome = "tie"
+    agent_catastrophic = bool(agent_regret is not None and agent_regret >= CATASTROPHIC_REGRET_THRESHOLD)
+    deterministic_catastrophic = bool(regret is not None and regret >= CATASTROPHIC_REGRET_THRESHOLD)
     empirical_ranking = list(reference.get("ranking", []))
     deterministic_ranking = [
         method for method in recommendation.ranked_methods if method in empirical_ranking
@@ -256,6 +304,10 @@ def _evaluate_case_seed(
         if recommendation.diagnostics is not None
         else None,
         "deterministic_selected_method": selected_method,
+        "deterministic_confidence": recommendation.confidence,
+        "deterministic_score_margin": recommendation.score_margin,
+        "agent_initial_method": agent_method,
+        "method_disagreement": method_disagreement,
         "deterministic_ranking": deterministic_ranking,
         "deterministic_scores": recommendation.method_scores,
         "policy_score_contributions": {
@@ -268,6 +320,12 @@ def _evaluate_case_seed(
         "best_primary_mean": best_score,
         "selected_primary_mean": selected_score,
         "normalized_regret": regret,
+        "agent_normalized_regret": agent_regret,
+        "challenge_regret_delta": regret_delta,
+        "challenge_outcome": challenge_outcome,
+        "agent_catastrophic_regret": agent_catastrophic,
+        "deterministic_catastrophic_regret": deterministic_catastrophic,
+        "catastrophic_regret_prevented": bool(agent_catastrophic and not deterministic_catastrophic),
         "exact_reference_match": bool(selected_method == reference.get("best_method"))
         if reference.get("best_method") is not None
         else False,
@@ -527,6 +585,112 @@ def _sensitivity_rows(aggregates: dict[str, dict[str, Any]], candidates: Sequenc
     ]
 
 
+def _soft_calibration_keys(
+    regime_key: str,
+) -> list[str]:
+    task, dimensionality, complexity, margin = regime_key.split("/", 3)
+    return [
+        regime_key,
+        f"{task}/{dimensionality}/all/{margin}",
+        f"{task}/all/all/{margin}",
+        f"{task}/all/all/all",
+        "all/all/all/all",
+    ]
+
+
+def build_soft_challenge_calibration(
+    records: Sequence[dict[str, Any]],
+    *,
+    policy: SoftChallengePolicy | None = None,
+    artifact_version: str = "v1",
+) -> dict[str, Any]:
+    """Build regime reliability from development-only paired outcomes.
+
+    A positive regret delta means the deterministic choice reduced regret versus
+    the initial agent method.  Ties are retained in support but excluded from the
+    win/loss denominator, making the reported success rate transparent.
+    """
+
+    policy = policy or SoftChallengePolicy()
+    supplied = list(records)
+    final_records = [
+        record for record in supplied
+        if record.get("benchmark_role") == BenchmarkRole.FINAL_EVALUATION.value
+        or record.get("evaluation_role") == BenchmarkRole.FINAL_EVALUATION.value
+    ]
+    if final_records:
+        raise ValueError(
+            "Soft-challenge calibration accepts development records only; received final-evaluation records."
+        )
+    eligible = [
+        record for record in supplied
+        if record.get("method_disagreement") is True
+        and record.get("challenge_regret_delta") is not None
+        and record.get("diagnostics") is not None
+    ]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in eligible:
+        regime = calibration_regime_key(
+            task_type=str(record.get("task_type")),
+            diagnostics=record.get("diagnostics"),
+            score_margin=record.get("deterministic_score_margin"),
+            policy=policy,
+        )
+        for key in _soft_calibration_keys(regime):
+            grouped[key].append(record)
+
+    regimes: dict[str, dict[str, Any]] = {}
+    for key, group in sorted(grouped.items()):
+        wins = sum(record.get("challenge_outcome") == "improved" for record in group)
+        losses = sum(record.get("challenge_outcome") == "worsened" for record in group)
+        ties = sum(record.get("challenge_outcome") == "tie" for record in group)
+        non_tied = wins + losses
+        catastrophic_support = sum(bool(record.get("agent_catastrophic_regret")) for record in group)
+        prevented = sum(bool(record.get("catastrophic_regret_prevented")) for record in group)
+        regret_deltas = [
+            float(record["challenge_regret_delta"])
+            for record in group
+            if record.get("challenge_regret_delta") is not None
+        ]
+        regimes[key] = {
+            "regime": key,
+            "support": len(group),
+            "challenge_win_count": wins,
+            "challenge_loss_count": losses,
+            "challenge_tie_count": ties,
+            "challenge_win_rate": float(wins / non_tied) if non_tied else None,
+            "challenge_loss_rate": float(losses / non_tied) if non_tied else None,
+            "empirical_reliability": float(wins / non_tied) if non_tied else None,
+            "mean_regret_delta": float(sum(regret_deltas) / len(regret_deltas)) if regret_deltas else None,
+            "catastrophic_regret_support": catastrophic_support,
+            "catastrophic_regret_prevented_count": prevented,
+            "catastrophic_regret_prevention_rate": (
+                float(prevented / catastrophic_support) if catastrophic_support else None
+            ),
+            "dataset_count": len({str(record.get("dataset_id", record.get("benchmark_case"))) for record in group}),
+            "task_types": sorted({str(record.get("task_type")) for record in group}),
+        }
+    return {
+        "calibration_schema_version": SOFT_CHALLENGE_CALIBRATION_SCHEMA_VERSION,
+        "calibration_artifact_version": f"{SOFT_CHALLENGE_CALIBRATION_SCHEMA_VERSION}-{artifact_version}",
+        "source_role": BenchmarkRole.POLICY_DEVELOPMENT.value,
+        "agent_source": "existing_offline_modeling_fallback_proxy",
+        "outcome_tolerance": SOFT_CHALLENGE_OUTCOME_TOLERANCE,
+        "policy": {
+            "version": policy.version,
+            "min_calibration_support": policy.min_calibration_support,
+            "medium_confidence_min_reliability": policy.medium_confidence_min_reliability,
+            "high_confidence_min_reliability": policy.high_confidence_min_reliability,
+            "catastrophic_regret_threshold": policy.catastrophic_regret_threshold,
+            "catastrophic_prevention_min_rate": policy.catastrophic_prevention_min_rate,
+            "min_catastrophic_support": policy.min_catastrophic_support,
+        },
+        "record_count": len(eligible),
+        "dataset_ids": sorted({str(record.get("dataset_id", record.get("benchmark_case"))) for record in eligible}),
+        "regimes": regimes,
+    }
+
+
 def build_calibration_artifact(
     cases: Sequence[BenchmarkCase],
     candidates: Sequence[PolicyCandidate],
@@ -541,6 +705,7 @@ def build_calibration_artifact(
     selected_name = str(selection["selected_candidate"])
     current_records = [record for record in records if record["policy_candidate"] == "current"]
     selected_records = [record for record in records if record["policy_candidate"] == selected_name]
+    soft_calibration = build_soft_challenge_calibration(current_records)
     return {
         "calibration_schema_version": CALIBRATION_SCHEMA_VERSION,
         "evaluation_role": BenchmarkRole.POLICY_DEVELOPMENT.value,
@@ -573,6 +738,7 @@ def build_calibration_artifact(
         "sensitivity_analysis": _sensitivity_rows(aggregates, candidates),
         "failure_cases": _failure_cases(selected_records),
         "current_policy_failure_cases": _failure_cases(current_records),
+        "soft_challenge_calibration": soft_calibration,
         "raw_records": list(records),
     }
 
@@ -669,6 +835,27 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
             "- Compatibility scores remain interpretable compatibility points, not probabilities of empirical optimality.",
         ]
     )
+    soft = artifact.get("soft_challenge_calibration") or {}
+    lines.extend(
+        [
+            "",
+            "## Selective soft-challenge calibration",
+            "",
+            f"- Calibration artifact: `{soft.get('calibration_artifact_version', 'unavailable')}`",
+            f"- Development records with a model-family disagreement: `{soft.get('record_count', 0)}`",
+            "- Reliability is the deterministic challenger win rate among non-tied development disagreements; ties remain in support but are excluded from that denominator.",
+            "",
+            "| Regime | Support | Challenger wins | Agent wins | Ties | Win rate | Mean regret delta | Catastrophic prevention |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for key, row in sorted((soft.get("regimes") or {}).items()):
+        lines.append(
+            f"| `{key}` | {row.get('support', 0)} | {row.get('challenge_win_count', 0)} | "
+            f"{row.get('challenge_loss_count', 0)} | {row.get('challenge_tie_count', 0)} | "
+            f"{row.get('challenge_win_rate')} | {row.get('mean_regret_delta')} | "
+            f"{row.get('catastrophic_regret_prevention_rate')} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -678,7 +865,12 @@ def _write_artifacts(output_dir: Path, artifact: dict[str, Any]) -> dict[str, st
     markdown_path = output_dir / "policy_calibration_report.md"
     json_path.write_text(json.dumps(artifact, indent=2, sort_keys=True, default=str), encoding="utf-8")
     markdown_path.write_text(render_calibration_report(artifact), encoding="utf-8")
-    return {"json": str(json_path), "markdown": str(markdown_path)}
+    soft_path = output_dir / "soft_challenge_calibration.json"
+    soft_path.write_text(
+        json.dumps(artifact["soft_challenge_calibration"], indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    return {"json": str(json_path), "markdown": str(markdown_path), "soft_challenge_json": str(soft_path)}
 
 
 def run_policy_calibration(

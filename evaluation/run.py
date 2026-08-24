@@ -16,6 +16,12 @@ def main() -> None:
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model", default="gpt-4.1-mini")
+    parser.add_argument(
+        "--gate-mode",
+        choices=("llm_only", "always_reconcile", "selective"),
+        default="selective",
+        help="Compare the initial agent, legacy always-reconcile gate, or selective intervention gate.",
+    )
     parser.add_argument("--case", action="append", dest="cases", help="Benchmark case name; repeatable.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use the documented offline fallback.")
@@ -35,6 +41,7 @@ def main() -> None:
         offline=args.offline,
         include_perturbations=args.include_perturbations,
         case_names=args.cases,
+        gate_mode=args.gate_mode,
         resume=args.resume,
     )
     print(json.dumps(result, indent=2, default=str))

@@ -11,6 +11,7 @@ DEFAULT_THRESHOLDS = {
     "classification_regret": 0.01,
     "regression_normalized_regret": 0.02,
     "paired_normalized_regret": 0.02,
+    "catastrophic_regret_threshold": 0.10,
 }
 
 
@@ -197,6 +198,27 @@ def _soft_status(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _soft_decision(record: dict[str, Any]) -> str | None:
+    artifact = record.get("soft_challenge") or {}
+    decision = artifact.get("decision")
+    if decision in {"agree", "challenge", "abstain"}:
+        return str(decision)
+    status_detail = artifact.get("status_detail")
+    if status_detail == "challenged":
+        return "challenge"
+    if status_detail == "abstained":
+        return "abstain"
+    if status_detail == "agreement":
+        return "agree"
+    if record.get("reconciliation_invoked") is True and _soft_status(record) == "disagreement":
+        return "challenge"
+    if _soft_status(record) == "disagreement":
+        return "abstain"
+    if _soft_status(record) == "agreement":
+        return "agree"
+    return None
+
+
 def _soft_challenges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         record
@@ -210,8 +232,12 @@ def _soft_challenges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _soft_decision_records(records: list[dict[str, Any]], decision: str) -> list[dict[str, Any]]:
+    return [record for record in _soft_challenges(records) if _soft_decision(record) == decision]
+
+
 def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dict[str, int]:
-    challenges = _soft_challenges(records)
+    challenges = _soft_decision_records(records, "challenge")
     outcomes = Counter(_outcome(record, tolerance) for record in challenges)
     return {
         "improved": outcomes.get("improved", 0),
@@ -271,6 +297,8 @@ def summarize_trials(
         initial_valid_records = [record for record in valid_records if record.get("agent_initial_valid") is True]
         final_valid_records = [record for record in valid_records if record.get("final_valid") is True]
         soft_challenge_records = _soft_challenges(valid_records)
+        challenge_records = _soft_decision_records(valid_records, "challenge")
+        abstained_records = _soft_decision_records(valid_records, "abstain")
         agent_matches, agent_denominator = method_match(valid_records, "agent_initial_method")
         gated_matches, gated_denominator = method_match(valid_records, "final_method")
         paired = [
@@ -294,6 +322,44 @@ def summarize_trials(
             and record.get("agent_normalized_regret") is not None
             and approximate_match(record.get("task_type", "classification"), record["agent_normalized_regret"], configured)
         ]
+        challenge_outcomes = [
+            _outcome(record, float(configured["paired_normalized_regret"]))
+            for record in challenge_records
+            if record.get("agent_normalized_regret") is not None
+            and record.get("gated_normalized_regret") is not None
+        ]
+        challenge_improved = challenge_outcomes.count("improved")
+        challenge_worsened = challenge_outcomes.count("worsened")
+        challenge_neutral = challenge_outcomes.count("tie")
+        abstained_comparable = [
+            record for record in abstained_records
+            if record.get("agent_normalized_regret") is not None
+            and record.get("deterministic_normalized_regret") is not None
+        ]
+        abstained_agent_better = sum(
+            float(record["agent_normalized_regret"]) < float(record["deterministic_normalized_regret"]) - float(configured["paired_normalized_regret"])
+            for record in abstained_comparable
+        )
+        abstained_deterministic_better = sum(
+            float(record["deterministic_normalized_regret"]) < float(record["agent_normalized_regret"]) - float(configured["paired_normalized_regret"])
+            for record in abstained_comparable
+        )
+        challenge_deltas = [
+            float(record["challenge_regret_delta"])
+            for record in challenge_records
+            if record.get("challenge_regret_delta") is not None
+        ]
+        catastrophic_agent = [
+            record for record in valid_records
+            if record.get("agent_normalized_regret") is not None
+            and float(record["agent_normalized_regret"]) >= float(configured["catastrophic_regret_threshold"])
+        ]
+        catastrophic_challenges = [record for record in challenge_records if record in catastrophic_agent]
+        catastrophic_prevented = sum(
+            record.get("gated_normalized_regret") is not None
+            and float(record["gated_normalized_regret"]) < float(configured["catastrophic_regret_threshold"])
+            for record in catastrophic_challenges
+        )
         return {
             "trial_count": len(records),
             "completed_trial_count": len(valid_records),
@@ -337,6 +403,11 @@ def summarize_trials(
                 sum(record.get("deterministic_recommendation") is not None for record in valid_records),
             ),
             "soft_challenge_count": len(soft_challenge_records),
+            "total_disagreements": len(soft_challenge_records),
+            "challenges": len(challenge_records),
+            "abstentions": len(abstained_records),
+            "challenge_rate": _rate(len(challenge_records), len(soft_challenge_records)),
+            "abstention_rate": _rate(len(abstained_records), len(soft_challenge_records)),
             "soft_challenge_reconciliation_invocation_count": sum(
                 bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
             ),
@@ -369,6 +440,21 @@ def summarize_trials(
             "soft_challenge_neutral_count": _soft_outcome_counts(
                 valid_records, float(configured["paired_normalized_regret"])
             )["neutral"],
+            "challenge_improved_count": challenge_improved,
+            "challenge_worsened_count": challenge_worsened,
+            "challenge_neutral_count": challenge_neutral,
+            "intervention_precision": _rate(challenge_improved, challenge_improved + challenge_worsened),
+            "mean_performance_delta_conditional_on_challenge": _mean(challenge_deltas),
+            "abstained_agent_better_count": abstained_agent_better,
+            "abstained_deterministic_better_count": abstained_deterministic_better,
+            "abstained_comparable_count": len(abstained_comparable),
+            "catastrophic_regret_rate": _rate(len(catastrophic_agent), len(valid_records)),
+            "catastrophic_regret_prevented_by_challenge_count": catastrophic_prevented,
+            "catastrophic_regret_prevented_by_challenge_rate": _rate(
+                catastrophic_prevented, len(catastrophic_challenges)
+            ),
+            "unnecessary_intervention_count": challenge_worsened,
+            "unnecessary_intervention_rate": _rate(challenge_worsened, len(challenge_records)),
             "unsafe_plan_interception_count": sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
             "unsafe_plan_interception_rate": _rate(
                 sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
@@ -474,6 +560,7 @@ def summarize_trials(
         task: aggregate_for([record for record in completed if record.get("task_type") == task])
         for task in ("classification", "regression")
     }
+    overall_selective = aggregate_for(completed)
     source_counts = {
         source: sum(record.get("agent_source") == source for record in trials)
         for source in sorted({str(record.get("agent_source")) for record in trials})
@@ -526,6 +613,11 @@ def summarize_trials(
             len(deterministic_available),
         ),
         "soft_challenge_count": len(soft_challenge_records),
+        "total_disagreements": overall_selective["total_disagreements"],
+        "challenges": overall_selective["challenges"],
+        "abstentions": overall_selective["abstentions"],
+        "challenge_rate": overall_selective["challenge_rate"],
+        "abstention_rate": overall_selective["abstention_rate"],
         "soft_challenge_reconciliation_invocation_count": sum(
             bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
         ),
@@ -558,6 +650,25 @@ def summarize_trials(
         "soft_challenge_neutral_count": _soft_outcome_counts(
             completed, float(configured["paired_normalized_regret"])
         )["neutral"],
+        "challenge_improved_count": overall_selective["challenge_improved_count"],
+        "challenge_worsened_count": overall_selective["challenge_worsened_count"],
+        "challenge_neutral_count": overall_selective["challenge_neutral_count"],
+        "intervention_precision": overall_selective["intervention_precision"],
+        "mean_performance_delta_conditional_on_challenge": overall_selective[
+            "mean_performance_delta_conditional_on_challenge"
+        ],
+        "abstained_agent_better_count": overall_selective["abstained_agent_better_count"],
+        "abstained_deterministic_better_count": overall_selective["abstained_deterministic_better_count"],
+        "abstained_comparable_count": overall_selective["abstained_comparable_count"],
+        "catastrophic_regret_rate": overall_selective["catastrophic_regret_rate"],
+        "catastrophic_regret_prevented_by_challenge_count": overall_selective[
+            "catastrophic_regret_prevented_by_challenge_count"
+        ],
+        "catastrophic_regret_prevented_by_challenge_rate": overall_selective[
+            "catastrophic_regret_prevented_by_challenge_rate"
+        ],
+        "unnecessary_intervention_count": overall_selective["unnecessary_intervention_count"],
+        "unnecessary_intervention_rate": overall_selective["unnecessary_intervention_rate"],
         "unsafe_plan_interception_count": len(intercepted),
         "unsafe_plan_interception_rate": _rate(len(intercepted), len(initial_invalid)),
         "validation_interception_count": len(intentionally_unsafe_intercepted),

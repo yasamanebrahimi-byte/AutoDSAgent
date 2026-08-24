@@ -478,6 +478,7 @@ def compute_deterministic_diagnostics(
     effective_ratio = rows / max(estimated_one_hot, 1)
     return DeterministicDiagnostics(
         rows=rows,
+        training_row_count=rows,
         usable_features=usable,
         excluded_features=excluded,
         excluded_feature_types=excluded_types,

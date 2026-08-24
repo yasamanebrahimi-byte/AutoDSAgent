@@ -210,9 +210,13 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
             run for the proposals; treat those checks as authoritative. In the normal
             soft-challenge case, both proposals have passed hard validation and the remaining
             question is advisory model-family compatibility. The deterministic recommendation
-            is advisory, and its numerical compatibility scores are not probabilities, not
-            cross-validation results, and not empirical performance estimates. Disagreement
-            does not mean the initial agent is wrong. Preserve the initial plan unless the
+            is advisory, and its numerical compatibility scores are heuristic evidence: they are not probabilities, not
+            cross-validation results, and not empirical performance estimates. A versioned
+            empirical calibration may justify why challenging in a similar training-only
+            regime is historically useful, but it does not estimate the performance of either
+            specific model on this dataset. This challenge passed the threshold for
+            reconsideration; it does not prove that the deterministic recommendation is correct.
+            Disagreement does not mean the initial agent is wrong. Preserve the initial plan unless the
             actual training-only evidence identifies a convincing methodological reason to
             prefer the alternative. Compare the evidence for both proposals and choose only
             one of the two proposed methods; never invent a third model family. If a proposal
@@ -256,8 +260,11 @@ coerce_numeric_strings.""",
             Both proposals have already passed hard deterministic safety/executability
             validation when this is a soft challenge. The deterministic recommendation is
             an advisory model-family compatibility assessment. Its numerical compatibility
-            scores are not probabilities, not cross-validation results, and not empirical
-            performance estimates. Disagreement does not mean the initial agent is wrong.
+            scores are heuristic evidence, not probabilities, cross-validation results, or
+            empirical performance estimates. The selective policy has only established that
+            challenging in a similar training-only regime has enough historical support; it
+            has not proved this deterministic recommendation is correct or predicted this
+            dataset's performance. Disagreement does not mean the initial agent is wrong.
             Preserve the initial plan unless the actual training-only evidence identifies a
             convincing methodological reason to prefer the alternative. Compare the evidence
             for both proposals. Use diagnostics and score-contribution evidence as auditable

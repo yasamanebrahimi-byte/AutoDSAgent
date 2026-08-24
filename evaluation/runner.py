@@ -21,6 +21,7 @@ from app.pipeline import (
     _fallback_resolution,
     _validate_before_training,
 )
+from app.soft_challenge import SOFT_CHALLENGE_POLICY_VERSION, load_calibration_artifact
 from app.preprocessing import compare_preprocessing_plans
 from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation, PreprocessingContract
 from app.validation import (
@@ -58,12 +59,15 @@ class EvaluationConfig:
     thresholds: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
     prompt_schema_version: str = PROMPT_SCHEMA_VERSION
     repository_commit: str | None = None
+    gate_mode: str = "selective"
 
     def __post_init__(self) -> None:
         if self.repetitions < 1:
             raise ValueError("repetitions must be at least one")
         if not 0.10 <= self.test_size <= 0.50:
             raise ValueError("test_size must be between 0.10 and 0.50")
+        if self.gate_mode not in {"llm_only", "always_reconcile", "selective"}:
+            raise ValueError("gate_mode must be 'llm_only', 'always_reconcile', or 'selective'.")
 
 
 class _EvaluationGateAgent:
@@ -375,6 +379,7 @@ def _run_trial(
     }
     initial_input_artifact = {
         "evaluation_mode": "modeling_gate",
+        "gate_mode": config.gate_mode,
         "question": case.question,
         "benchmark_target_constraint": case.target_column,
         "benchmark_task_constraint": case.expected_task_type,
@@ -457,7 +462,13 @@ def _run_trial(
         reconciliation_invoked = agreement_status == "disagreement" and not (
             target_disagreement or task_disagreement
         )
-        if target_disagreement or task_disagreement:
+        if config.gate_mode == "llm_only":
+            agreement_status = "llm_only"
+            final_fields = _plan_fields(plan)
+            final_validation = initial_validation.as_dict()
+            final_valid = initial_validation.status == "passed"
+            training_allowed = final_valid
+        elif target_disagreement or task_disagreement:
             gate_error = (
                 "[established_target_task_is_immutable] The modeling agent changed the established "
                 "target/task after the supervised holdout was frozen."
@@ -491,6 +502,7 @@ def _run_trial(
                     row_positions=list(range(len(frame))),
                     established_target=case.target_column,
                     established_task=case.expected_task_type,
+                    soft_challenge_mode=config.gate_mode,
                 )
                 # The gate may also reconcile a hard-invalid initial proposal
                 # whose method-family comparison looks like agreement.  The
@@ -584,6 +596,9 @@ def _run_trial(
         _family_score(reference, plan.recommended_method) if initial_validation.status == "passed" else None
     )
     gated_family_score = _family_score(reference, final_fields["method"]) if final_valid else None
+    deterministic_family_score = (
+        _family_score(reference, deterministic.recommended_method) if deterministic is not None else None
+    )
     agent_plan_cv = (
         evaluate_plan_cv(
             training_frame,
@@ -638,6 +653,11 @@ def _run_trial(
     )
     agent_regret = regret(case.expected_task_type, best_score, agent_family_score)
     gated_regret = regret(case.expected_task_type, best_score, gated_family_score)
+    deterministic_normalized_regret = normalized_regret(
+        case.expected_task_type,
+        best_score,
+        deterministic_family_score,
+    )
     paired_cv_improvement = None
     if agent_family_score is not None and gated_family_score is not None:
         paired_cv_improvement = (
@@ -666,6 +686,7 @@ def _run_trial(
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
         "evaluation_mode": "modeling_gate",
+        "gate_mode": config.gate_mode,
         "trial": trial_number,
         "trial_id": context["trial_id"],
         "trial_status": "completed",
@@ -702,6 +723,8 @@ def _run_trial(
         "deterministic_task": deterministic.task_type if deterministic else None,
         "deterministic_method": deterministic.recommended_method if deterministic else None,
         "deterministic_policy_version": deterministic.policy_version if deterministic else None,
+        "deterministic_confidence": deterministic.confidence if deterministic else None,
+        "deterministic_score_margin": deterministic.score_margin if deterministic else None,
         "deterministic_preprocessing": deterministic.preprocessing.model_dump(mode="json") if deterministic else None,
         "deterministic_failure": deterministic_failure,
         "agreement_status": agreement_status,
@@ -714,6 +737,10 @@ def _run_trial(
             (gate_result or {}).get("soft_challenge", {}).get("status")
             if gate_result
             else "unavailable"
+        ),
+        "soft_challenge_decision": (
+            (gate_result or {}).get("soft_challenge_decision")
+            or (gate_result or {}).get("soft_challenge", {}).get("decision")
         ),
         "target_disagreement": target_disagreement,
         "task_disagreement": task_disagreement,
@@ -745,6 +772,8 @@ def _run_trial(
             "deterministic_confidence": deterministic.confidence if deterministic else None,
             "method_disagreement": method_disagreement,
             "preprocessing_disagreement": preprocessing_disagreement,
+            "decision": "agree" if not method_disagreement else "abstain",
+            "status_detail": "agreement" if not method_disagreement else "abstained",
             "reconciliation_invoked": False,
             "reconciliation_status": "not_invoked",
         },
@@ -789,6 +818,14 @@ def _run_trial(
         "gated_regret": gated_regret,
         "agent_normalized_regret": normalized_regret(case.expected_task_type, best_score, agent_family_score),
         "gated_normalized_regret": normalized_regret(case.expected_task_type, best_score, gated_family_score),
+        "deterministic_normalized_regret": deterministic_normalized_regret,
+        "challenge_regret_delta": (
+            normalized_regret(case.expected_task_type, best_score, agent_family_score)
+            - deterministic_normalized_regret
+            if normalized_regret(case.expected_task_type, best_score, agent_family_score) is not None
+            and deterministic_normalized_regret is not None
+            else None
+        ),
         "paired_cv_improvement": paired_cv_improvement,
         "gate_outcome": gate_outcome,
         "gate_outcome_tolerance": tolerance,
@@ -898,6 +935,7 @@ def _failed_trial_record(
         "task_type": case.expected_task_type,
         "trial": trial_number,
         "trial_status": "failed",
+        "gate_mode": config.gate_mode,
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": split_seed,
         "split_contract": split.as_dict(),
@@ -955,6 +993,10 @@ def run_evaluation(
     case_names: Sequence[str] | None = None,
     agent_plan_factory: AgentPlanFactory | None = None,
     reconciliation_factory: ReconciliationFactory | None = None,
+    # Preserve the historical public-harness default. Research runs should
+    # pass gate_mode="selective" explicitly; the production pipeline defaults
+    # to selective intervention.
+    gate_mode: str = "always_reconcile",
     resume: bool = False,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
@@ -968,6 +1010,7 @@ def run_evaluation(
         include_perturbations=include_perturbations,
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
         repository_commit=_repository_commit(),
+        gate_mode=gate_mode,
     )
     selected_cases = list(cases or default_benchmark_cases())
     if case_names:
@@ -987,8 +1030,18 @@ def run_evaluation(
         "agent_mode": "offline" if config.offline else "live_or_fallback",
         "agent_model_requested": config.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
+        "gate_mode": config.gate_mode,
+        "gate_mode_definitions": {
+            "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
+            "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
+            "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
+        },
         "prompt_schema_version": config.prompt_schema_version,
         "deterministic_policy_version": DeterministicPolicy().version,
+        "soft_challenge_policy_version": SOFT_CHALLENGE_POLICY_VERSION,
+        "soft_challenge_calibration_artifact_version": load_calibration_artifact().get(
+            "calibration_artifact_version"
+        ),
         "generation_settings": {"seed": None, "temperature": None},
         "evaluation_settings": {
             "primary_metrics": {"classification": "macro_f1", "regression": "rmse"},
