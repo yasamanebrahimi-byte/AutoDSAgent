@@ -809,7 +809,6 @@ def _validate_modeling_gate(
 
     if soft_challenge_mode not in {"selective", "always_reconcile", "probe_first"}:
         raise ValueError(f"Unsupported soft_challenge_mode: {soft_challenge_mode!r}")
-    probe_first_mode = soft_challenge_mode == "probe_first"
 
     # The calibrated soft policy remains available as audit metadata, but it
     # no longer gates the production probe.  A valid family disagreement first
