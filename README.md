@@ -13,7 +13,9 @@ The central idea is simple:
 
 This makes the boundary between probabilistic reasoning and reproducible data science visible rather than hiding it behind an autonomous chain.
 
-The agent recommendation can never substitute for a failed deterministic recommendation. If the independent deterministic recommender is unavailable, the run fails closed before model training. A recorded agreement means both independent recommendation paths completed successfully and materially agreed. For post-split modeling disagreements, the default selective policy uses development-only calibration to challenge only sufficiently reliable disagreements and abstains on low-confidence, unsupported, or unreliable cases; hard validation failures still force reconciliation.
+The agent recommendation can never substitute for a failed hard validation. If the independent deterministic recommender is unavailable, the run fails closed before model training. For a valid model-family disagreement, the bounded pairwise empirical probe runs first on the frozen training partition. Only moderate or strong probe evidence permits the blinded reconciler to reconsider the two existing plans; weak, tied, or unavailable evidence preserves the original LLM plan. The historical soft-challenge calibration remains available for evaluation/ablation comparison, but it cannot block the production probe.
+
+The production modeling philosophy is deliberately advisory: hard validation is authoritative for correctness, safety, leakage, preprocessing completeness, and executability; the deterministic model-family recommendation is an independent competing hypothesis; the pairwise probe supplies bounded dataset-specific evidence; and the LLM makes the final choice during blinded reconciliation. Deterministic compatibility scores are auditable heuristics, not predicted accuracy, probabilities, or cross-validation results.
 
 ### Agent roles
 
@@ -112,9 +114,9 @@ The policy uses the same canonical categorical-cardinality and one-hot safety li
 
 The policy can be wrong and is evaluated separately against the evaluation-only empirical CV reference. That reference never enters runtime recommendation or reconciliation, and the holdout is never used for model-family recommendation.
 
-Selective modeling intervention is implemented in `app/soft_challenge.py`. The runtime loads the frozen `app/soft_challenge_calibration.json` artifact, buckets training-only regimes by task, dimensionality, complexity, and raw score margin, then records an explicit `agree`, `challenge`, or `abstain` decision with support, reliability, regret, and catastrophic-prevention evidence. Calibration artifacts are generated offline from policy-development records only; final-evaluation records are rejected by the calibration builder.
+Historical selective modeling intervention is implemented in `app/soft_challenge.py`. The runtime may load the frozen `app/soft_challenge_calibration.json` artifact for audit metadata and evaluation baselines, but its decision cannot block the production probe. Calibration artifacts are generated offline from policy-development records only; final-evaluation records are rejected by the calibration builder.
 
-When that policy returns `challenge` for a hard-valid model-family disagreement, the gate runs the separate runtime pairwise probe in `app/empirical_challenge_probe.py` before blinded reconciliation. Policy `v1` uses at most three stratified folds for classification or seeded K-folds for regression, one canonical estimator configuration per proposed family, and the proposal's validated preprocessing contract inside each fold. It compares only Proposal A and Proposal B, uses frozen training-partition rows, and records fold scores, variability, fold wins, relative advantage, and `tie`/`weak`/`moderate`/`strong` evidence strength. The probe is directional evidence; it cannot select a final model and never reuses `evaluation.empirical_reference` or holdout metrics. The frozen policy thresholds are: tie at relative advantage `0.02` or less (or a difference within half the larger fold standard deviation), moderate at `0.10`, and strong at `0.20` with consistent fold wins and variability support. Probe invocation, completion, winner, fit count, and conditional usefulness are included in evaluation summaries; pass `empirical_probe_enabled=False` to the evaluation harness for the no-probe ablation.
+For every hard-valid model-family disagreement, the production gate runs the separate runtime pairwise probe in `app/empirical_challenge_probe.py` before any soft reconciliation decision. Policy `v1` uses at most three stratified folds for classification or seeded K-folds for regression, one canonical estimator configuration per proposed family, and the proposal's validated preprocessing contract inside each fold. It compares only Proposal A and Proposal B, uses frozen training-partition rows, and records fold scores, variability, fold wins, relative advantage, and `tie`/`weak`/`moderate`/`strong` evidence strength. Unavailable, tied, or weak evidence abstains and preserves the LLM plan; moderate or strong evidence invokes blinded reconciliation. The probe is directional evidence; it cannot select a final model and never reuses `evaluation.empirical_reference` or holdout metrics. The frozen policy thresholds are: tie at relative advantage `0.02` or less (or a difference within half the larger fold standard deviation), moderate at `0.10`, and strong at `0.20` with consistent fold wins and variability support. Probe invocation, completion, winner, fit count, and conditional usefulness are included in evaluation summaries; pass `empirical_probe_enabled=False` to the evaluation harness for the no-probe ablation.
 
 If the deterministic recommender fails, the validation gate remains incomplete and the run stops before training; the agent plan is retained for auditability, but it is never copied into a deterministic recommendation.
 
@@ -143,7 +145,7 @@ The modeling agent and deterministic recommender independently return the typed 
 
 The deterministic validator derives requirements from the observed feature schema, missingness, infinities, cardinality, task, and model family. Some requirements are safety invariants and some are optional preferences. Numeric and categorical missing values require their corresponding imputers; usable categories require a supported encoder with safe unknown handling; linear methods require standard numeric scaling under this project policy; tree ensembles are not forced to scale; boosted trees use bounded ordinal encoding; identifiers, unsupported text, datetimes, and high-cardinality features remain excluded; and oversized one-hot matrices fail closed. No holdout row is used to fit preprocessing.
 
-The gate compares normalized material preprocessing behavior in addition to target, task, and method. Ordering or absent-feature differences are recorded as immaterial. For example, if the agent proposes no imputation but the data contains missing numeric values, the difference is material and reconciliation is required. A reconciliation response must return a complete supported contract and explicitly discuss material preprocessing differences. The selected contract is validated again after structural cleaning; failed invariants stop the run before model fitting regardless of confidence or justification.
+The gate compares normalized material preprocessing behavior in addition to target, task, and method. Ordering or absent-feature differences are recorded as immaterial. If a preprocessing contract is hard-invalid, the authoritative hard-validation correction path remains in force. When both contracts are executable and model families agree, the original LLM contract is retained without soft reconciliation; the selected contract is validated again after structural cleaning, and failed invariants stop the run before model fitting regardless of confidence or justification.
 
 Example:
 
@@ -151,7 +153,7 @@ Example:
 Agent:       numeric_imputation=none, categorical_encoding=one_hot
 Deterministic: numeric_imputation=median, categorical_imputation=most_frequent,
                categorical_encoding=one_hot (missing values observed)
-Gate:        preprocessing disagreement -> reconciliation
+Gate:        hard-invalid contract -> correction; otherwise preserve the LLM contract
 Approved:    median + most_frequent imputation, one_hot(handle_unknown=ignore),
              identifier_handling=exclude, fit_inside_pipeline=true
 Executed:    the approved contract builds the saved ColumnTransformer/Pipeline
@@ -278,7 +280,8 @@ It compares three auditable conditions:
 ```text
 llm_only       →  the independent proposal without a modeling gate
 always_reconcile →  reconcile every material modeling disagreement
-selective      →  challenge only calibrated disagreements; abstain otherwise
+selective      →  historical calibrated selective gate
+probe_first    →  probe every valid family disagreement; reconcile moderate/strong evidence
 empirical reference →  post-hoc training-only CV across all supported families
 ```
 
@@ -292,7 +295,10 @@ establish target/task
   → build training-only profile
   → agent_initial
   → deterministic recommendation
-  → decide agree / challenge / abstain; reconcile only when challenged
+  → hard-validate both proposals
+  → retain the LLM on family agreement
+  → pairwise training-only probe on family disagreement
+  → abstain on unavailable/tie/weak evidence, otherwise blinded A/B reconciliation
   → deterministic validation gate
   → model training
 ```
@@ -312,7 +318,7 @@ The default local suite needs no network download:
 # Small offline smoke test
 python -m evaluation.run --offline --case wine --repetitions 1 --output evaluation_results/live_smoke
 
-# Explicit gate modes: llm_only, always_reconcile, or selective (default)
+# Explicit gate modes: llm_only, always_reconcile, selective, or probe_first
 python -m evaluation.run --offline --gate-mode selective --case wine --repetitions 1 --output evaluation_results/selective_smoke
 
 # Main live study: 10 independent OpenAI responses per case
@@ -376,11 +382,11 @@ python -m evaluation.ablation `
   --require-live
 ```
 
-The default suite is versioned as `modeling-gate-ablation-v1` and includes `llm_only`, `deterministic_only`, `legacy_gate`, `blinded_always_reconcile`, `high_confidence_only`, `selective_calibrated`, `interaction_boundary_aware`, `empirical_probe`, and `full`. Select a subset by repeating `--ablation`; use `--resume` to retry failed/missing trials.
+The default suite is versioned as `modeling-gate-ablation-v1` and includes `llm_only`, `deterministic_only`, `legacy_gate`, `blinded_always_reconcile`, `high_confidence_only`, `selective_calibrated`, `interaction_boundary_aware`, `empirical_probe`, `probe_first`, and `full`. Select a subset by repeating `--ablation`; use `--resume` to retry failed/missing trials. The paired ablation cache reuses the same initial LLM proposal across architecture variants.
 
 An ablation bundle contains `config.json`, `proposal_cache.jsonl`, `empirical_reference_cache.json`, one directory per selected preset (`trials.jsonl`, `summary.json`, `summary.md`, and the per-preset reference artifact), plus `ablation_summary.json` and `ablation_summary.md`. The combined report includes gate-health metrics, dataset- and trial-weighted summaries inherited from the evaluation metrics, paired comparisons, API call counts, probe counts, split/repetition identity, and strict-live integrity counts. No API credential is written to any cache, configuration, trial, or report artifact.
 
-Modeling reconciliation uses the versioned blinded evidence-comparison contract documented in [`docs/reconciliation.md`](docs/reconciliation.md). On a selective `CHALLENGE`, the two proposals are presented symmetrically as Proposal A and Proposal B, with reproducible seeded ordering and source mapping retained only in the evaluation artifact. Use `--reconciliation-mode legacy` for the source-labeled evaluation baseline, `--reconciliation-mode blinded` for the default, and `--order-swap` for paired A/B versus B/A robustness trials.
+Modeling reconciliation uses the versioned blinded evidence-comparison contract documented in [`docs/reconciliation.md`](docs/reconciliation.md). On probe-triggered reconsideration, the two proposals are presented symmetrically as Proposal A and Proposal B, with reproducible seeded ordering and source mapping retained only in the evaluation artifact. The probe never selects the final model directly. Use `--reconciliation-mode legacy` for the source-labeled evaluation baseline, `--reconciliation-mode blinded` for the default, and `--order-swap` for paired A/B versus B/A robustness trials.
 
 ### Metrics and interpretation
 
@@ -390,7 +396,7 @@ The empirical reference ranks all four supported families using identical traini
 
 For each comparable trial, normalized regret is larger-is-worse: classification regret is `max(0, best_macro_f1 - selected_macro_f1)`; regression regret is `max(0, selected_rmse - best_rmse) / max(abs(best_rmse), 1e-12)`. The versioned `intervention-quality-v1` objective classifies a regret reduction as `improved`, `worsened`, or `neutral` using one configurable normalized tolerance (`0.02` by default; legacy `tie` aliases are retained). Gate health is primary: intervention precision, challenge yield, harmful-intervention rate, unnecessary-intervention rate, challenge recall, mean/median regret reduction, and catastrophic-regret prevention/introduction. Exact family match and top-2 compatibility remain secondary diagnostics. The full formulas, utility weights, aggregation rules, and uncertainty treatment are documented in [`docs/gate_evaluation_objective.md`](docs/gate_evaluation_objective.md).
 
-Selective runs additionally report disagreement count, challenge and abstention rates, conditional intervention precision, mean challenge regret delta, abstained agent-better cases, catastrophic-regret rate and prevention, and potentially unnecessary interventions. The raw deterministic score margin is retained as a heuristic feature; it is never treated as a probability or empirical performance estimate.
+Selective and probe-first runs additionally report disagreement count, probe invocation and evidence-strength distributions, probe-triggered reconciliation rate, challenge and abstention rates, conditional intervention precision, mean/median regret reduction, catastrophic regret prevention/introduction, missed rescues, and conditional empirical-probe usefulness. The raw deterministic score margin is retained as a heuristic feature; it is never treated as a probability or empirical performance estimate.
 
 “Potentially unnecessary intervention” is intentionally cautious: the initial plan was valid, the agent and deterministic methods disagreed, the final method changed, and the initial method was within the task-specific reference tolerance. It does not prove that the gate was universally wrong. Holdout results are retained as a descriptive external check, not used to label the gate outcome.
 

@@ -846,6 +846,10 @@ def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
                 useful.append(float(gated) <= float(initial))
     return {
         "probe_invocation_count": len(invoked),
+        "probe_invocation_rate": _rate(
+            len(invoked),
+            sum(record.get("method_disagreement") is True for record in records),
+        ),
         "probe_completion_count": len(completed),
         "probe_unavailable_count": len(unavailable),
         "probe_failed_count": len(failed),
@@ -854,6 +858,10 @@ def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "probe_b_win_count": winners.get("B", 0),
         "probe_tie_count": winners.get("tie", 0),
         "probe_evidence_strength_counts": dict(sorted(strengths.items())),
+        "probe_evidence_strength_distribution": dict(sorted(Counter(
+            (record.get("empirical_probe") or {}).get("evidence_strength") or "unknown"
+            for record in invoked
+        ).items())),
         "probe_winner_matched_final_selection_count": sum(winner_final_matches),
         "probe_winner_matched_final_selection_rate": _rate(
             sum(winner_final_matches), len(winner_final_matches)
@@ -864,6 +872,7 @@ def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "probe_moderate_or_strong_following_improved_or_tied_count": sum(useful),
         "probe_moderate_or_strong_following_improved_or_tied_rate": _rate(sum(useful), len(useful)),
+        "probe_conditional_usefulness_rate": _rate(sum(useful), len(useful)),
         "probe_mean_model_fits": _mean(fits),
         "probe_median_model_fits": _median(fits),
     }

@@ -90,8 +90,11 @@ def ablation_presets() -> dict[str, AblationSpec]:
         "empirical_probe": AblationSpec(
             "empirical_probe", "selective", "calibrated", "blinded", empirical_probe=True, **common
         ),
+        "probe_first": AblationSpec(
+            "probe_first", "probe_first", "calibrated", "blinded", empirical_probe=True, **common
+        ),
         "full": AblationSpec(
-            "full", "selective", "calibrated", "blinded", empirical_probe=True, **common
+            "full", "probe_first", "calibrated", "blinded", empirical_probe=True, **common
         ),
     }
 
@@ -323,6 +326,7 @@ def run_ablation_study(
         ("blinded_always_reconcile", "legacy_gate"),
         ("interaction_boundary_aware", "selective_calibrated"),
         ("empirical_probe", "interaction_boundary_aware"),
+        ("probe_first", "selective_calibrated"),
         ("selective_calibrated", "llm_only"),
     ]
     paired = [

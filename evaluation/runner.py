@@ -87,7 +87,7 @@ class EvaluationConfig:
             raise ValueError("repetitions must be at least one")
         if not 0.10 <= self.test_size <= 0.50:
             raise ValueError("test_size must be between 0.10 and 0.50")
-        if self.gate_mode not in {"llm_only", "deterministic_only", "always_reconcile", "selective"}:
+        if self.gate_mode not in {"llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"}:
             raise ValueError("Unsupported gate_mode.")
         if self.reconciliation_mode not in {"blinded", "legacy"}:
             raise ValueError("reconciliation_mode must be 'blinded' or 'legacy'.")
@@ -1065,6 +1065,10 @@ def _run_trial(
         ),
         "empirical_probe_status": ((gate_result or {}).get("empirical_probe") or {}).get("status"),
         "empirical_probe": (gate_result or {}).get("empirical_probe"),
+        "probe_status": (gate_result or {}).get("probe_status") or ((gate_result or {}).get("empirical_probe") or {}).get("status"),
+        "probe_evidence_strength": (gate_result or {}).get("probe_evidence_strength") or ((gate_result or {}).get("empirical_probe") or {}).get("evidence_strength"),
+        "abstention_reason": (gate_result or {}).get("abstention_reason"),
+        "decision_path": (gate_result or {}).get("decision_path"),
         "final_decision": gate_result.get("final") if gate_result else {
             **final_fields,
             "selected_source": None,
@@ -1460,6 +1464,7 @@ def run_evaluation(
             "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
             "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
             "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
+            "probe_first": "run the bounded pairwise training-only probe for every valid family disagreement; reconcile only for moderate or strong evidence",
         },
         "prompt_schema_version": config.prompt_schema_version,
         "deterministic_policy_version": DeterministicPolicy().version,

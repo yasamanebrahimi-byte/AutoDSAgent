@@ -19,9 +19,9 @@ def main() -> None:
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument(
         "--gate-mode",
-        choices=("llm_only", "deterministic_only", "always_reconcile", "selective"),
+        choices=("llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"),
         default="selective",
-        help="Compare the initial agent, legacy always-reconcile gate, or selective intervention gate.",
+        help="Compare the initial agent, historical gates, or the probe-first intervention gate.",
     )
     parser.add_argument(
         "--reconciliation-mode",

@@ -228,6 +228,10 @@ class SoftChallengeArtifact(StrictModel):
     empirical_probe_invoked: StrictBool = False
     empirical_probe_policy_version: str = "v1"
     empirical_probe: Optional[dict[str, Any]] = None
+    probe_status: Literal["not_invoked", "completed", "unavailable", "failed"] = "not_invoked"
+    probe_evidence_strength: Literal["not_invoked", "tie", "weak", "moderate", "strong"] = "not_invoked"
+    abstention_reason: Optional[str] = None
+    decision_path: Optional[str] = None
     scores_are_probabilities: StrictBool = False
     scores_are_cross_validation_results: StrictBool = False
     scores_are_empirical_performance_estimates: StrictBool = False

@@ -1,9 +1,9 @@
 """Small, pairwise, training-only evidence for challenged model-family disagreements.
 
 This module is deliberately separate from ``evaluation.empirical_reference``.
-The runtime probe evaluates exactly two already-proposed plans, only after the
-selective challenge policy has authorized intervention.  It never sees a
-holdout frame and it never returns a final modeling decision.
+The runtime probe evaluates exactly two already-proposed plans after hard
+validation, before any soft reconciliation decision. It never sees a holdout
+frame and it never returns a final modeling decision.
 """
 
 from __future__ import annotations

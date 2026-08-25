@@ -57,11 +57,14 @@ def test_named_presets_are_explicit_and_versioned():
         "selective_calibrated",
         "interaction_boundary_aware",
         "empirical_probe",
+        "probe_first",
         "full",
     } <= set(presets)
     assert presets["selective_calibrated"].interaction_diagnostics is False
     assert presets["interaction_boundary_aware"].interaction_diagnostics is True
     assert presets["empirical_probe"].empirical_probe is True
+    assert presets["probe_first"].decision_mode == "probe_first"
+    assert presets["probe_first"].empirical_probe is True
     assert presets["full"].schema_version == "modeling-gate-ablation-v1"
 
 

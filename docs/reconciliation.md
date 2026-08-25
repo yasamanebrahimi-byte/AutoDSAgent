@@ -1,11 +1,15 @@
 # Modeling reconciliation
 
-The default post-challenge modeling reconciler is
+The default probe-triggered modeling reconciler is
 `2026-08-24.blinded-evidence-comparison.v2-empirical-probe` (`blinded_evidence_comparison`). It
-is invoked only after the existing formulation gate, frozen split, hard
-validation, and soft-challenge policy. The initial modeling proposal and the
-deterministic recommendation remain independent; this change only affects the
-comparison after a challenge is authorized.
+is invoked only after the existing formulation gate, frozen split, and hard
+validation. For a valid model-family disagreement, the bounded pairwise probe
+runs first on the frozen training partition. Only moderate or strong evidence
+authorizes reconsideration; unavailable, tied, or weak evidence preserves the
+initial LLM plan. The initial modeling proposal and deterministic recommendation
+remain independent. The deterministic recommendation is an advisory hypothesis,
+and its compatibility scores are heuristics rather than predicted accuracy or
+probabilities.
 
 ## Prompt contract
 
@@ -54,11 +58,11 @@ strength. A failed or unavailable probe is recorded as such and is not treated a
 evidence for either proposal.
 
 Raw compatibility scores, ranked methods, score margins, deterministic
-confidence, calibration reliability, holdout results, candidate-model CV
-results, empirical-reference results, and source labels are not included in the
-default prompt. They remain in runtime artifacts and evaluation logs for audit,
-policy calibration, and reporting. A legacy prompt mode is retained for
-evaluation baselines only.
+confidence, soft-challenge calibration reliability, holdout results,
+candidate-model CV results, empirical-reference results, and source labels are
+not included in the default prompt. They remain in runtime artifacts and
+evaluation logs for audit, policy calibration, and reporting. A legacy prompt
+mode is retained for evaluation baselines only.
 
 The structured response adds `selected_proposal` (`A` or `B`), concise strengths
 and weaknesses for both proposals, `decisive_evidence`, `selection_confidence`,
@@ -103,3 +107,8 @@ B/A order. The summary reports reconciliation invocation, agent versus
 deterministic selection, Proposal A/B selection rates and imbalance, and paired
 `order_swap_consistency_rate` / `order_swap_flip_rate`. The existing predictive,
 intervention, safety, and catastrophic-regret metrics remain unchanged.
+
+The `probe_first` evaluation preset is independently selectable. It reuses the
+same cached initial LLM proposal as the paired comparison variants, records probe
+invocation and evidence strength, and keeps the probe winner advisory: only the
+blinded reconciler can select the final proposal.
