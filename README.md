@@ -322,10 +322,10 @@ python -m evaluation.run --offline --case wine --repetitions 1 --output evaluati
 python -m evaluation.run --offline --gate-mode selective --case wine --repetitions 1 --output evaluation_results/selective_smoke
 
 # Main live study: 10 independent OpenAI responses per case
-python -m evaluation.run --live --repetitions 10 --output evaluation_results/live_main
+python -m evaluation.run --live --gate-mode probe_first --require-live --repetitions 10 --output evaluation_results/live_main
 
 # Larger research-style study
-python -m evaluation.run --live --repetitions 25 --output evaluation_results/live_extended
+python -m evaluation.run --live --gate-mode probe_first --require-live --repetitions 25 --output evaluation_results/live_extended
 ```
 
 For a live run, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. `--live` is explicit but the default when `--offline` is absent. If credentials are unavailable, the run records `offline_fallback`; if an API request fails and production fallback handles it, the row records that failure separately. Neither fallback nor mock rows are included in OpenAI-only metrics.
@@ -333,7 +333,7 @@ For a live run, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. `--live` is 
 Interrupted runs can be continued safely with `--resume` using the same configuration:
 
 ```powershell
-python -m evaluation.run --live --repetitions 10 --output evaluation_results/live_main --resume
+python -m evaluation.run --live --gate-mode probe_first --require-live --repetitions 10 --output evaluation_results/live_main --resume
 ```
 
 The harness verifies configuration compatibility, skips completed trial IDs, writes after each completed trial, and refuses to overwrite an existing bundle without `--resume`. `empirical_reference.json` stores the in-run training-only reference cache so repeated identical-evidence trials do not recompute candidate CV.

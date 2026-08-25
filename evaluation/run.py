@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument(
         "--gate-mode",
         choices=("llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"),
-        default="selective",
+        default="probe_first",
         help="Compare the initial agent, historical gates, or the probe-first intervention gate.",
     )
     parser.add_argument(
