@@ -27,7 +27,6 @@ from app.schemas import (
 )
 from app.reconciliation import (
     BLINDED_RECONCILIATION_MODE,
-    BLINDED_RECONCILIATION_PROMPT_VERSION,
     build_blinded_reconciliation,
 )
 
@@ -35,7 +34,7 @@ from app.reconciliation import (
 # Bump this when the modeling/reconciliation input contract changes.  The
 # evaluation harness records it beside every trial so a result bundle can be
 # interpreted without preserving provider-specific request metadata.
-PROMPT_SCHEMA_VERSION = BLINDED_RECONCILIATION_PROMPT_VERSION
+PROMPT_SCHEMA_VERSION = "2026-08-24.blinded-evidence-comparison.v3-empirical-probe"
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -141,7 +140,11 @@ re-select, confirm, or return target/task fields. Independently choose only the
 model family and complete typed preprocessing contract from the training-only
 profile. Do not assume that a deterministic recommender exists. Keep structural
 cleaning separate and keep learned transformations inside the training pipeline.
-The method vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.""",
+The method vocabulary is: linear, regularized_linear, tree_ensemble, boosted_tree.
+Use only these executable categorical preprocessing pairs: one_hot with
+categorical_unknown_handling='ignore'; ordinal with
+categorical_unknown_handling='use_encoded_value'; or none with
+categorical_unknown_handling='ignore'. Do not return any other pairing.""",
             {
                 "question": question,
                 "approved_formulation": {

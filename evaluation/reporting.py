@@ -161,7 +161,7 @@ def render_summary_markdown(
         live_item = item.get("openai_only") or item
         item_outcomes = live_item.get("gating_outcome_counts", {})
         rows.append(
-            f"| {dataset} | {item.get('openai_trial_count', 0)} | {live_item.get('total_challenges', 0)} | {live_item.get('total_abstentions', 0)} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('neutral', item_outcomes.get('tie', 0))} | {_percent(live_item.get('intervention_precision'))} | {_percent(live_item.get('harmful_intervention_rate'))} | {_number(live_item.get('mean_regret_reduction'))} | {live_item.get('catastrophic_prevented_count', 0)} / {live_item.get('catastrophic_introduced_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} -> {_percent(live_item.get('gated_empirical_reference_match_rate'))} |"
+            f"| {dataset} | {item.get('openai_trial_count', 0)} | {live_item.get('challenges', 0)} | {live_item.get('abstentions', 0)} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('neutral', item_outcomes.get('tie', 0))} | {_percent(live_item.get('intervention_precision'))} | {_percent(live_item.get('harmful_intervention_rate'))} | {_number(live_item.get('mean_regret_reduction'))} | {live_item.get('catastrophic_prevented_count', 0)} / {live_item.get('catastrophic_introduced_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} -> {_percent(live_item.get('gated_empirical_reference_match_rate'))} |"
         )
     rows.extend([
         "",
