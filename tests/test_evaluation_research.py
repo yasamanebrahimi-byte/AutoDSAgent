@@ -101,6 +101,52 @@ def test_openai_only_metrics_exclude_fallback_mock_and_failed_rows():
     assert summary["openai_only_match_rates"]["initial_reference_match_rate"] == 1.0
 
 
+def test_llm_only_stale_reconciliation_flag_is_not_counted_as_an_invocation():
+    base = {
+        "trial_status": "completed",
+        "agent_source": "openai",
+        "task_type": "classification",
+        "perturbation_id": "clean",
+        "agent_initial_valid": True,
+        "final_valid": True,
+        "agent_initial_method": "linear",
+        "final_method": "linear",
+        "empirical_best_method": "linear",
+        "agent_normalized_regret": 0.0,
+        "gated_normalized_regret": 0.0,
+        "paired_cv_improvement": 0.0,
+    }
+    llm_only_summary = summarize_trials(
+        [
+            {
+                **base,
+                "agreement_status": "llm_only",
+                "method_disagreement": True,
+                "reconciliation_invoked": True,
+                "reconciliation_status": "not_invoked",
+            }
+        ]
+    )
+    actual_reconciliation_summary = summarize_trials(
+        [
+            {
+                **base,
+                "agreement_status": "disagreement",
+                "method_disagreement": True,
+                "reconciliation_invoked": True,
+                "reconciliation_status": "succeeded",
+                "reconciliation_method_source": "agent",
+            }
+        ]
+    )
+
+    assert llm_only_summary["reconciliation_invocation_rate"] == 0.0
+    assert llm_only_summary["reconciliation_success_rate"] is None
+    assert llm_only_summary["openai_only_reconciliation_invocation_rate"] == 0.0
+    assert actual_reconciliation_summary["reconciliation_invocation_rate"] == 1.0
+    assert actual_reconciliation_summary["reconciliation_success_rate"] == 1.0
+
+
 def test_regret_direction_and_gate_outcome_tolerance_are_explicit():
     assert normalized_regret("classification", 0.8, 0.7) == pytest.approx(0.1)
     assert normalized_regret("classification", 0.8, 0.9) == 0.0

@@ -27,6 +27,30 @@ def _dimension_agreement(records: list[dict[str, Any]], disagreement_field: str)
     return sum(not bool(record[disagreement_field]) for record in eligible) / len(eligible)
 
 
+def _split_count(config: dict[str, Any], trials: list[dict[str, Any]]) -> int:
+    configured = config.get("split_seeds")
+    if configured is not None:
+        return len(configured)
+    observed = {record.get("split_seed") for record in trials if record.get("split_seed") is not None}
+    return len(observed) or 1
+
+
+def _split_limitation(config: dict[str, Any], trials: list[dict[str, Any]]) -> str:
+    count = _split_count(config, trials)
+    cardinal = {
+        1: "One",
+        2: "Two",
+        3: "Three",
+        4: "Four",
+        5: "Five",
+    }.get(count, str(count))
+    noun = "split" if count == 1 else "splits"
+    return (
+        f"{cardinal} train/holdout {noun} and a small benchmark suite still do not establish "
+        "broad domain generalization."
+    )
+
+
 def render_summary_markdown(
     config: dict[str, Any], trials: list[dict[str, Any]], summary: dict[str, Any]
 ) -> str:
@@ -141,7 +165,7 @@ def render_summary_markdown(
         f"- Soft-challenge outcomes: **{summary.get('soft_challenge_improved_count', 0)} improved**, **{summary.get('soft_challenge_worsened_count', 0)} worsened**, **{summary.get('soft_challenge_neutral_count', 0)} neutral**.",
         f"- Challenge outcomes: **{summary.get('challenge_improved_count', 0)} improved**, **{summary.get('challenge_worsened_count', 0)} worsened**, **{summary.get('challenge_neutral_count', 0)} neutral**; intervention precision: **{_percent(summary.get('intervention_precision'))}**.",
         f"- Abstentions where agent was better: **{summary.get('abstained_agent_better_count', 0)}**; where deterministic was better: **{summary.get('abstained_deterministic_better_count', 0)}**.",
-        f"- Mean challenge regret improvement: **{_number(summary.get('mean_performance_delta_conditional_on_challenge'))}**; unnecessary interventions: **{summary.get('unnecessary_intervention_count', 0)}** (**{_percent(summary.get('unnecessary_intervention_rate'))}**).",
+        f"- Mean deterministic-challenger regret advantage: **{_number(summary.get('mean_performance_delta_conditional_on_challenge'))}**; this is `agent normalized regret - deterministic challenger normalized regret`, so it is not final gated intervention improvement; unnecessary interventions: **{summary.get('unnecessary_intervention_count', 0)}** (**{_percent(summary.get('unnecessary_intervention_rate'))}**).",
         f"- Catastrophic-regret rate: **{_percent(summary.get('catastrophic_regret_rate'))}**; catastrophic cases prevented by challenge: **{summary.get('catastrophic_regret_prevented_by_challenge_count', 0)}** (**{_percent(summary.get('catastrophic_regret_prevented_by_challenge_rate'))}**).",
         "- A soft disagreement is competing advisory evidence, not an invalid plan. Every challenge row retains the initial plan, deterministic plan, preprocessing comparison, reconciliation response, selected source, and final hard-validation result.",
         "",
@@ -176,7 +200,7 @@ def render_summary_markdown(
         "",
         "- The benchmark suite is small and local; it is not representative of every tabular data-science domain.",
         "- The empirical reference is not a universal optimum or ground truth; it ranks only the supported families under one CV design.",
-        "- Method-family match is not equivalent to predictive or deployment quality, and a one-split study cannot establish generalization.",
+        f"- Method-family match is not equivalent to predictive or deployment quality, and {_split_limitation(config, trials)}",
         "- Offline fallback and mock rows must not be used to make claims about live LLM behavior.",
         "- Semantic leakage, feature availability, and domain-specific safety still require expert review.",
         "",

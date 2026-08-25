@@ -103,7 +103,7 @@ Intervention quality is primary. Exact family match and top-2 compatibility belo
 - Soft-challenge outcomes: **3 improved**, **0 worsened**, **16 neutral**.
 - Challenge outcomes: **3 improved**, **0 worsened**, **16 neutral**; intervention precision: **100.0%**.
 - Abstentions where agent was better: **28**; where deterministic was better: **0**.
-- Mean challenge regret improvement: **-0.9921**; unnecessary interventions: **16** (**84.2%**).
+- Mean deterministic-challenger regret advantage: **-0.9921**; this is `agent normalized regret - deterministic challenger normalized regret`, so it is not final gated intervention improvement; unnecessary interventions: **16** (**84.2%**).
 - Catastrophic-regret rate: **5.2%**; catastrophic cases prevented by challenge: **0** (**n/a**).
 - A soft disagreement is competing advisory evidence, not an invalid plan. Every challenge row retains the initial plan, deterministic plan, preprocessing comparison, reconciliation response, selected source, and final hard-validation result.
 
@@ -148,6 +148,6 @@ Intervention quality is primary. Exact family match and top-2 compatibility belo
 
 - The benchmark suite is small and local; it is not representative of every tabular data-science domain.
 - The empirical reference is not a universal optimum or ground truth; it ranks only the supported families under one CV design.
-- Method-family match is not equivalent to predictive or deployment quality, and a one-split study cannot establish generalization.
+- Method-family match is not equivalent to predictive or deployment quality, and Three train/holdout splits and a small benchmark suite still do not establish broad domain generalization.
 - Offline fallback and mock rows must not be used to make claims about live LLM behavior.
 - Semantic leakage, feature availability, and domain-specific safety still require expert review.

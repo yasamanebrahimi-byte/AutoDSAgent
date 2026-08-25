@@ -340,6 +340,21 @@ def _final_hard_invalid(record: dict[str, Any]) -> bool:
     return record.get("final_valid") is False
 
 
+def _reconciliation_was_invoked(record: dict[str, Any]) -> bool:
+    """Return whether the saved row records an actual reconciliation attempt.
+
+    Some legacy `llm_only` rows retain the disagreement-derived
+    `reconciliation_invoked` flag even though the gate records
+    `reconciliation_status` as `not_invoked`. The status disambiguates that
+    stale flag without changing invocation accounting for succeeded or failed
+    reconciliation attempts.
+    """
+
+    return bool(record.get("reconciliation_invoked")) and record.get(
+        "reconciliation_status"
+    ) != "not_invoked"
+
+
 def _soft_status(record: dict[str, Any]) -> str | None:
     artifact = record.get("soft_challenge") or {}
     if artifact.get("status") in {"agreement", "disagreement", "invalid", "unavailable"}:
@@ -365,7 +380,7 @@ def _soft_decision(record: dict[str, Any]) -> str | None:
         return "abstain"
     if status_detail == "agreement":
         return "agree"
-    if record.get("reconciliation_invoked") is True and _soft_status(record) == "disagreement":
+    if _reconciliation_was_invoked(record) and _soft_status(record) == "disagreement":
         return "challenge"
     if _soft_status(record) == "disagreement":
         return "abstain"
@@ -909,7 +924,7 @@ def summarize_trials(
     final_valid = [record for record in completed if record.get("final_valid") is True]
     agreement = [record for record in deterministic_available if record.get("agreement_status") == "agreement"]
     disagreements = [record for record in deterministic_available if record.get("agreement_status") == "disagreement"]
-    recon = [record for record in completed if record.get("reconciliation_invoked")]
+    recon = [record for record in completed if _reconciliation_was_invoked(record)]
     recon_success = [record for record in recon if record.get("reconciliation_status") == "succeeded"]
     soft_challenge_records = _soft_challenges(completed)
     intercepted = [record for record in initial_invalid if record.get("unsafe_plan_intercepted") is True]
@@ -1037,10 +1052,10 @@ def summarize_trials(
             ),
             "reconciliation_success_rate": _rate(
                 sum(record.get("reconciliation_status") == "succeeded" for record in valid_records),
-                sum(bool(record.get("reconciliation_invoked")) for record in valid_records),
+                sum(_reconciliation_was_invoked(record) for record in valid_records),
             ),
             "reconciliation_invocation_rate": _rate(
-                sum(bool(record.get("reconciliation_invoked")) for record in valid_records), len(valid_records)
+                sum(_reconciliation_was_invoked(record) for record in valid_records), len(valid_records)
             ),
             **_reconciliation_rates(valid_records),
             "model_family_disagreement_rate": _rate(
@@ -1058,10 +1073,10 @@ def summarize_trials(
             "challenge_rate": _rate(len(challenge_records), len(soft_challenge_records)),
             "abstention_rate": _rate(len(abstained_records), len(soft_challenge_records)),
             "soft_challenge_reconciliation_invocation_count": sum(
-                bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
+                _reconciliation_was_invoked(record) for record in soft_challenge_records
             ),
             "soft_challenge_reconciliation_invocation_rate": _rate(
-                sum(bool(record.get("reconciliation_invoked")) for record in soft_challenge_records),
+                sum(_reconciliation_was_invoked(record) for record in soft_challenge_records),
                 len(soft_challenge_records),
             ),
             **_reconciliation_rates(valid_records),
@@ -1322,10 +1337,10 @@ def summarize_trials(
         "challenge_rate": overall_selective["challenge_rate"],
         "abstention_rate": overall_selective["abstention_rate"],
         "soft_challenge_reconciliation_invocation_count": sum(
-            bool(record.get("reconciliation_invoked")) for record in soft_challenge_records
+            _reconciliation_was_invoked(record) for record in soft_challenge_records
         ),
         "soft_challenge_reconciliation_invocation_rate": _rate(
-            sum(bool(record.get("reconciliation_invoked")) for record in soft_challenge_records),
+            sum(_reconciliation_was_invoked(record) for record in soft_challenge_records),
             len(soft_challenge_records),
         ),
         **_reconciliation_rates(completed),
@@ -1490,7 +1505,7 @@ def summarize_trials(
             len(openai_preprocessing_records),
         ),
         "openai_only_reconciliation_invocation_rate": _rate(
-            sum(bool(record.get("reconciliation_invoked")) for record in openai), len(openai)
+            sum(_reconciliation_was_invoked(record) for record in openai), len(openai)
         ),
         "openai_only_paired_stats": {
             "trial_count": len(openai_paired),
