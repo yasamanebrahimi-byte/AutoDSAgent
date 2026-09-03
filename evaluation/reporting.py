@@ -114,6 +114,14 @@ def render_summary_markdown(
         "## LLM Decision Stability",
         "",
     ]
+    if config.get("suite") == "external":
+        insertion = rows.index("## Trial Coverage")
+        rows[insertion:insertion] = [
+            f"- External benchmark suite version: **{config.get('benchmark_suite_version', '1.0.0')}**; source: AMLB/OpenML task IDs.",
+            "- External Benchmark v1 uses AutoDS deterministic train/holdout splits rather than AMLB predefined folds; results are not directly comparable to AMLB leaderboard numbers.",
+            "- External results are evaluation-only and must not be used for policy calibration or threshold/prompt tuning.",
+            "",
+        ]
     stability = summary.get("stability_by_dataset", {})
     if stability:
         rows.extend([

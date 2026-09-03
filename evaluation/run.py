@@ -12,6 +12,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Evaluate the AutoDSAgent validation architecture on local tabular benchmarks."
     )
+    parser.add_argument(
+        "--suite",
+        choices=("local", "external"),
+        default="local",
+        help="Benchmark suite to evaluate; local is the backwards-compatible default.",
+    )
+    parser.add_argument(
+        "--tier",
+        choices=("core", "stress"),
+        help="Optional external-suite tier filter.",
+    )
     parser.add_argument("--output", default="evaluation_results/offline", help="Evaluation output directory.")
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
@@ -80,6 +91,8 @@ def main() -> None:
         enable_regression_interaction_diagnostics=not args.disable_interaction_diagnostics,
         enable_classification_boundary_diagnostics=not args.disable_boundary_diagnostics,
         resume=args.resume,
+        suite=args.suite,
+        tier=args.tier,
     )
     print(json.dumps(result, indent=2, default=str))
 

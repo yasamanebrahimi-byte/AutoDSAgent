@@ -34,6 +34,7 @@ class BenchmarkRole(str, Enum):
 
     POLICY_DEVELOPMENT = "policy_development"
     FINAL_EVALUATION = "final_evaluation"
+    EXTERNAL_EVALUATION = "external_evaluation"
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,11 @@ class BenchmarkCase:
     notes: str = ""
     random_seed: int = 42
     role: BenchmarkRole = BenchmarkRole.POLICY_DEVELOPMENT
+    openml_task_id: int | None = None
+    source_suite: str | None = None
+    source_suite_id: int | None = None
+    benchmark_suite_version: str | None = None
+    tier: Literal["core", "stress"] = "core"
 
     def load(self) -> pd.DataFrame:
         if self.dataframe is not None:
@@ -70,7 +76,7 @@ class BenchmarkCase:
 
     def as_dict(self) -> dict[str, object]:
         frame = self.load()
-        return {
+        payload: dict[str, object] = {
             "name": self.name,
             "dataset_source": self.dataset_source,
             "target_column": self.target_column,
@@ -83,6 +89,32 @@ class BenchmarkCase:
             "benchmark_suite_version": BENCHMARK_SUITE_VERSION,
             "rows": int(len(frame)),
             "columns": int(len(frame.columns)),
+        }
+        if self.openml_task_id is not None:
+            payload.update(
+                {
+                    "openml_task_id": self.openml_task_id,
+                    "source_suite": self.source_suite,
+                    "source_suite_id": self.source_suite_id,
+                    "benchmark_suite_version": (
+                        self.benchmark_suite_version or BENCHMARK_SUITE_VERSION
+                    ),
+                    "tier": self.tier,
+                }
+            )
+        return payload
+
+    def provenance(self) -> dict[str, object]:
+        """Return external provenance without loading the case's dataframe."""
+
+        if self.openml_task_id is None:
+            return {}
+        return {
+            "openml_task_id": self.openml_task_id,
+            "source_suite": self.source_suite,
+            "source_suite_id": self.source_suite_id,
+            "benchmark_suite_version": self.benchmark_suite_version,
+            "benchmark_tier": self.tier,
         }
 
 

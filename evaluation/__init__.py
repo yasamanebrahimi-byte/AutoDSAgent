@@ -7,6 +7,13 @@ from evaluation.benchmarks import (
     default_benchmark_cases,
 )
 from evaluation.runner import EvaluationConfig, run_evaluation
+from evaluation.external_benchmarks import (
+    EXTERNAL_BENCHMARK_MANIFEST,
+    EXTERNAL_BENCHMARK_SUITE_VERSION,
+    OpenMLBenchmarkSpec,
+    external_benchmark_cases,
+    external_benchmark_specs,
+)
 
 __all__ = [
     "BENCHMARK_SUITE_VERSION",
@@ -14,5 +21,10 @@ __all__ = [
     "BenchmarkRole",
     "EvaluationConfig",
     "default_benchmark_cases",
+    "EXTERNAL_BENCHMARK_MANIFEST",
+    "EXTERNAL_BENCHMARK_SUITE_VERSION",
+    "OpenMLBenchmarkSpec",
+    "external_benchmark_cases",
+    "external_benchmark_specs",
     "run_evaluation",
 ]

@@ -32,6 +32,10 @@ evaluation_results/**/runs/
 evaluation_results/**/*smoke*/
 evaluation_results/**/_verification/
 
+# Optional OpenML cache; benchmark data must remain outside source control.
+.openml_cache/
+openml_cache/
+
 # Generated policy/evaluation scratch directories.
 .boundary_calibration_*/
 .boundary_final_*/

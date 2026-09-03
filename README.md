@@ -85,6 +85,7 @@ pytest
 ```
 
 More detailed design and evaluation notes are in [`docs/`](docs/), including [reconciliation](docs/reconciliation.md) and the [evaluation objective](docs/gate_evaluation_objective.md).
+The optional frozen AMLB/OpenML external evaluation suite is documented in [external benchmark](docs/external_benchmark.md).
 
 ## License
 

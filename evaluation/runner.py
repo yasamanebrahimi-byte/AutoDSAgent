@@ -81,8 +81,14 @@ class EvaluationConfig:
     enable_classification_boundary_diagnostics: bool = True
     ablation_name: str | None = None
     ablation_schema_version: str | None = None
+    suite: str = "local"
+    tier: str | None = None
 
     def __post_init__(self) -> None:
+        if self.suite not in {"local", "external"}:
+            raise ValueError("suite must be 'local' or 'external'.")
+        if self.tier is not None and self.tier not in {"core", "stress"}:
+            raise ValueError("tier must be 'core', 'stress', or None.")
         if self.repetitions < 1:
             raise ValueError("repetitions must be at least one")
         if not 0.10 <= self.test_size <= 0.50:
@@ -1198,6 +1204,7 @@ def _run_trial(
         "fallback_row": agent_source == "offline_fallback" or reconciliation_agent_source == "offline_fallback",
         "empirical_reference_cache_key": cache_key,
     }
+    record.update(case.provenance())
     return _jsonable(record)
 
 
@@ -1317,6 +1324,7 @@ def _failed_trial_record(
         "fallback_row": False,
         "reconciliation_api_call_made": False,
         "reconciliation_request_failed": False,
+        **case.provenance(),
     }
 
 
@@ -1371,6 +1379,8 @@ def run_evaluation(
     ablation_spec: Any | None = None,
     proposal_cache_path: str | Path | None = None,
     empirical_reference_cache_path: str | Path | None = None,
+    suite: str = "local",
+    tier: str | None = None,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
@@ -1399,6 +1409,8 @@ def run_evaluation(
         raise ValueError("require_live cannot be combined with offline mode.")
     selected_split_seeds = tuple(int(value) for value in (split_seeds or [seed]))
     config = EvaluationConfig(
+        suite=suite,
+        tier=tier,
         repetitions=repetitions,
         seed=seed,
         test_size=test_size,
@@ -1420,10 +1432,19 @@ def run_evaluation(
         ablation_name=ablation_name,
         ablation_schema_version=ablation_schema_version,
     )
-    selected_cases = list(cases or default_benchmark_cases())
+    if cases is not None:
+        selected_cases = list(cases)
+    elif suite == "external":
+        from evaluation.external_benchmarks import external_benchmark_cases
+
+        selected_cases = external_benchmark_cases()
+    else:
+        selected_cases = default_benchmark_cases()
     if case_names:
         wanted = set(case_names)
         selected_cases = [case for case in selected_cases if case.name in wanted]
+    if tier is not None:
+        selected_cases = [case for case in selected_cases if case.tier == tier]
     if not selected_cases:
         raise ValueError("No benchmark cases selected.")
     perturbations = default_perturbations() if include_perturbations else []
@@ -1431,6 +1452,8 @@ def run_evaluation(
     stable_config = {
         "config_version": "2026-08-24.evaluation.v4-intervention-quality",
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
+        "suite": config.suite,
+        "tier": config.tier,
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,
@@ -1491,6 +1514,10 @@ def run_evaluation(
         ],
         "repository_commit": config.repository_commit,
     }
+    if config.suite == "external":
+        stable_config["benchmark_suite_version"] = (
+            selected_cases[0].benchmark_suite_version or "unknown"
+        )
     if resume:
         config_path = output_path / "config.json"
         trials_path = output_path / "trials.jsonl"
@@ -1498,7 +1525,12 @@ def run_evaluation(
             raise ValueError("--resume requires an existing evaluation bundle with config.json and trials.jsonl.")
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
         compare_keys = [key for key in stable_config if key != "repository_commit"]
-        mismatches = [key for key in compare_keys if existing_config.get(key) != stable_config.get(key)]
+        legacy_defaults = {"suite": "local", "tier": None}
+        mismatches = [
+            key
+            for key in compare_keys
+            if existing_config.get(key, legacy_defaults.get(key)) != stable_config.get(key)
+        ]
         if mismatches:
             raise ValueError(
                 "Existing evaluation configuration is incompatible; refusing to resume: "
