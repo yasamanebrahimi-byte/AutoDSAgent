@@ -156,6 +156,7 @@ def test_identical_features_with_conflicting_targets_are_reported_but_non_blocki
     assert check["evidence"] == {"conflicting_groups": 1, "conflicting_rows": 2}
     assert result.status == "passed"
     assert result.as_dict()["overall_status"] == "passed"
+    assert result.direct_leakage_detected is False
     assert result.as_dict()["diagnostics"][0]["code"] == "identical_feature_rows_have_consistent_targets"
     result.raise_if_failed()
 

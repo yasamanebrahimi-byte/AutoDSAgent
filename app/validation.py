@@ -848,7 +848,6 @@ def validate_training_plan(
         "Identical usable feature rows can map to conflicting targets; inspect duplicates or correct the source data.",
         severity="warning",
     )
-    result.direct_leakage_detected = result.direct_leakage_detected or conflict_groups > 0
 
     if split is None:
         split_evidence = _validate_split_and_cv(
