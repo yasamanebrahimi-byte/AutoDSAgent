@@ -47,12 +47,19 @@ class ValidationCheck:
     message: str
     severity: str = "error"
 
+    @property
+    def blocking(self) -> bool:
+        """Whether a failed check prevents an executable training plan."""
+
+        return self.severity == "error"
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
             "status": "passed" if self.passed else "failed",
             "passed": self.passed,
             "severity": self.severity,
+            "blocking": self.blocking,
             "evidence": self.evidence,
             "message": self.message,
         }
@@ -115,11 +122,25 @@ class ValidationResult:
 
     @property
     def status(self) -> str:
-        return "passed" if not any(not check.passed for check in self.checks) else "failed"
+        return "passed" if not self.blocking_failed_checks else "failed"
 
     @property
     def failed_checks(self) -> list[ValidationCheck]:
-        return [check for check in self.checks if not check.passed]
+        """Return failed blocking checks.
+
+        Non-blocking diagnostics remain available through ``diagnostic_checks``
+        and the serialized ``checks`` artifact.
+        """
+
+        return self.blocking_failed_checks
+
+    @property
+    def blocking_failed_checks(self) -> list[ValidationCheck]:
+        return [check for check in self.checks if not check.passed and check.blocking]
+
+    @property
+    def diagnostic_checks(self) -> list[ValidationCheck]:
+        return [check for check in self.checks if not check.passed and not check.blocking]
 
     def add_check(
         self,
@@ -130,15 +151,16 @@ class ValidationResult:
         *,
         severity: str = "error",
     ) -> None:
-        self.checks.append(
-            ValidationCheck(
-                code=code,
-                passed=passed,
-                evidence=evidence,
-                message=message,
-                severity=severity,
-            )
+        check = ValidationCheck(
+            code=code,
+            passed=passed,
+            evidence=evidence,
+            message=message,
+            severity=severity,
         )
+        self.checks.append(check)
+        if not check.passed and not check.blocking:
+            self.warnings.append(f"[{check.code}] {check.message}")
 
     def add_failure(self, code: str, message: str, evidence: dict[str, Any] | None = None) -> None:
         self.add_check(code, False, evidence or {}, message)
@@ -174,6 +196,7 @@ class ValidationResult:
             else None,
             "checks": [check.as_dict() for check in self.checks],
             "failures": failures,
+            "diagnostics": [check.as_dict() for check in self.diagnostic_checks],
         }
 
 
@@ -822,7 +845,8 @@ def validate_training_plan(
         "identical_feature_rows_have_consistent_targets",
         conflict_groups == 0,
         {"conflicting_groups": conflict_groups, "conflicting_rows": conflict_rows},
-        "Identical usable feature rows cannot map to conflicting targets; inspect duplicates or correct the source data.",
+        "Identical usable feature rows can map to conflicting targets; inspect duplicates or correct the source data.",
+        severity="warning",
     )
     result.direct_leakage_detected = result.direct_leakage_detected or conflict_groups > 0
 
@@ -1485,15 +1509,30 @@ def _conflicting_feature_groups(features: pd.DataFrame, target: pd.Series) -> tu
     if features.empty:
         return 0, 0
     key_frame = features.astype("string").fillna("<MISSING>")
-    keys = key_frame.agg("\x1f".join, axis=1)
     target_keys = target.astype("string").fillna("<MISSING>").reset_index(drop=True)
-    grouped = pd.DataFrame({"key": keys, "target": target_keys}).groupby("key", sort=False)["target"]
-    conflicts = grouped.nunique(dropna=False)
-    conflicting_keys = conflicts[conflicts > 1].index
-    if len(conflicting_keys) == 0:
+    # Hashing normalized rows first avoids materializing a wide row-key tuple
+    # for datasets where duplicate feature rows are absent. Any hash bucket
+    # that appears to conflict is resolved with exact tuples before counting,
+    # so hash collisions cannot change the diagnostic result.
+    row_hashes = pd.util.hash_pandas_object(key_frame, index=False).to_numpy()
+    grouped = pd.DataFrame({"key": row_hashes, "target": target_keys.to_numpy()}).groupby(
+        "key", sort=False
+    )["target"]
+    conflicting_hashes = grouped.nunique(dropna=False)
+    conflicting_hashes = conflicting_hashes[conflicting_hashes > 1].index.to_numpy()
+    if len(conflicting_hashes) == 0:
         return 0, 0
-    rows = int(keys.isin(conflicting_keys).sum())
-    return int(len(conflicting_keys)), rows
+    candidate_positions = np.flatnonzero(np.isin(row_hashes, conflicting_hashes))
+    candidate_keys = pd.MultiIndex.from_frame(key_frame.iloc[candidate_positions].reset_index(drop=True))
+    exact_group_ids = pd.factorize(candidate_keys, sort=False)[0]
+    candidate_targets = target_keys.iloc[candidate_positions].reset_index(drop=True)
+    exact_grouped = pd.DataFrame({"key": exact_group_ids, "target": candidate_targets.to_numpy()}).groupby(
+        "key", sort=False
+    )["target"]
+    conflicting_groups = exact_grouped.nunique(dropna=False)
+    conflicting_groups = conflicting_groups[conflicting_groups > 1].index.to_numpy()
+    rows = int(np.isin(exact_group_ids, conflicting_groups).sum())
+    return int(len(conflicting_groups)), rows
 
 
 def _name_suggests_target_leakage(feature_name: str, target_name: str) -> bool:

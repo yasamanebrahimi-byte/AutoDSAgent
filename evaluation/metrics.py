@@ -240,7 +240,9 @@ def _validation_failure_codes(record: dict[str, Any]) -> set[str]:
     codes.update(
         str(check.get("code"))
         for check in final_validation.get("checks", [])
-        if check.get("status") == "failed" and check.get("code")
+        if check.get("status") == "failed"
+        and check.get("blocking", check.get("severity", "error") == "error")
+        and check.get("code")
     )
     return codes
 

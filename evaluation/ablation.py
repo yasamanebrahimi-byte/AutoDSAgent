@@ -19,6 +19,12 @@ from evaluation.runner import run_evaluation
 
 
 ABLATION_SCHEMA_VERSION = "modeling-gate-ablation-v1"
+PRIMARY_ABLATION_NAMES = (
+    "llm_only",
+    "blinded_always_reconcile",
+    "selective_calibrated",
+    "full",
+)
 
 
 @dataclass(frozen=True)
@@ -264,7 +270,7 @@ def run_ablation_study(
     if suite not in {"local", "external"}:
         raise ValueError("suite must be 'local' or 'external'.")
     all_specs = ablation_presets()
-    selected_names = list(ablations or all_specs)
+    selected_names = list(ablations) if ablations is not None else list(PRIMARY_ABLATION_NAMES)
     unknown = sorted(set(selected_names) - set(all_specs))
     if unknown:
         raise ValueError(f"Unknown ablation preset(s): {', '.join(unknown)}")

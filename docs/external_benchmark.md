@@ -116,6 +116,12 @@ Run the complete external suite offline:
 python -m evaluation.run --suite external --offline --output evaluation_results/external_offline
 ```
 
+Run the primary paired ablation set offline:
+
+```bash
+python -m evaluation.ablation --suite external --offline --output evaluation_results/external_ablation_offline --ablation llm_only --ablation blinded_always_reconcile --ablation selective_calibrated --ablation full
+```
+
 Run only one tier:
 
 ```bash
@@ -126,7 +132,10 @@ After the suite is frozen and live research approval is in place, run the full
 suite live with strict failure reporting:
 
 ```bash
-python -m evaluation.run --suite external --live --require-live --output evaluation_results/external_live
+python -m evaluation.ablation --suite external --live --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation blinded_always_reconcile --ablation selective_calibrated --ablation full
 ```
+
+The historical `legacy_gate` preset remains available as a secondary ablation
+by passing `--ablation legacy_gate` explicitly.
 
 The default `python -m evaluation.run` command remains the local suite.

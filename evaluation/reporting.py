@@ -45,10 +45,22 @@ def _split_limitation(config: dict[str, Any], trials: list[dict[str, Any]]) -> s
         5: "Five",
     }.get(count, str(count))
     noun = "split" if count == 1 else "splits"
+    suite = config.get("suite", "local")
+    benchmark_description = (
+        "the frozen external AMLB/OpenML benchmark suite"
+        if suite == "external"
+        else "a small benchmark suite"
+    )
     return (
-        f"{cardinal} train/holdout {noun} and a small benchmark suite still do not establish "
+        f"{cardinal} train/holdout {noun} and {benchmark_description} still do not establish "
         "broad domain generalization."
     )
+
+
+def _benchmark_limitation(config: dict[str, Any]) -> str:
+    if config.get("suite") == "external":
+        return "The frozen external AMLB/OpenML suite is not representative of every tabular data-science domain."
+    return "The local benchmark suite is intended for reproducible development and is not representative of every tabular data-science domain."
 
 
 def render_summary_markdown(
@@ -207,7 +219,7 @@ def render_summary_markdown(
         "",
         "## Limitations",
         "",
-        "- The benchmark suite is small and local; it is not representative of every tabular data-science domain.",
+        f"- {_benchmark_limitation(config)}",
         "- The empirical reference is not a universal optimum or ground truth; it ranks only the supported families under one CV design.",
         f"- Method-family match is not equivalent to predictive or deployment quality, and {_split_limitation(config, trials)}",
         "- Offline fallback and mock rows must not be used to make claims about live LLM behavior.",

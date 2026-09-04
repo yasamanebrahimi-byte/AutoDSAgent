@@ -32,3 +32,15 @@ def test_report_names_deterministic_challenger_advantage_and_derives_split_limit
     assert "agent normalized regret - deterministic challenger normalized regret" in report
     assert "Three train/holdout splits and a small benchmark suite still do not establish broad domain generalization." in report
     assert "Mean challenge regret improvement" not in report
+
+
+def test_external_report_uses_external_suite_aware_limitations():
+    report = render_summary_markdown(
+        config={"suite": "external", "split_seeds": [42]},
+        trials=[],
+        summary={},
+    )
+
+    assert "the frozen external AMLB/OpenML benchmark suite" in report
+    assert "small and local" not in report
+    assert "not representative of every tabular data-science domain" in report

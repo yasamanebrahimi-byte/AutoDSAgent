@@ -12,7 +12,7 @@ from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.deterministic_policy import DeterministicPolicy
 from app.schemas import AgentPlan, PreprocessingContract
 from app.soft_challenge import decide_soft_challenge
-from evaluation.ablation import ablation_presets, run_ablation_study
+from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
 from evaluation.benchmarks import BenchmarkCase
 from evaluation.runner import _proposal_cache_key, run_evaluation
 
@@ -66,6 +66,14 @@ def test_named_presets_are_explicit_and_versioned():
     assert presets["probe_first"].decision_mode == "probe_first"
     assert presets["probe_first"].empirical_probe is True
     assert presets["full"].schema_version == "modeling-gate-ablation-v1"
+
+
+def test_default_ablation_set_is_the_primary_four_and_legacy_remains_available(tmp_path: Path):
+    result = run_ablation_study(tmp_path / "default", cases=[_case()])
+
+    assert tuple(result["summary"]["selected_ablations"]) == PRIMARY_ABLATION_NAMES
+    assert "legacy_gate" not in result["summary"]["selected_ablations"]
+    assert "legacy_gate" in ablation_presets()
 
 
 def test_high_confidence_only_ignores_calibration_reliability():

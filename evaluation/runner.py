@@ -215,6 +215,17 @@ def _failed_checks(result: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _blocking_failed_check_codes(payload: dict[str, Any] | None) -> list[str]:
+    """Return only hard-invalid check codes from a serialized validation payload."""
+
+    return [
+        str(check["code"])
+        for check in (payload or {}).get("checks", [])
+        if check.get("status") == "failed"
+        and check.get("blocking", check.get("severity", "error") == "error")
+    ]
+
+
 def _plan_fields(plan: AgentPlan | None) -> dict[str, Any]:
     if plan is None:
         return {
@@ -941,11 +952,7 @@ def _run_trial(
         "objective_version": GATE_OBJECTIVE_VERSION,
     }
     initial_failure_codes = [failure["code"] for failure in _failed_checks(initial_validation)]
-    final_failure_codes = [
-        check["code"]
-        for check in (final_validation or {}).get("checks", [])
-        if check.get("status") == "failed"
-    ]
+    final_failure_codes = _blocking_failed_check_codes(final_validation)
     validation_failure_codes = sorted(set(initial_failure_codes) | set(final_failure_codes))
     record = {
         "benchmark_case": case.name,
@@ -1202,6 +1209,7 @@ def _run_trial(
                 check["code"]
                 for check in (final_validation or {}).get("checks", [])
                 if check.get("status") == "failed"
+                and check.get("blocking", check.get("severity", "error") == "error")
             }
         ),
         "failure_reason": gate_error
@@ -1534,7 +1542,11 @@ def run_evaluation(
         },
         "thresholds": config.thresholds,
         "limitations": [
-            "Small local benchmark suite.",
+            (
+                "Frozen external AMLB/OpenML suite is not representative of every tabular data-science domain."
+                if config.suite == "external"
+                else "Small local benchmark suite is not representative of every tabular data-science domain."
+            ),
             "Empirical reference compares only supported families under this CV procedure.",
             "Offline/mock rows are not evidence about live LLM behavior.",
         ],
