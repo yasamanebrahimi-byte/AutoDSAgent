@@ -1,4 +1,8 @@
 {
+  "manifest_schema_version": "confirmatory-manifest-v1",
+  "status": "draft",
+  "strict_live_required": true,
+  "experiment_name": "selective-intervention-reliability",
   "experiment_config_version": "paper-confirmatory-v1",
   "freeze_rule": "Freeze this file and the git commit before inspecting external live outcomes.",
   "research_scope": "LLM-based model-family and preprocessing planning for supervised tabular classification/regression under selective deterministic validation",

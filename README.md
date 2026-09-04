@@ -96,8 +96,11 @@ The optional frozen AMLB/OpenML external evaluation suite is documented in [exte
 Development and confirmatory evaluation are separate. Live API smoke tests
 must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
-outcomes are not part of the normal publication-readiness workflow. Freeze the
-configuration snapshot at
+outcomes are not part of the normal publication-readiness workflow. The checked
+in configuration snapshot is a draft template (`status: "draft"`); intentionally
+set it to `"frozen"` only after selecting the actual models, seeds, repetitions,
+and other experiment settings. Then pass it explicitly with
+`--confirmatory-config` to enable runtime validation and manifest hashing:
 [`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
 before launching a strict-live external run.
 

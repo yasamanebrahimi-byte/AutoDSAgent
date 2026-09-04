@@ -17,6 +17,7 @@ from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
 from app.llm import LLMUnavailable, PROMPT_SCHEMA_VERSION, OpenAIAgents
+from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
 from app.pipeline import (
     _fallback_modeling_plan,
     _fallback_modeling_resolution,
@@ -55,6 +56,17 @@ from evaluation.metrics import (
     summarize_trials,
 )
 from evaluation.perturbations import Perturbation, default_perturbations
+from evaluation.confirmatory import (
+    CONFIRMATORY_EXPERIMENT_NAME,
+    load_confirmatory_manifest,
+    runtime_manifest_values,
+    validate_confirmatory_manifest,
+)
+from evaluation.statistics import (
+    DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
+    DEFAULT_BOOTSTRAP_REPLICATES,
+    DEFAULT_BOOTSTRAP_SEED,
+)
 
 
 EXPERIMENT_CONFIG_VERSION = "paper-confirmatory-v1"
@@ -524,7 +536,10 @@ def _run_trial(
         "deterministic_recommendation_included": False,
         "empirical_reference_included": False,
         "previous_repetitions_included": False,
+        "planner_prompt_schema_version": config.prompt_schema_version,
+        "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
+        "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
     }
     proposal_key = _proposal_cache_key(
         case=case,
@@ -648,7 +663,10 @@ def _run_trial(
             "perturbation": perturbation_id,
             "split_seed": experimental_split_seed,
             "llm_repetition": trial_number,
+            "planner_prompt_schema_version": config.prompt_schema_version,
+            "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
             "prompt_schema_version": config.prompt_schema_version,
+            "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
             "approved_target": case.target_column,
             "approved_task": case.expected_task_type,
         }
@@ -824,7 +842,10 @@ def _run_trial(
                 "tree_ensemble",
                 "boosted_tree",
             ],
+            "planner_prompt_schema_version": config.prompt_schema_version,
+            "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
             "prompt_schema_version": config.prompt_schema_version,
+            "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
         },
         sort_keys=True,
     )
@@ -1077,7 +1098,10 @@ def _run_trial(
             and initial_plan_override is None
         ),
         "generation_settings": {"seed": None, "temperature": None},
+        "planner_prompt_schema_version": config.prompt_schema_version,
+        "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
+        "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
         "agent_initial_input": initial_input_artifact,
         "agent_initial": {
             **initial_fields,
@@ -1439,7 +1463,10 @@ def _failed_trial_record(
         "live_request_failed": not config.offline,
         "api_status": "failed_live_request" if not config.offline else "offline",
         "fallback_status": "none",
+        "planner_prompt_schema_version": config.prompt_schema_version,
+        "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
+        "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
         "agent_initial": None,
         "agent_initial_valid": None,
         "deterministic_recommendation": None,
@@ -1548,6 +1575,8 @@ def run_evaluation(
     empirical_reference_cache_path: str | Path | None = None,
     suite: str = "local",
     tier: str | None = None,
+    confirmatory_config_path: str | Path | None = None,
+    confirmatory_selected_ablations: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
@@ -1622,10 +1651,68 @@ def run_evaluation(
     output_path = Path(output_dir).resolve()
     agents = OpenAIAgents(model=config.planner_model)
     reconciler_agents = OpenAIAgents(model=config.reconciler_model)
+    confirmatory_metadata: dict[str, Any] | None = None
+    if confirmatory_config_path is not None:
+        if config.suite != "external":
+            raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
+        manifest = load_confirmatory_manifest(confirmatory_config_path)
+        configured_holdout_tolerances = {
+            "classification": holdout_neutral_tolerance("classification", config.thresholds),
+            "regression": holdout_neutral_tolerance("regression", config.thresholds),
+        }
+        runtime_values = runtime_manifest_values(
+            experiment_name=CONFIRMATORY_EXPERIMENT_NAME,
+            planner_model=str(agents.model),
+            reconciler_model=str(reconciler_agents.model),
+            split_seeds=list(config.split_seeds),
+            llm_repetitions=config.repetitions,
+            holdout_fraction=config.test_size,
+            selected_ablations=(
+                list(confirmatory_selected_ablations)
+                if confirmatory_selected_ablations is not None
+                else ([config.ablation_name] if config.ablation_name else None)
+            ),
+            deterministic_policy_version=DeterministicPolicy().version,
+            empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
+            planner_prompt_schema_version=config.prompt_schema_version,
+            reconciler_prompt_schema_version=BLINDED_RECONCILIATION_PROMPT_VERSION,
+            candidate_model_families=[
+                "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
+            ],
+            classification_neutral_tolerance=configured_holdout_tolerances["classification"],
+            regression_neutral_tolerance=configured_holdout_tolerances["regression"],
+            benchmark_manifest_version=(
+                selected_cases[0].benchmark_suite_version
+                if selected_cases[0].benchmark_suite_version
+                else "local-2"
+            ),
+            strict_live_required=config.require_live,
+            bootstrap_settings={
+                "method": "dataset_cluster_bootstrap_percentile",
+                "replicates": DEFAULT_BOOTSTRAP_REPLICATES,
+                "confidence_level": DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
+                "seed": DEFAULT_BOOTSTRAP_SEED,
+            },
+            experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+        )
+        confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
     stable_config = {
         "config_version": "2026-09-04.evaluation.v5-paper-metrics",
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
         "confirmatory_config_snapshot": CONFIRMATORY_CONFIG_SNAPSHOT,
+        "confirmatory_mode": confirmatory_metadata is not None,
+        "confirmatory_config_status": (
+            confirmatory_metadata["status"] if confirmatory_metadata else "not_selected"
+        ),
+        "experiment_config_path": str(Path(confirmatory_config_path).resolve()) if confirmatory_config_path else None,
+        "experiment_config_sha256": (
+            confirmatory_metadata.get("experiment_config_sha256")
+            if confirmatory_metadata else None
+        ),
+        "strict_live_required": config.require_live,
+        "fallback_rows": None,
+        "config_mismatch_detected": False,
+        "confirmatory_valid": None,
         "result_schema_version": HOLDOUT_METRIC_SCHEMA_VERSION,
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "suite": config.suite,
@@ -1665,6 +1752,11 @@ def run_evaluation(
         "ablation_name": config.ablation_name,
         "ablation_schema_version": config.ablation_schema_version,
         "ablation_spec": spec_values,
+        "selected_ablations": (
+            list(confirmatory_selected_ablations)
+            if confirmatory_selected_ablations is not None
+            else ([config.ablation_name] if config.ablation_name else None)
+        ),
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
@@ -1674,7 +1766,10 @@ def run_evaluation(
             "probe_direct": "run the bounded pairwise training-only probe; directly select a moderate or strong empirical winner",
             "full": "run the bounded pairwise training-only probe; invoke blinded reconciliation only for moderate or strong evidence",
         },
+        "planner_prompt_schema_version": config.prompt_schema_version,
+        "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
+        "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
         "deterministic_policy_version": DeterministicPolicy().version,
         "soft_challenge_policy_version": SOFT_CHALLENGE_POLICY_VERSION,
         "soft_challenge_calibration_artifact_version": load_calibration_artifact().get(
@@ -1879,6 +1974,39 @@ def run_evaluation(
                                 encoding="utf-8",
                             )
     summary = summarize_trials(trials, thresholds=config.thresholds)
+    confirmatory_valid = None
+    if confirmatory_metadata is not None:
+        confirmatory_valid = bool(
+            config.suite == "external"
+            and config.require_live
+            and not config.offline
+            and summary.get("strict_live_valid", False)
+            and summary.get("fallback_rows", 0) == 0
+        )
+    confirmatory_result_metadata = {
+        "confirmatory_mode": confirmatory_metadata is not None,
+        "confirmatory_config_status": (
+            confirmatory_metadata["status"] if confirmatory_metadata else "not_selected"
+        ),
+        "experiment_config_path": (
+            str(Path(confirmatory_config_path).resolve())
+            if confirmatory_config_path is not None else None
+        ),
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_sha256": (
+            confirmatory_metadata.get("experiment_config_sha256")
+            if confirmatory_metadata else None
+        ),
+        "strict_live_required": config.require_live,
+        "fallback_rows": summary.get("fallback_rows", 0),
+        "config_mismatch_detected": False,
+        "external_benchmark_manifest_matches": (
+            True if confirmatory_metadata is not None else None
+        ),
+        "confirmatory_valid": confirmatory_valid,
+    }
+    summary.update(confirmatory_result_metadata)
+    config_payload.update(confirmatory_result_metadata)
     paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
     if proposal_cache_file is not None:
         _write_proposal_cache(proposal_cache_file, proposal_cache)

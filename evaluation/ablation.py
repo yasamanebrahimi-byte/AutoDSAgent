@@ -16,9 +16,20 @@ from statistics import mean, median
 from typing import Any, Sequence
 
 from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
-from evaluation.runner import run_evaluation
-from evaluation.statistics import cluster_bootstrap_ci
+from evaluation.runner import EXPERIMENT_CONFIG_VERSION, run_evaluation
+from evaluation.statistics import (
+    DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
+    DEFAULT_BOOTSTRAP_REPLICATES,
+    DEFAULT_BOOTSTRAP_SEED,
+    cluster_bootstrap_ci,
+)
 from evaluation.metrics import DEFAULT_THRESHOLDS, holdout_neutral_tolerance, paper_holdout_delta
+from evaluation.confirmatory import (
+    CONFIRMATORY_EXPERIMENT_NAME,
+    load_confirmatory_manifest,
+    runtime_manifest_values,
+    validate_confirmatory_manifest,
+)
 from app.deterministic_policy import DeterministicPolicy
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.llm import PROMPT_SCHEMA_VERSION
@@ -241,8 +252,9 @@ def _paired_comparison(
     right = {_unit_key(row): row for row in rows_by_name.get(second, []) if row.get("trial_status") != "failed"}
     shared = sorted(set(left) & set(right), key=str)
     holdout_differences: list[float] = []
-    holdout_rows: list[dict[str, Any]] = []
-    first_better = second_better = tied = 0
+    holdout_task_types: list[str] = []
+    holdout_by_dataset: dict[str, list[float]] = {}
+    dataset_task_types: dict[str, set[str]] = {}
     diagnostic_differences: list[float] = []
     diagnostic_rows: list[dict[str, Any]] = []
     for key in shared:
@@ -267,7 +279,12 @@ def _paired_comparison(
             # untouched-holdout intervention outcome.
             difference = float(first_delta) - float(second_delta)
             holdout_differences.append(difference)
-            holdout_rows.append({"benchmark_case": key[0], "difference": difference})
+            holdout_task_types.append(str(first_row.get("task_type", "classification")))
+            dataset = str(key[0])
+            holdout_by_dataset.setdefault(dataset, []).append(difference)
+            dataset_task_types.setdefault(dataset, set()).add(
+                str(first_row.get("task_type", "classification"))
+            )
         a = first_row.get("gated_normalized_regret")
         b = second_row.get("gated_normalized_regret")
         if a is not None and b is not None:
@@ -278,22 +295,40 @@ def _paired_comparison(
             diagnostic_rows.append({"benchmark_case": key[0], "difference": diagnostic_difference})
         if first_delta is None or second_delta is None:
             continue
+    dataset_effects = [
+        {
+            "benchmark_case": dataset,
+            "difference": mean(differences),
+            "paired_trial_count": len(differences),
+            "task_type": sorted(dataset_task_types.get(dataset, {"classification"}))[0],
+        }
+        for dataset, differences in sorted(holdout_by_dataset.items())
+    ]
+    dataset_means = [row["difference"] for row in dataset_effects]
+    dataset_better = {"first": 0, "second": 0, "tied": 0}
+    for row in dataset_effects:
+        task_type = row["task_type"]
         pair_tolerance = (
-            holdout_neutral_tolerance(str(first_row.get("task_type", "classification")), tolerance)
+            holdout_neutral_tolerance(task_type, tolerance)
             if isinstance(tolerance, dict)
             else float(tolerance)
         )
-        if difference > pair_tolerance:
-            first_better += 1
-        elif difference < -pair_tolerance:
-            second_better += 1
+        if row["difference"] > pair_tolerance:
+            dataset_better["first"] += 1
+        elif row["difference"] < -pair_tolerance:
+            dataset_better["second"] += 1
         else:
-            tied += 1
+            dataset_better["tied"] += 1
+    # One row per dataset is intentional: the clustered bootstrap below is
+    # therefore a bootstrap of the dataset-level paired effects, not of
+    # individual split/repetition rows.
     holdout_difference_ci = cluster_bootstrap_ci(
-        holdout_rows,
+        dataset_effects,
         lambda sample: mean(row["difference"] for row in sample) if sample else None,
         "benchmark_case",
     )
+    trial_weighted_mean = mean(holdout_differences) if holdout_differences else None
+    trial_weighted_median = median(holdout_differences) if holdout_differences else None
     diagnostic_difference_ci = cluster_bootstrap_ci(
         diagnostic_rows,
         lambda sample: mean(row["difference"] for row in sample) if sample else None,
@@ -305,17 +340,52 @@ def _paired_comparison(
         "paired_units": len(holdout_differences),
         "paired_holdout_units": len(holdout_differences),
         "paired_training_diagnostic_units": len(diagnostic_differences),
-        "n_paired_datasets": len({row["benchmark_case"] for row in holdout_rows}),
-        "first_better": first_better,
-        "second_better": second_better,
-        "tied": tied,
-        "mean_paired_holdout_delta_difference_first_advantage": mean(holdout_differences) if holdout_differences else None,
-        "median_paired_holdout_delta_difference_first_advantage": median(holdout_differences) if holdout_differences else None,
+        "n_paired_datasets": len(dataset_effects),
+        "paired_holdout_dataset_effects": dataset_effects,
+        # Paper-primary pairwise values: one equal-weighted effect per
+        # benchmark dataset/task, with win/tie/loss also classified per task.
+        "first_better": dataset_better["first"],
+        "second_better": dataset_better["second"],
+        "tied": dataset_better["tied"],
+        "dataset_macro_first_better": dataset_better["first"],
+        "dataset_macro_second_better": dataset_better["second"],
+        "dataset_macro_tied": dataset_better["tied"],
+        "mean_paired_holdout_delta_difference_first_advantage": mean(dataset_means) if dataset_means else None,
+        "median_paired_holdout_delta_difference_first_advantage": median(dataset_means) if dataset_means else None,
+        "dataset_macro_mean_paired_holdout_delta_difference_first_advantage": mean(dataset_means) if dataset_means else None,
+        "dataset_macro_median_paired_holdout_delta_difference_first_advantage": median(dataset_means) if dataset_means else None,
         "paired_holdout_delta_ci": holdout_difference_ci,
+        # Explicitly secondary, trial-weighted diagnostics retained for
+        # reproducibility with earlier reports.
+        "trial_weighted_mean_paired_holdout_delta_difference_first_advantage": trial_weighted_mean,
+        "trial_weighted_median_paired_holdout_delta_difference_first_advantage": trial_weighted_median,
+        "trial_weighted_first_better": sum(
+            difference > (
+                holdout_neutral_tolerance(task_type, tolerance)
+                if isinstance(tolerance, dict) else float(tolerance)
+            ) for difference, task_type in zip(holdout_differences, holdout_task_types)
+        ),
+        "trial_weighted_second_better": sum(
+            difference < -(
+                holdout_neutral_tolerance(task_type, tolerance)
+                if isinstance(tolerance, dict) else float(tolerance)
+            ) for difference, task_type in zip(holdout_differences, holdout_task_types)
+        ),
+        "trial_weighted_tied": sum(
+            abs(difference) <= (
+                holdout_neutral_tolerance(task_type, tolerance)
+                if isinstance(tolerance, dict) else float(tolerance)
+            ) for difference, task_type in zip(holdout_differences, holdout_task_types)
+        ),
         "mean_paired_regret_difference_first_advantage": mean(diagnostic_differences) if diagnostic_differences else None,
         "median_paired_regret_difference_first_advantage": median(diagnostic_differences) if diagnostic_differences else None,
+        "trial_weighted_mean_paired_regret_difference_first_advantage": mean(diagnostic_differences) if diagnostic_differences else None,
+        "trial_weighted_median_paired_regret_difference_first_advantage": median(diagnostic_differences) if diagnostic_differences else None,
         "paired_regret_difference_ci": diagnostic_difference_ci,
+        "trial_weighted_paired_regret_difference_ci": diagnostic_difference_ci,
         "training_reference_comparison_role": "secondary diagnostic; primary comparison uses untouched holdout",
+        "paired_holdout_difference_sign": "first ablation paper_holdout_delta minus second ablation paper_holdout_delta; positive favors first",
+        "win_loss_tie_unit": "dataset/task mean paired difference",
     }
 
 
@@ -333,7 +403,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Central Comparison",
         "",
-        "| Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (macro) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
+        "| Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro, descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|",
     ]
     for row in payload["central_table"]:
@@ -345,7 +415,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Paired Comparisons", ""])
     for item in payload["paired_comparisons"]:
         lines.append(
-            f"- `{item['first']}` vs `{item['second']}`: primary untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
+            f"- `{item['first']}` vs `{item['second']}`: dataset-macro untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Trial-weighted diagnostic mean: `{item['trial_weighted_mean_paired_holdout_delta_difference_first_advantage']}`. Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
         )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
@@ -382,6 +452,7 @@ def run_ablation_study(
     resume: bool = False,
     suite: str = "local",
     tier: str | None = None,
+    confirmatory_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
@@ -413,6 +484,48 @@ def run_ablation_study(
     split_seeds = tuple(int(seed) for seed in split_seeds)
     if not split_seeds:
         raise ValueError("At least one split seed is required.")
+    configured_thresholds = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    confirmatory_metadata: dict[str, Any] | None = None
+    if confirmatory_config_path is not None:
+        manifest = load_confirmatory_manifest(confirmatory_config_path)
+        runtime_values = runtime_manifest_values(
+            experiment_name=CONFIRMATORY_EXPERIMENT_NAME,
+            planner_model=resolved_planner_model,
+            reconciler_model=resolved_reconciler_model,
+            split_seeds=split_seeds,
+            llm_repetitions=repetitions,
+            holdout_fraction=0.2,
+            selected_ablations=selected_names,
+            deterministic_policy_version=DeterministicPolicy().version,
+            empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
+            planner_prompt_schema_version=PROMPT_SCHEMA_VERSION,
+            reconciler_prompt_schema_version=BLINDED_RECONCILIATION_PROMPT_VERSION,
+            candidate_model_families=[
+                "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
+            ],
+            classification_neutral_tolerance=holdout_neutral_tolerance(
+                "classification", configured_thresholds
+            ),
+            regression_neutral_tolerance=holdout_neutral_tolerance(
+                "regression", configured_thresholds
+            ),
+            benchmark_manifest_version=(
+                selected_cases[0].benchmark_suite_version
+                if selected_cases[0].benchmark_suite_version
+                else "local-2"
+            ),
+            strict_live_required=require_live,
+            bootstrap_settings={
+                "method": "dataset_cluster_bootstrap_percentile",
+                "replicates": DEFAULT_BOOTSTRAP_REPLICATES,
+                "confidence_level": DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
+                "seed": DEFAULT_BOOTSTRAP_SEED,
+            },
+            experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+        )
+        if suite != "external":
+            raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
+        confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / "config.json"
@@ -427,6 +540,7 @@ def run_ablation_study(
 
     root_config = {
         "experiment_freeze_metadata_version": EXPERIMENT_FREEZE_METADATA_VERSION,
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
         "repository_commit": repository_commit(),
         "ablation_schema_version": ABLATION_SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -454,7 +568,8 @@ def run_ablation_study(
             case.openml_task_id for case in selected_cases
             if case.openml_task_id is not None
         ],
-        "prompt_schema_version": "modeling-gate-v1",
+        "planner_prompt_schema_version": PROMPT_SCHEMA_VERSION,
+        "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "deterministic_policy_version": DeterministicPolicy().version,
         "deterministic_policy": {
             "version": DeterministicPolicy().version,
@@ -463,8 +578,7 @@ def run_ablation_study(
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "empirical_probe_policy": EmpiricalProbePolicy().as_dict(),
         "reconciliation_prompt_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
-        "planner_prompt_schema_version": PROMPT_SCHEMA_VERSION,
-        "thresholds": {**DEFAULT_THRESHOLDS, **(thresholds or {})},
+        "thresholds": configured_thresholds,
         "holdout_fraction": 0.2,
         "candidate_model_families": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
         "preprocessing_option_space": [
@@ -480,6 +594,16 @@ def run_ablation_study(
             "bootstrap_seed": 20260824,
         },
         "confirmatory_config_snapshot": "evaluation/configs/paper_confirmatory_v1.json",
+        "confirmatory_mode": confirmatory_metadata is not None,
+        "confirmatory_config_status": (
+            confirmatory_metadata["status"] if confirmatory_metadata else "not_selected"
+        ),
+        "experiment_config_path": str(Path(confirmatory_config_path).resolve()) if confirmatory_config_path else None,
+        "experiment_config_sha256": confirmatory_metadata.get("experiment_config_sha256") if confirmatory_metadata else None,
+        "strict_live_required": require_live,
+        "fallback_rows": None,
+        "config_mismatch_detected": False,
+        "confirmatory_valid": None,
         "evaluation_objective": "intervention-quality-v1",
     }
     if suite == "external":
@@ -545,6 +669,8 @@ def run_ablation_study(
             resume=resume and (spec_dir / "config.json").is_file(),
             suite=suite,
             tier=tier,
+            confirmatory_config_path=confirmatory_config_path,
+            confirmatory_selected_ablations=selected_names if confirmatory_metadata else None,
         )
         results[spec.name] = result
         trial_rows[spec.name] = result["trials"]
@@ -586,6 +712,20 @@ def run_ablation_study(
             row["ablation"]: row["api_usage"] for row in central
         },
     }
+    if confirmatory_metadata is not None:
+        fallback_rows = sum(
+            int(result["summary"].get("fallback_rows", 0)) for result in results.values()
+        )
+        root_config.update({
+            "fallback_rows": fallback_rows,
+            "external_benchmark_manifest_matches": True,
+            "confirmatory_valid": bool(
+                all(result["summary"].get("confirmatory_valid") is True for result in results.values())
+            ),
+        })
+        combined.update(root_config)
+        combined["confirmatory_valid"] = root_config["confirmatory_valid"]
+        config_path.write_text(json.dumps(root_config, indent=2, sort_keys=True), encoding="utf-8")
     (root / "ablation_summary.json").write_text(
         json.dumps(combined, indent=2, sort_keys=True), encoding="utf-8"
     )
@@ -631,6 +771,10 @@ def main() -> None:
     parser.add_argument("--require-live", action="store_true")
     parser.add_argument("--include-perturbations", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--confirmatory-config",
+        help="Opt into a frozen external confirmatory manifest; development runs omit this flag.",
+    )
     args = parser.parse_args()
     result = run_ablation_study(
         args.output,
@@ -647,6 +791,7 @@ def main() -> None:
         resume=args.resume,
         suite=args.suite,
         tier=args.tier,
+        confirmatory_config_path=args.confirmatory_config,
     )
     print(json.dumps(result["summary"]["central_table"], indent=2, default=str))
 

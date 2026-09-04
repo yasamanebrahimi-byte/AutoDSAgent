@@ -56,6 +56,10 @@ rate, scale-free mean/median delta, dataset-macro estimate, clustered CI, and
 valid paired denominator are reported alongside the training-side diagnostics
 below.
 
+The result schema remains `holdout-metrics-v2`: the explicit training-reference
+names and incidence fields are additive, while historical short names remain
+deprecated aliases with their semantics recorded in the serialized formulas.
+
 For training-side diagnostic analysis, `normalized_gate_delta` is
 `initial_normalized_regret - final_normalized_regret`. Positive means that the
 gate reduced regret. The same direction is obtained directly from primary
@@ -77,16 +81,27 @@ success or harm.
 
 ## Paper-facing intervention metrics
 
-- `challenge_rate = challenged_disagreements / eligible_disagreements`.
-- `intervention_rate = changed_soft_plans / completed_trials`.
-- `abstention_preservation_rate = abstained_disagreements /
-  (challenged_disagreements + abstained_disagreements)`.
-- `beneficial_intervention_rate`, `harmful_intervention_rate`, and
-  `neutral_intervention_rate` use the task-appropriate holdout delta and its
-  task-specific tolerance.
-- `intervention_precision = beneficial / all comparable actual interventions`.
-- `harm_rate = harmful / all comparable actual interventions` (also exposed as
-  `harmful_intervention_rate`).
+- An eligible soft disagreement is a completed disagreement with a valid
+  initial proposal after hard-validation eligibility; the denominator is the
+  set of eligible soft disagreements, represented by challenge plus abstention
+  records.
+- `challenge_rate = challenged eligible initial plans / eligible soft
+  disagreements`.
+- `intervention_rate = actual changed soft plans / eligible completed trials`.
+- `abstention_rate` and `abstention_preservation_rate` are conditional:
+  `challenged eligible initial plans preserved because evidence was insufficient
+  / eligible soft disagreements`.
+- `beneficial_intervention_rate = beneficial actual interventions / actual
+  interventions with evaluable holdout outcome`; `harmful_intervention_rate`
+  and `neutral_intervention_rate` use the same denominator and their respective
+  untouched-holdout outcomes. Their incidence counterparts use all eligible
+  completed trials as denominator.
+- `intervention_precision = beneficial actual interventions / actual
+  interventions with evaluable holdout outcome`.
+- `harm_rate = harmful actual interventions / actual interventions with
+  evaluable holdout outcome` (also exposed as `harmful_intervention_rate`).
+- A zero denominator returns `null` and renders as `n/a`; no rate silently
+  changes its denominator.
 
 All rates return `null` when their denominator is zero. Primary estimates are
 dataset-macro; trial-weighted values are retained and explicitly labeled as
@@ -97,9 +112,18 @@ secondary diagnostics.
 - `training_reference_intervention_precision = improved / (improved +
   worsened)`. Neutral interventions are excluded from this denominator; this
   is distinct from the primary holdout `intervention_precision`.
-- `challenge_yield = improved / total_challenges`.
-- `harmful_intervention_rate = worsened / total_challenges`.
-- `unnecessary_intervention_rate = neutral / total_challenges`.
+- `training_reference_challenge_yield = training-reference improved challenges
+  / total challenges`.
+- `training_reference_harmful_intervention_rate = training-reference worsened
+  challenges / total challenges`.
+- `training_reference_unnecessary_intervention_rate = training-reference
+  neutral challenges / total challenges`.
+- `challenge_yield` is a deprecated alias for
+  `training_reference_challenge_yield`; `unnecessary_intervention_rate` is a
+  deprecated alias for `training_reference_unnecessary_intervention_rate`.
+  New paper-facing harm is always the untouched-holdout
+  `harmful_intervention_rate`; historical rows without holdout pairs retain a
+  documented compatibility fallback rather than being reinterpreted.
 - `challenge_recall` (also exposed as `rescue_recall`) is an optional post-hoc
   diagnostic whose denominator is a training-only empirical-reference
   opportunity: the deterministic alternative is better than the initial plan
@@ -154,6 +178,18 @@ percentile bootstrap samples dataset/task IDs with replacement and retains all
 rows belonging to each sampled task, including repeated splits and LLM
 repetitions. It is never an IID row bootstrap. Key mean metrics include a
 fixed-seed dataset-clustered interval; support below 20 is marked unstable.
+
+Paired ablation effects follow the same independent-unit rule: trials are
+paired by case, perturbation, split seed, repetition, and evaluation variant;
+paired holdout deltas are averaged within each dataset/task; the headline is
+the mean of those dataset effects; and the paired CI resamples one complete
+dataset effect at a time. Trial-weighted paired values remain diagnostics only.
+
+The pooled `paper_holdout_delta` is descriptive because classification uses
+absolute macro-F1 points while regression uses relative RMSE improvement.
+Paper reporting therefore emphasizes challenge/intervention/abstention and
+holdout outcome rates, dataset-level win/tie/loss, and separate classification
+and regression magnitude summaries with clustered CIs.
 
 Reports include decision-path, deterministic-confidence, empirical-probe-
 strength, task/regime, per-dataset, repetition-aware, concentration, and

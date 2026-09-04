@@ -163,13 +163,15 @@ python -m pip install -e ".[benchmark]"
 python scripts/prefetch_external_benchmarks.py
 ```
 
-3. Run a small paired strict-live core-tier ablation only after the
-configuration and manifest are frozen, and treat it as the confirmatory run
-itself. Live is implicit for
-`evaluation.ablation`; do not add `--live`:
+3. Intentionally freeze the confirmatory manifest (`status: "frozen"`) and the
+git commit only after all policies, prompts, thresholds, models, metrics,
+benchmark membership, split seeds, repetitions, and analysis are final.
+4. Run the frozen external confirmatory experiment. Live is implicit for
+`evaluation.ablation`; do not add `--live`. Opt in to manifest enforcement
+with `--confirmatory-config evaluation/configs/paper_confirmatory_v1.json`:
 
 ```bash
-python -m evaluation.ablation --suite external --tier core --require-live --output evaluation_results/external_core_live --split-seed 42 --repetitions 1 --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
+python -m evaluation.ablation --suite external --tier core --require-live --confirmatory-config evaluation/configs/paper_confirmatory_v1.json --output evaluation_results/external_core_live --split-seed 42 --repetitions 1 --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
 ```
 
 Confirm that `proposal_cache.jsonl` gives compatible ablations the same initial
@@ -178,9 +180,14 @@ fallback rows, explicit planner/reconciler success counts, effective model IDs,
 and a valid confirmatory status. A failed or incomplete strict-live run is
 preserved for debugging and excluded from headline analysis.
 
+If execution is staged into a core tranche and a stress tranche, these are two
+execution tranches of one already-frozen confirmatory experiment. After core
+outcomes are observed, do not change prompts, thresholds, deterministic policy,
+model families, benchmark membership, analysis metrics, or reconciliation
+before running stress. If any such change is necessary, the earlier external
+run becomes exploratory and the modified later run cannot be combined with it
+as one untouched confirmatory experiment.
+
 An external live pilot is not part of the normal publication-readiness
-workflow. If operational debugging requires one, predesignate the task before
-the run, record it as exploratory, and exclude that task/run from the
-confirmatory headline analysis. Do not tune policies, prompts, thresholds,
-candidate families, reconciliation, or benchmark membership after inspecting
-external live outcomes and then reuse those outcomes as untouched confirmation.
+workflow. If operational debugging requires one, use only a predesignated
+task, record it as exploratory, and exclude it from confirmatory analysis.

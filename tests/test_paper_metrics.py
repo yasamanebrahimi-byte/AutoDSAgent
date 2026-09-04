@@ -12,6 +12,7 @@ from evaluation.metrics import (
     summarize_gate_health,
     summarize_trials,
 )
+from evaluation.statistics import cluster_bootstrap_ci
 
 
 def _holdout_record(
@@ -73,6 +74,34 @@ def test_regression_neutrality_uses_relative_not_native_rmse_units():
     assert holdout["harmful_intervention_count"] == 0
 
 
+def test_training_reference_harm_and_holdout_harm_are_distinct_metrics():
+    records = []
+    for index, (initial, final) in enumerate(((0.20, 0.00), (0.00, 0.20), (0.05, 0.045))):
+        record = {
+            "benchmark_case": "metric-separation",
+            "task_type": "classification",
+            "trial_status": "completed",
+            "agreement_status": "disagreement",
+            "method_disagreement": True,
+            "soft_challenge": {"status": "disagreement", "decision": "challenge"},
+            "agent_initial_valid": True,
+            "intervention_occurred": True,
+            "agent_normalized_regret": initial,
+            "gated_normalized_regret": final,
+            "initial_holdout_metric": 0.60,
+            "final_holdout_metric": 0.70,
+            "paper_holdout_delta": 0.10,
+            "trial": index,
+        }
+        records.append(record)
+
+    health = summarize_gate_health(records)
+    assert health["training_reference_challenge_yield"] == pytest.approx(1 / 3)
+    assert health["training_reference_harmful_intervention_rate"] == pytest.approx(1 / 3)
+    assert health["harmful_intervention_rate"] == pytest.approx(0.0)
+    assert health["holdout_intervention_metrics"]["harmful_intervention_rate"] == pytest.approx(0.0)
+
+
 def test_dataset_macro_holdout_estimate_does_not_weight_extra_repetitions():
     records = [
         _holdout_record("small", "classification", 0.60, 0.70),
@@ -117,6 +146,64 @@ def test_ablation_primary_pairing_uses_holdout_delta_and_keeps_regret_diagnostic
     assert result["mean_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0.20)
     assert result["training_reference_comparison_role"].startswith("secondary")
     assert result["mean_paired_regret_difference_first_advantage"] == pytest.approx(-0.40)
+
+
+def test_ablation_pairing_is_dataset_macro_with_unequal_repetitions():
+    def row(dataset: str, trial: int, delta: float) -> dict:
+        return {
+            "trial_status": "completed",
+            "benchmark_case": dataset,
+            "task_type": "classification",
+            "perturbation_id": "clean",
+            "split_seed": 42,
+            "trial": trial,
+            "evaluation_variant": "standard",
+            "paper_holdout_delta": delta,
+        }
+
+    rows = {
+        "first": [row("A", trial, 0.10) for trial in range(9)] + [row("B", 0, -0.10)],
+        "second": [row("A", trial, 0.00) for trial in range(9)] + [row("B", 0, 0.00)],
+    }
+    result = _paired_comparison(rows, "first", "second", tolerance=0.02)
+
+    assert result["n_paired_datasets"] == 2
+    assert result["mean_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0.0)
+    assert result["median_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0.0)
+    assert result["trial_weighted_mean_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0.08)
+    assert (result["first_better"], result["second_better"], result["tied"]) == (1, 1, 0)
+    assert result["paired_holdout_delta_ci"]["n_clusters"] == 2
+    expected_ci = cluster_bootstrap_ci(
+        result["paired_holdout_dataset_effects"],
+        lambda sample: sum(item["difference"] for item in sample) / len(sample) if sample else None,
+        "benchmark_case",
+    )
+    assert result["paired_holdout_delta_ci"] == expected_ci
+    assert [item["paired_trial_count"] for item in result["paired_holdout_dataset_effects"]] == [9, 1]
+
+
+def test_ablation_pairing_win_tie_loss_is_dataset_level():
+    base = {
+        "trial_status": "completed",
+        "task_type": "classification",
+        "perturbation_id": "clean",
+        "split_seed": 42,
+        "evaluation_variant": "standard",
+    }
+    rows = {
+        "first": [
+            {**base, "benchmark_case": "better", "trial": 0, "paper_holdout_delta": 0.05},
+            {**base, "benchmark_case": "tie", "trial": 0, "paper_holdout_delta": 0.01},
+            {**base, "benchmark_case": "worse", "trial": 0, "paper_holdout_delta": -0.05},
+        ],
+        "second": [
+            {**base, "benchmark_case": "better", "trial": 0, "paper_holdout_delta": 0.00},
+            {**base, "benchmark_case": "tie", "trial": 0, "paper_holdout_delta": 0.00},
+            {**base, "benchmark_case": "worse", "trial": 0, "paper_holdout_delta": 0.00},
+        ],
+    }
+    result = _paired_comparison(rows, "first", "second", tolerance=0.02)
+    assert (result["first_better"], result["second_better"], result["tied"]) == (1, 1, 1)
 
 
 def test_summary_exposes_versioned_paper_fields_and_marks_strict_failures():

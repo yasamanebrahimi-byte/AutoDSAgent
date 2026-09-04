@@ -70,6 +70,10 @@ def main() -> None:
         help="Strict research mode: fail incomplete live trials instead of substituting fallbacks; failed/incomplete rows are non-confirmatory.",
     )
     parser.add_argument(
+        "--confirmatory-config",
+        help="Opt into a frozen external confirmatory manifest; development runs omit this flag.",
+    )
+    parser.add_argument(
         "--include-perturbations",
         action="store_true",
         help="Add the small deterministic data-quality scenario suite.",
@@ -96,6 +100,7 @@ def main() -> None:
         resume=args.resume,
         suite=args.suite,
         tier=args.tier,
+        confirmatory_config_path=args.confirmatory_config,
     )
     print(json.dumps(result, indent=2, default=str))
 

@@ -648,9 +648,13 @@ def _holdout_health(
         "harmful_intervention_count": harmful,
         "neutral_intervention_count": neutral,
         "intervention_precision": _rate(beneficial, denominator),
+        "beneficial_intervention_rate": _rate(beneficial, denominator),
         "harmful_intervention_rate": _rate(harmful, denominator),
         "harm_rate": _rate(harmful, denominator),
         "holdout_neutral_intervention_rate": _rate(neutral, denominator),
+        "holdout_beneficial_intervention_rate": _rate(beneficial, denominator),
+        "holdout_harmful_intervention_rate": _rate(harmful, denominator),
+        "holdout_neutral_intervention_incidence": _rate(neutral, len(records)),
         "mean_holdout_intervention_delta": _mean(deltas),
         "median_holdout_intervention_delta": _median(deltas),
         "mean_paper_holdout_delta": _mean(deltas),
@@ -1013,19 +1017,32 @@ def _gate_health(
             primary_improved, primary_improved + primary_harmful
         ),
         "intervention_precision_including_neutral": _rate(primary_improved, primary_denominator),
-        "challenge_yield": _rate(primary_improved, primary_denominator),
+        # Training/reference quantities have explicit names.  The historical
+        # short names below remain aliases for old consumers only.
+        "training_reference_challenge_yield": _rate(improved, len(challenges)),
+        "challenge_yield": _rate(improved, len(challenges)),
         "harmful_intervention_rate": _rate(primary_harmful, primary_denominator),
         "harm_rate": _rate(primary_harmful, primary_denominator),
         "beneficial_intervention_rate": _rate(primary_improved, primary_denominator),
         "neutral_intervention_rate": _rate(primary_neutral, primary_denominator),
+        "beneficial_intervention_incidence": _rate(primary_improved, len(valid)),
+        "harmful_intervention_incidence": _rate(primary_harmful, len(valid)),
+        "neutral_intervention_incidence": _rate(primary_neutral, len(valid)),
         "intervention_rate": _rate(len(interventions), len(valid)),
         "abstention_preservation_rate": _rate(len(abstentions), len(challenges) + len(abstentions)),
-        "unnecessary_intervention_count": primary_neutral,
-        "unnecessary_intervention_rate": _rate(primary_neutral, primary_denominator),
+        "unnecessary_intervention_count": neutral,
+        "unnecessary_intervention_rate": _rate(neutral, len(challenges)),
         "holdout_intervention_metrics": holdout,
         "training_reference_intervention_precision": _rate(improved, improved + worsened),
         "training_reference_harmful_intervention_rate": _rate(worsened, len(challenges)),
         "training_reference_unnecessary_intervention_rate": _rate(neutral, len(challenges)),
+        "metric_aliases": {
+            "challenge_yield": "deprecated alias for training_reference_challenge_yield",
+            "unnecessary_intervention_rate": "deprecated alias for training_reference_unnecessary_intervention_rate",
+            "harmful_intervention_rate": (
+                "paper holdout rate when holdout pairs are available; historical training-reference fallback otherwise"
+            ),
+        },
         "challenge_recall": _rate(beneficial_challenges, beneficial_opportunities),
         "beneficial_challenge_count": beneficial_challenges,
         "beneficial_opportunity_count": beneficial_opportunities,
@@ -1110,10 +1127,18 @@ def _dataset_macro_health(
         for dataset, group in sorted(grouped.items(), key=lambda item: str(item[0]))
     }
     numeric = (
-        "intervention_precision", "intervention_precision_excluding_neutral", "challenge_yield", "harmful_intervention_rate", "harm_rate",
+        "intervention_precision", "intervention_precision_excluding_neutral",
+        "training_reference_challenge_yield", "challenge_yield",
+        "harmful_intervention_rate", "harm_rate",
+        "training_reference_intervention_precision",
+        "training_reference_harmful_intervention_rate",
+        "training_reference_unnecessary_intervention_rate",
         "unnecessary_intervention_rate", "challenge_recall", "mean_regret_reduction",
         "median_regret_reduction", "catastrophic_prevented_rate", "catastrophic_introduced_rate",
-        "challenge_rate", "abstention_rate", "beneficial_intervention_rate", "neutral_intervention_rate", "intervention_rate",
+        "challenge_rate", "abstention_rate", "beneficial_intervention_rate",
+        "neutral_intervention_rate", "intervention_rate",
+        "beneficial_intervention_incidence", "harmful_intervention_incidence",
+        "neutral_intervention_incidence",
         "abstention_preservation_rate", "mean_paper_holdout_delta",
         "median_paper_holdout_delta",
     )
@@ -1137,6 +1162,11 @@ def _dataset_macro_health(
             )
         },
         "dataset_macro_holdout_intervention_metrics": {
+            "beneficial_intervention_rate": _mean(
+                float(item["holdout_intervention_metrics"]["beneficial_intervention_rate"])
+                for item in per_dataset.values()
+                if item["holdout_intervention_metrics"].get("beneficial_intervention_rate") is not None
+            ),
             "intervention_precision": _mean(
                 float(item["holdout_intervention_metrics"]["intervention_precision"])
                 for item in per_dataset.values()
@@ -1517,11 +1547,32 @@ def summarize_trials(
                 "intervention_precision_excluding_neutral"
             ],
             "challenge_yield": health["challenge_yield"],
+            "training_reference_challenge_yield": health[
+                "training_reference_challenge_yield"
+            ],
             "intervention_rate": health["intervention_rate"],
             "abstention_preservation_rate": health["abstention_preservation_rate"],
             "beneficial_intervention_rate": health["beneficial_intervention_rate"],
             "harmful_intervention_rate": health["harmful_intervention_rate"],
             "neutral_intervention_rate": health["neutral_intervention_rate"],
+            "beneficial_intervention_incidence": health[
+                "beneficial_intervention_incidence"
+            ],
+            "harmful_intervention_incidence": health[
+                "harmful_intervention_incidence"
+            ],
+            "neutral_intervention_incidence": health[
+                "neutral_intervention_incidence"
+            ],
+            "training_reference_intervention_precision": health[
+                "training_reference_intervention_precision"
+            ],
+            "training_reference_harmful_intervention_rate": health[
+                "training_reference_harmful_intervention_rate"
+            ],
+            "training_reference_unnecessary_intervention_rate": health[
+                "training_reference_unnecessary_intervention_rate"
+            ],
             "challenge_recall": health["challenge_recall"],
             "missed_rescue_count": health["missed_rescue_count"],
             "good_abstention_count": health["good_abstention_count"],
@@ -1693,11 +1744,16 @@ def summarize_trials(
     # dataset/task summaries. Its intervals use the same dataset-cluster
     # bootstrap, rather than an IID row bootstrap or a trial-weighted mean.
     macro_ci_metrics = (
-        "intervention_precision", "challenge_yield", "harmful_intervention_rate", "harm_rate",
+        "intervention_precision", "challenge_yield",
+        "training_reference_challenge_yield", "harmful_intervention_rate", "harm_rate",
+        "training_reference_harmful_intervention_rate",
+        "training_reference_unnecessary_intervention_rate",
         "unnecessary_intervention_rate", "challenge_recall", "mean_regret_reduction",
         "median_regret_reduction", "catastrophic_prevented_rate",
         "catastrophic_introduced_rate",
         "beneficial_intervention_rate", "neutral_intervention_rate", "intervention_rate",
+        "beneficial_intervention_incidence", "harmful_intervention_incidence",
+        "neutral_intervention_incidence",
         "abstention_preservation_rate", "mean_paper_holdout_delta", "median_paper_holdout_delta",
         "intervention_precision_excluding_neutral",
     )
@@ -1788,9 +1844,11 @@ def summarize_trials(
             "regret_reduction": "initial_normalized_regret-final_normalized_regret",
             "gate_outcome": "improved/worsened when regret reduction differs from zero by more than neutral_tolerance; otherwise neutral",
             "training_reference_intervention_precision": "improved_interventions/(improved_interventions+worsened_interventions); neutral interventions excluded",
-            "challenge_yield": "improved_interventions/total_challenges",
-            "harmful_intervention_rate": "worsened_interventions/total_challenges",
-            "unnecessary_intervention_rate": "neutral_interventions/total_challenges",
+            "training_reference_challenge_yield": "training_reference_improved_challenges/total_challenges",
+            "training_reference_harmful_intervention_rate": "training_reference_worsened_challenges/total_challenges",
+            "training_reference_unnecessary_intervention_rate": "training_reference_neutral_challenges/total_challenges",
+            "challenge_yield": "deprecated alias for training_reference_challenge_yield",
+            "unnecessary_intervention_rate": "deprecated alias for training_reference_unnecessary_intervention_rate",
             "holdout_macro_f1_delta": "final_holdout_macro_f1-initial_holdout_macro_f1",
             "holdout_rmse_delta_raw": "initial_holdout_rmse-final_holdout_rmse (diagnostic/native units only)",
             "holdout_rmse_relative_improvement": "(initial_holdout_rmse-final_holdout_rmse)/max(abs(initial_holdout_rmse), holdout_rmse_epsilon)",
@@ -1799,11 +1857,18 @@ def summarize_trials(
             "beneficial_intervention": "paper_holdout_delta > task-specific neutral tolerance",
             "harmful_intervention": "paper_holdout_delta < -task-specific neutral tolerance",
             "neutral_intervention": "abs(paper_holdout_delta) <= task-specific neutral tolerance",
-            "intervention_precision": "beneficial_interventions / all comparable actual interventions; null when denominator is zero",
-            "harm_rate": "harmful_interventions / all comparable actual interventions; null when denominator is zero",
-            "challenge_rate": "challenged_disagreements / eligible_disagreements",
-            "intervention_rate": "actual_changed_soft_plans / completed_trials",
-            "abstention_preservation_rate": "abstained_challenges / challenged_or_abstained_disagreements",
+            "beneficial_intervention_rate": "beneficial actual interventions / actual interventions with evaluable holdout outcome",
+            "neutral_intervention_rate": "neutral actual interventions / actual interventions with evaluable holdout outcome",
+            "intervention_precision": "beneficial actual interventions / actual interventions with evaluable holdout outcome; null when denominator is zero",
+            "harmful_intervention_rate": "harmful actual interventions / actual interventions with evaluable holdout outcome; historical rows without holdout retain the deprecated training-reference fallback",
+            "harm_rate": "same numerator and denominator as harmful_intervention_rate",
+            "challenge_rate": "challenged eligible initial plans / eligible soft disagreements (challenge plus abstention records after hard-validation eligibility); null when denominator is zero",
+            "intervention_rate": "actual final-plan changes caused by the soft safeguard / completed eligible trials",
+            "abstention_rate": "challenged eligible initial plans preserved because evidence was insufficient / eligible soft disagreements",
+            "abstention_preservation_rate": "same conditional preservation rate as abstention_rate",
+            "beneficial_intervention_incidence": "beneficial actual interventions / eligible completed trials",
+            "harmful_intervention_incidence": "harmful actual interventions / eligible completed trials",
+            "neutral_intervention_incidence": "neutral actual interventions / eligible completed trials",
             "challenge_recall": "beneficial_challenges_made/all_disagreements_where_deterministic_alternative_would_help",
             "rescue_recall": "same as challenge_recall; denominator is a training-only empirical-reference rescue opportunity, never a holdout-derived gate",
             "potentially_unnecessary_intervention": "valid initial plan AND method disagreement AND final method changed AND initial regret within the task tolerance",
@@ -1942,6 +2007,9 @@ def summarize_trials(
             "intervention_precision_excluding_neutral"
         ],
         "challenge_yield": dataset_gate_health["challenge_yield"],
+        "training_reference_challenge_yield": dataset_gate_health[
+            "training_reference_challenge_yield"
+        ],
         "intervention_rate": dataset_gate_health["intervention_rate"],
         "abstention_preservation_rate": dataset_gate_health[
             "abstention_preservation_rate"
@@ -1952,7 +2020,25 @@ def summarize_trials(
         "harmful_intervention_rate": dataset_gate_health["harmful_intervention_rate"],
         "harm_rate": dataset_gate_health["harm_rate"],
         "neutral_intervention_rate": dataset_gate_health["neutral_intervention_rate"],
+        "beneficial_intervention_incidence": dataset_gate_health[
+            "beneficial_intervention_incidence"
+        ],
+        "harmful_intervention_incidence": dataset_gate_health[
+            "harmful_intervention_incidence"
+        ],
+        "neutral_intervention_incidence": dataset_gate_health[
+            "neutral_intervention_incidence"
+        ],
         "unnecessary_intervention_rate": dataset_gate_health["unnecessary_intervention_rate"],
+        "training_reference_intervention_precision": dataset_gate_health[
+            "training_reference_intervention_precision"
+        ],
+        "training_reference_harmful_intervention_rate": dataset_gate_health[
+            "training_reference_harmful_intervention_rate"
+        ],
+        "training_reference_unnecessary_intervention_rate": dataset_gate_health[
+            "training_reference_unnecessary_intervention_rate"
+        ],
         "holdout_intervention_precision": overall_holdout["intervention_precision"],
         "holdout_harmful_intervention_rate": overall_holdout["harmful_intervention_rate"],
         "holdout_neutral_intervention_rate": overall_holdout["holdout_neutral_intervention_rate"],

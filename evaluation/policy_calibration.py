@@ -678,6 +678,15 @@ def aggregate_candidate_records(
         "challenge_yield": gate_health["challenge_yield"],
         "harmful_intervention_rate": gate_health["harmful_intervention_rate"],
         "unnecessary_intervention_rate": gate_health["unnecessary_intervention_rate"],
+        "training_reference_challenge_yield": gate_health[
+            "training_reference_challenge_yield"
+        ],
+        "training_reference_harmful_intervention_rate": gate_health[
+            "training_reference_harmful_intervention_rate"
+        ],
+        "training_reference_unnecessary_intervention_rate": gate_health[
+            "training_reference_unnecessary_intervention_rate"
+        ],
         "challenge_recall": gate_health["challenge_recall"],
         "mean_regret_reduction": gate_health["mean_regret_reduction"],
         "median_regret_reduction": gate_health["median_regret_reduction"],
@@ -972,6 +981,9 @@ def build_soft_challenge_calibration(
             "challenge_win_rate": float(wins / non_tied) if non_tied else None,
             "challenge_loss_rate": float(losses / non_tied) if non_tied else None,
             "intervention_precision": float(wins / non_tied) if non_tied else None,
+            "training_reference_challenge_yield": float(wins / len(group)) if group else None,
+            "training_reference_harmful_intervention_rate": float(losses / len(group)) if group else None,
+            "training_reference_unnecessary_intervention_rate": float(ties / len(group)) if group else None,
             "challenge_yield": float(wins / len(group)) if group else None,
             "harmful_intervention_rate": float(losses / len(group)) if group else None,
             "unnecessary_intervention_rate": float(ties / len(group)) if group else None,
@@ -1052,9 +1064,12 @@ def build_calibration_artifact(
             "catastrophic_regret_threshold": CATASTROPHIC_REGRET_THRESHOLD,
             "neutral_tolerance": SOFT_CHALLENGE_OUTCOME_TOLERANCE,
             "intervention_precision": "improved interventions / (improved + worsened interventions); neutral excluded",
-            "challenge_yield": "improved interventions / total challenges",
-            "harmful_intervention_rate": "worsened interventions / total challenges",
-            "unnecessary_intervention_rate": "neutral interventions / total challenges",
+            "training_reference_challenge_yield": "training-reference improved challenges / total challenges",
+            "training_reference_harmful_intervention_rate": "training-reference worsened challenges / total challenges",
+            "training_reference_unnecessary_intervention_rate": "training-reference neutral challenges / total challenges",
+            "challenge_yield": "deprecated alias for training_reference_challenge_yield",
+            "harmful_intervention_rate": "deprecated training-reference alias in calibration artifacts",
+            "unnecessary_intervention_rate": "deprecated alias for training_reference_unnecessary_intervention_rate",
             "challenge_recall": "beneficial challenges made / all disagreements where deterministic alternative would materially help",
             "aggregation": "average repeated seeds within each unique dataset, then summarize across datasets",
         },
