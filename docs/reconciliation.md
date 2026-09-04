@@ -1,7 +1,7 @@
 # Modeling reconciliation
 
 The default probe-triggered modeling reconciler is
-`2026-08-24.blinded-evidence-comparison.v2-empirical-probe` (`blinded_evidence_comparison`). It
+`2026-09-04.blinded-canonical-proposals.v1-empirical-probe` (`blinded_evidence_comparison`). It
 is invoked only after the existing formulation gate, frozen split, and hard
 validation. For a valid model-family disagreement, the bounded pairwise probe
 runs first on the frozen training partition. Only moderate or strong evidence
@@ -23,7 +23,9 @@ mention, or favor their origins. Target and task are immutable approved context.
 Choose exactly one of Proposal A or Proposal B, return its model family and a
 complete supported preprocessing contract, and never invent Proposal C.
 
-First provide a concise, two-sided critique: strengths and weaknesses for A,
+Evaluate A and B only from dataset/task evidence, methodological suitability,
+preprocessing/model compatibility, empirical probe evidence when available,
+risks, and assumptions. Do not infer how either proposal was generated. First provide a concise, two-sided critique: strengths and weaknesses for A,
 strengths and weaknesses for B, including the strongest case against each.
 Then list the decisive observed evidence and select A or B. The output must be
 methodological justification, not hidden chain-of-thought. If evidence is close,
@@ -50,8 +52,12 @@ the selected plan.
 The JSON payload contains shared `dataset_evidence`, `proposal_a`, `proposal_b`,
 shared preprocessing requirements, neutral preprocessing differences, and
 source-neutral hard-validation results. Each proposal has the same fields:
-`model_family`, `preprocessing`, `rationale`, `supporting_evidence`,
-`assumptions`, and `risks`. A challenged payload may also contain an
+`model_family`, `task_type`, `preprocessing`, `preprocessing_plan`,
+`feature_handling`, `modeling_strategy`, `rationale`, `supporting_evidence`,
+`contradicting_evidence`, `assumptions`, `risks`, `constraints`, and
+`expected_failure_modes`. Both candidates are rendered by the same deterministic
+canonical formatter; raw source rationale and recommendation metadata are not
+copied. A challenged payload may also contain an
 `empirical_probe` block with symmetric A/B mean and fold scores, standard
 deviations, fold wins, metric direction, relative advantage, and evidence
 strength. A failed or unavailable probe is recorded as such and is not treated as
@@ -79,7 +85,7 @@ state is never used. The resolved ordering is retained privately in artifacts:
 ```json
 {
   "reconciliation_mode": "blinded_evidence_comparison",
-  "reconciliation_prompt_version": "2026-08-24.blinded-evidence-comparison.v2-empirical-probe",
+  "reconciliation_prompt_version": "2026-09-04.blinded-canonical-proposals.v1-empirical-probe",
   "proposal_order_seed": 123,
   "proposal_a_source": "agent",
   "proposal_b_source": "deterministic",
@@ -89,7 +95,17 @@ state is never used. The resolved ordering is retained privately in artifacts:
 ```
 
 These fields are for evaluation and reporting and are not sent to the live
-reconciler.
+reconciler. Internally, the architecture is: independently generate both
+proposals; canonicalize both; construct shared evidence; randomly assign the
+canonical candidates to A/B; reconcile; then remap the selected label to the
+private source record. Provenance is withheld not only by removing source labels,
+but also by canonical formatting that removes source-specific stylistic cues.
+The reconciler can see the approved target/task, aggregate training-only dataset
+evidence, both canonical plans and their preprocessing contracts, neutralized
+preprocessing differences, hard safety outcomes, and optional training-only
+pairwise probe results. It cannot see source labels, raw rationales, method
+scores/ranks, source identifiers, calibration metadata, holdout results, or
+other source-specific recommendation fields.
 
 ## Ablation semantics
 

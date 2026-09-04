@@ -1,7 +1,11 @@
 import json
 
 from app.llm import OpenAIAgents
-from app.reconciliation import build_blinded_reconciliation, infer_selected_proposal
+from app.reconciliation import (
+    build_blinded_reconciliation,
+    infer_selected_proposal,
+    normalize_reconciliation_candidate,
+)
 from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResolution
 from evaluation.metrics import _reconciliation_rates
 
@@ -57,6 +61,85 @@ def test_blinded_payload_hides_sources_scores_and_is_symmetric():
     assert "61" not in encoded
     assert set(blinded.payload["proposal_a"]) == set(blinded.payload["proposal_b"])
     assert "observed_statements" in blinded.payload["dataset_evidence"]
+
+
+def test_candidates_use_identical_canonical_schema_and_types():
+    agent, deterministic = _plans()
+    evidence = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification"
+    ).payload["dataset_evidence"]
+    first = normalize_reconciliation_candidate(agent, evidence, task_type="classification")
+    second = normalize_reconciliation_candidate(deterministic, evidence, task_type="classification")
+    assert first.keys() == second.keys()
+    assert {key: type(value) for key, value in first.items()} == {
+        key: type(value) for key, value in second.items()
+    }
+    assert all(first[field] and second[field] for field in (
+        "rationale", "supporting_evidence", "assumptions", "risks",
+        "constraints", "expected_failure_modes",
+    ))
+    assert not {"reasoning", "confidence", "method_scores", "evidence"} & set(first)
+
+
+def test_raw_planner_rationale_is_not_in_reconciliation_payload():
+    agent, deterministic = _plans()
+    distinctive = "DISTINCTIVE_RAW_PLANNER_RATIONALE_7f2a"
+    agent = agent.model_copy(update={"reasoning": distinctive})
+    blinded = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification"
+    )
+    assert distinctive not in json.dumps(blinded.payload, sort_keys=True)
+    assert distinctive not in json.dumps(blinded.payload["proposal_a"], sort_keys=True)
+    assert distinctive not in json.dumps(blinded.payload["proposal_b"], sort_keys=True)
+
+
+def test_deterministic_metadata_does_not_create_a_template_fingerprint():
+    agent, deterministic = _plans()
+    blinded = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification"
+    )
+    assert "training_rows=20" not in json.dumps(blinded.payload)
+    assert set(blinded.payload["proposal_a"]) == set(blinded.payload["proposal_b"])
+    assert len(blinded.payload["proposal_a"]["rationale"]) == len(blinded.payload["proposal_b"]["rationale"])
+
+
+def test_canonical_ab_swap_changes_only_candidate_assignment():
+    agent, deterministic = _plans()
+    first = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification",
+        proposal_order=("agent", "deterministic"),
+    ).payload
+    swapped = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification",
+        proposal_order=("deterministic", "agent"),
+    ).payload
+    assert first["proposal_a"] == swapped["proposal_b"]
+    assert first["proposal_b"] == swapped["proposal_a"]
+    assert set(first) == set(swapped)
+
+
+def test_normalization_is_deterministic():
+    agent, deterministic = _plans()
+    evidence = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification"
+    ).payload["dataset_evidence"]
+    assert normalize_reconciliation_candidate(
+        agent, evidence, task_type="classification"
+    ) == normalize_reconciliation_candidate(
+        agent, evidence, task_type="classification"
+    )
+
+
+def test_payload_has_no_provenance_terms_or_private_recommendation_metadata():
+    agent, deterministic = _plans()
+    payload = build_blinded_reconciliation(
+        _profile(), agent, deterministic, target_column="target", task_type="classification"
+    ).payload
+    encoded = json.dumps(payload, sort_keys=True).lower()
+    assert not any(term in encoded for term in (
+        '"agent"', '"llm"', '"planner"', '"deterministic"',
+        '"heuristic"', '"validator"', '"method_scores"', '"ranked_methods"',
+    ))
 
 
 def test_proposal_order_is_seeded_and_not_fixed():

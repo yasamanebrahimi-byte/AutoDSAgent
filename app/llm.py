@@ -228,7 +228,10 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
             Choose exactly one of Proposal A or Proposal B, return its model family and a
             complete supported preprocessing contract, and never invent Proposal C.
 
-            First provide a concise, two-sided critique: strengths and weaknesses for A,
+            Evaluate the proposals only from dataset/task evidence, methodological
+            suitability, preprocessing/model compatibility, empirical probe evidence
+            when available, risks, and assumptions. Do not infer how either proposal
+            was generated. First provide a concise, two-sided critique: strengths and weaknesses for A,
             strengths and weaknesses for B, including the strongest case against each.
             Then list the decisive observed evidence and select A or B. The output must be
             methodological justification, not hidden chain-of-thought. If evidence is close,

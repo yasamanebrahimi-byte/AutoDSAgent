@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 
 BLINDED_RECONCILIATION_MODE = "blinded_evidence_comparison"
-BLINDED_RECONCILIATION_PROMPT_VERSION = "2026-08-24.blinded-evidence-comparison.v2-empirical-probe"
+BLINDED_RECONCILIATION_PROMPT_VERSION = "2026-09-04.blinded-canonical-proposals.v1-empirical-probe"
 ProposalSource = Literal["agent", "deterministic"]
 ProposalLabel = Literal["A", "B"]
 
@@ -208,31 +208,59 @@ def _method_interpretation(method: str, evidence: dict[str, Any]) -> tuple[list[
     return support[:4], risks[:4], assumptions[:3]
 
 
-def _proposal(
-    source: ProposalSource,
+def normalize_reconciliation_candidate(
     plan: Any,
     dataset_evidence: dict[str, Any],
+    *,
+    task_type: str | None = None,
 ) -> dict[str, Any]:
+    """Render any modeling plan through the same source-independent contract.
+
+    In particular, this deliberately does not copy ``reasoning`` or any
+    recommendation metadata.  Those fields have source-specific authorship and
+    formatting.  The useful substantive information is represented by the
+    selected method, executable preprocessing, and deterministic interpretations
+    of the shared training evidence.
+    """
     values = _dump(plan)
     method = values.get("recommended_method")
-    reasoning = _neutralize_source_words(str(values.get("reasoning", "")).strip())
-    if source == "agent":
-        support: list[str] = []
-        risks: list[str] = []
-        assumptions: list[str] = []
-        rationale = [reasoning] if reasoning else []
-    else:
-        support, risks, assumptions = _method_interpretation(method, dataset_evidence)
-        rationale = [
-            "This proposal interprets the shared training-data evidence in relation to its selected model family."
-        ]
+    support, risks, assumptions = _method_interpretation(method, dataset_evidence)
+    preprocessing = _dump(values.get("preprocessing"))
+    if not support:
+        support = ["No strong directional support is established by the shared diagnostics."]
+    if not risks:
+        risks = ["The selected approach may be sensitive to evidence or assumptions not captured by the shared summary."]
+    constraints = [
+        "Use only the approved target and task context.",
+        "Apply the supplied preprocessing contract inside the training pipeline.",
+    ]
+    failure_modes = [
+        f"The {method} approach may be unsuitable if its stated assumptions do not hold.",
+        "The preprocessing contract may be insufficient for an unobserved data-quality condition.",
+    ]
+    rationale = [
+        f"The proposal selects the {method} model family and the supplied executable preprocessing contract.",
+        "Its suitability is assessed against the shared training-data evidence below.",
+    ]
     return {
         "model_family": method,
-        "preprocessing": values.get("preprocessing", {}),
+        "task_type": task_type,
+        "preprocessing": preprocessing,
+        "preprocessing_plan": preprocessing,
+        "feature_handling": {
+            "identifier": preprocessing.get("identifier_handling"),
+            "high_cardinality": preprocessing.get("high_cardinality_handling"),
+            "unsupported_text": preprocessing.get("unsupported_text_handling"),
+            "datetime": preprocessing.get("datetime_handling"),
+        },
+        "modeling_strategy": method,
         "rationale": rationale,
         "supporting_evidence": support,
+        "contradicting_evidence": risks,
         "assumptions": assumptions,
         "risks": risks,
+        "constraints": constraints,
+        "expected_failure_modes": failure_modes,
     }
 
 
@@ -258,7 +286,7 @@ def _blind_preprocessing_differences(
             "proposal_a_value": values[source_for_a],
             "proposal_b_value": values[source_for_b],
             "material": bool(item.get("material")),
-            "reason": item.get("reason"),
+            "reason": _neutralize_source_words(str(item.get("reason", ""))),
         })
     return differences
 
@@ -327,8 +355,12 @@ def build_blinded_reconciliation(
         random.Random(resolved_seed).shuffle(sources)
     proposal_a_source, proposal_b_source = sources
     proposals = {
-        "agent": _proposal("agent", modeling_plan, dataset_evidence),
-        "deterministic": _proposal("deterministic", deterministic, dataset_evidence),
+        "agent": normalize_reconciliation_candidate(
+            modeling_plan, dataset_evidence, task_type=task_type
+        ),
+        "deterministic": normalize_reconciliation_candidate(
+            deterministic, dataset_evidence, task_type=task_type
+        ),
     }
     payload = {
         "reconciliation_mode": BLINDED_RECONCILIATION_MODE,

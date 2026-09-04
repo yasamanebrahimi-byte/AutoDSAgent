@@ -69,7 +69,7 @@
   },
   "prompts": {
     "planner_schema_version": "2026-08-24.blinded-evidence-comparison.v3-empirical-probe",
-    "reconciliation_prompt_version": "2026-08-24.blinded-evidence-comparison.v2-empirical-probe",
+    "reconciliation_prompt_version": "2026-09-04.blinded-canonical-proposals.v1-empirical-probe",
     "reconciliation_mode": "blinded_evidence_comparison"
   },
   "modeling": {
