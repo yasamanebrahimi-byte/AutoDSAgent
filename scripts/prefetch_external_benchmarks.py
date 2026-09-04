@@ -66,7 +66,9 @@ def _success_entry(spec: OpenMLBenchmarkSpec, data: OpenMLBenchmarkData) -> dict
         "expected_rows": spec.expected_rows,
         "actual_rows": int(len(frame)),
         "expected_features": spec.expected_features,
-        "actual_features": int(features.shape[1]),
+        "actual_features": int(
+            frame.shape[1] if spec.feature_count_includes_target else features.shape[1]
+        ),
         "task_type": spec.expected_task_type,
         "expected_classes": spec.expected_classes,
         "actual_target_class_count": data.observed_classes,

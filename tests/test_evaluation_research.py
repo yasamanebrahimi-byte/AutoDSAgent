@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from evaluation.benchmarks import BenchmarkCase
+from evaluation.empirical_reference import evaluate_holdout_plan
 from evaluation.metrics import normalized_regret, summarize_trials
 from evaluation.runner import run_evaluation
 from app.schemas import AgentPlan, PreprocessingContract
+from app.validation import freeze_supervised_split
 
 
 def _case() -> BenchmarkCase:
@@ -42,6 +44,25 @@ def test_repetitions_reuse_identical_evidence_and_cached_reference(tmp_path: Pat
     assert len({json.dumps(row["agent_initial_input"], sort_keys=True) for row in rows}) == 1
     assert len({row["empirical_reference_cache_key"] for row in rows}) == 1
     assert all(row["holdout_policy"]["used_for_agent_planning"] is False for row in rows)
+
+
+def test_holdout_evaluation_aligns_masks_after_invalid_target_rows_are_removed():
+    frame = _case().load()
+    frame.loc[3, "target"] = None
+    split = freeze_supervised_split(frame, "target", "classification", random_state=19)
+
+    result = evaluate_holdout_plan(
+        frame,
+        split,
+        "target",
+        "classification",
+        "linear",
+        PreprocessingContract(numeric_scaling="standard"),
+        random_state=19,
+        row_positions=list(range(len(frame))),
+    )
+
+    assert result["status"] == "evaluated"
 
 
 def test_initial_agent_factory_context_excludes_downstream_decisions(tmp_path: Path):

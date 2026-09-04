@@ -200,8 +200,11 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "# Paired Modeling-Gate Ablation Study",
         "",
         f"- Ablation schema: `{payload['ablation_schema_version']}`",
+        f"- Benchmark suite: `{payload.get('suite', 'local')}`; tier: `{payload.get('tier')}`",
         f"- Split seeds: `{payload['split_seeds']}`",
         f"- LLM repetitions per split: `{payload['llm_repetitions']}`",
+        f"- Planner model: `{payload.get('planner_model', payload.get('model'))}`",
+        f"- Reconciler model: `{payload.get('reconciler_model', payload.get('model'))}`",
         f"- Strict live: `{payload['require_live']}`",
         "",
         "## Central Comparison",
@@ -242,6 +245,8 @@ def run_ablation_study(
     split_seeds: Sequence[int] = (42,),
     repetitions: int = 1,
     model: str = "gpt-4.1-mini",
+    planner_model: str | None = None,
+    reconciler_model: str | None = None,
     offline: bool = False,
     require_live: bool = False,
     include_perturbations: bool = False,
@@ -251,15 +256,36 @@ def run_ablation_study(
     agent_plan_factory: Any | None = None,
     reconciliation_factory: Any | None = None,
     resume: bool = False,
+    suite: str = "local",
+    tier: str | None = None,
 ) -> dict[str, Any]:
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
+    if suite not in {"local", "external"}:
+        raise ValueError("suite must be 'local' or 'external'.")
     all_specs = ablation_presets()
     selected_names = list(ablations or all_specs)
     unknown = sorted(set(selected_names) - set(all_specs))
     if unknown:
         raise ValueError(f"Unknown ablation preset(s): {', '.join(unknown)}")
     selected_specs = [all_specs[name] for name in selected_names]
+    if cases is not None:
+        selected_cases = list(cases)
+    elif suite == "external":
+        from evaluation.external_benchmarks import external_benchmark_cases
+
+        selected_cases = external_benchmark_cases()
+    else:
+        selected_cases = default_benchmark_cases()
+    if case_names:
+        wanted = set(case_names)
+        selected_cases = [case for case in selected_cases if case.name in wanted]
+    if tier is not None:
+        selected_cases = [case for case in selected_cases if case.tier == tier]
+    if not selected_cases:
+        raise ValueError("No benchmark cases selected.")
+    resolved_planner_model = planner_model or model
+    resolved_reconciler_model = reconciler_model or model
     split_seeds = tuple(int(seed) for seed in split_seeds)
     if not split_seeds:
         raise ValueError("At least one split seed is required.")
@@ -272,20 +298,60 @@ def run_ablation_study(
         "split_seeds": list(split_seeds),
         "llm_repetitions": repetitions,
         "model": model,
+        "planner_model": resolved_planner_model,
+        "reconciler_model": resolved_reconciler_model,
+        "planner_model_requested": resolved_planner_model,
+        "reconciler_model_requested": resolved_reconciler_model,
+        "suite": suite,
+        "tier": tier,
         "offline": offline,
         "require_live": require_live,
         "include_perturbations": include_perturbations,
         "selected_ablations": selected_names,
         "ablation_definitions": {name: spec.as_dict() for name, spec in all_specs.items()},
-        "benchmark_cases": [case.as_dict() for case in (cases or default_benchmark_cases())],
+        "benchmark_cases": [case.as_dict() for case in selected_cases],
         "evaluation_objective": "intervention-quality-v1",
     }
+    if suite == "external":
+        root_config["benchmark_suite_version"] = (
+            selected_cases[0].benchmark_suite_version or "unknown"
+        )
     if resume and config_path.is_file():
         existing = json.loads(config_path.read_text(encoding="utf-8"))
-        for key in ("ablation_schema_version", "split_seeds", "llm_repetitions", "selected_ablations", "require_live"):
-            if existing.get(key) != root_config.get(key):
+        legacy_planner_model = existing.get("planner_model", existing.get("model", "gpt-4.1-mini"))
+        legacy_reconciler_model = existing.get("reconciler_model", existing.get("model", "gpt-4.1-mini"))
+        legacy_defaults = {
+            "suite": "local",
+            "tier": None,
+            "planner_model": legacy_planner_model,
+            "reconciler_model": legacy_reconciler_model,
+        }
+        for key in (
+            "ablation_schema_version",
+            "split_seeds",
+            "llm_repetitions",
+            "selected_ablations",
+            "require_live",
+            "suite",
+            "tier",
+            "planner_model",
+            "reconciler_model",
+        ):
+            if existing.get(key, legacy_defaults.get(key)) != root_config.get(key):
                 raise ValueError(f"Existing ablation configuration is incompatible for {key!r}.")
-        root_config = existing
+        root_config = {
+            **existing,
+            "suite": existing.get("suite", "local"),
+            "tier": existing.get("tier"),
+            "planner_model": legacy_planner_model,
+            "reconciler_model": legacy_reconciler_model,
+            "planner_model_requested": existing.get(
+                "planner_model_requested", legacy_planner_model
+            ),
+            "reconciler_model_requested": existing.get(
+                "reconciler_model_requested", legacy_reconciler_model
+            ),
+        }
     elif config_path.exists():
         raise ValueError("Output directory already contains an ablation study; use --resume or choose a new directory.")
     else:
@@ -298,11 +364,13 @@ def run_ablation_study(
         spec_dir = root / spec.name
         result = run_evaluation(
             spec_dir,
-            cases=cases,
+            cases=selected_cases,
             repetitions=repetitions,
             seed=split_seeds[0],
             split_seeds=split_seeds,
             model=model,
+            planner_model=resolved_planner_model,
+            reconciler_model=resolved_reconciler_model,
             offline=offline,
             require_live=require_live,
             include_perturbations=include_perturbations,
@@ -314,6 +382,8 @@ def run_ablation_study(
             proposal_cache_path=proposal_cache_path,
             empirical_reference_cache_path=root / "empirical_reference_cache.json",
             resume=resume and (spec_dir / "config.json").is_file(),
+            suite=suite,
+            tier=tier,
         )
         results[spec.name] = result
         trial_rows[spec.name] = result["trials"]
@@ -379,6 +449,10 @@ def main() -> None:
     parser.add_argument("--split-seeds", action="append", dest="split_seeds_alias")
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--model", default="gpt-4.1-mini")
+    parser.add_argument("--planner-model")
+    parser.add_argument("--reconciler-model")
+    parser.add_argument("--suite", choices=("local", "external"), default="local")
+    parser.add_argument("--tier", choices=("core", "stress"))
     parser.add_argument("--ablation", action="append", dest="ablations")
     parser.add_argument("--cases", nargs="*")
     parser.add_argument("--offline", action="store_true")
@@ -391,12 +465,16 @@ def main() -> None:
         split_seeds=_parse_split_seeds((args.split_seeds or []) + (args.split_seeds_alias or [])),
         repetitions=args.repetitions,
         model=args.model,
+        planner_model=args.planner_model,
+        reconciler_model=args.reconciler_model,
         ablations=args.ablations,
         case_names=args.cases,
         offline=args.offline,
         require_live=args.require_live,
         include_perturbations=args.include_perturbations,
         resume=args.resume,
+        suite=args.suite,
+        tier=args.tier,
     )
     print(json.dumps(result["summary"]["central_table"], indent=2, default=str))
 

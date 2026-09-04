@@ -82,14 +82,23 @@ def requirements_from_records(
         record
         for record in used_records
         if record.get("semantic_type") == "numeric"
-        or record.get("semantic_type") == "numeric_like"
+        or (
+            record.get("semantic_type") == "numeric_like"
+            and record.get("dtype") != "category"
+        )
         or record.get("dtype", "").startswith(("int", "uint", "float"))
     ]
     categorical_records = [
         record
         for record in used_records
         if record not in numeric_records
-        and record.get("semantic_type") in {"categorical", "boolean"}
+        and (
+            record.get("semantic_type") in {"categorical", "boolean"}
+            or (
+                record.get("semantic_type") == "numeric_like"
+                and record.get("dtype") == "category"
+            )
+        )
     ]
     numeric_missing = int(sum(int(record.get("missing", 0) or 0) for record in numeric_records))
     categorical_missing = int(

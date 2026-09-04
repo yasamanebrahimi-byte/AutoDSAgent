@@ -29,6 +29,14 @@ def main() -> None:
     parser.add_argument("--split-seed", action="append", dest="split_seeds", type=int)
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument(
+        "--planner-model",
+        help="Model used for the initial modeling proposal; defaults to --model.",
+    )
+    parser.add_argument(
+        "--reconciler-model",
+        help="Model used for modeling reconciliation; defaults to --model.",
+    )
+    parser.add_argument(
         "--gate-mode",
         choices=("llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"),
         default="probe_first",
@@ -79,6 +87,8 @@ def main() -> None:
         seed=args.seed,
         split_seeds=args.split_seeds or [args.seed],
         model=args.model,
+        planner_model=args.planner_model,
+        reconciler_model=args.reconciler_model,
         offline=args.offline,
         include_perturbations=args.include_perturbations,
         case_names=args.cases,

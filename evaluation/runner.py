@@ -65,6 +65,8 @@ class EvaluationConfig:
     seed: int = 42
     test_size: float = 0.2
     model: str = "gpt-4.1-mini"
+    planner_model: str | None = None
+    reconciler_model: str | None = None
     offline: bool = False
     include_perturbations: bool = False
     thresholds: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
@@ -85,6 +87,10 @@ class EvaluationConfig:
     tier: str | None = None
 
     def __post_init__(self) -> None:
+        if self.planner_model is None:
+            object.__setattr__(self, "planner_model", self.model)
+        if self.reconciler_model is None:
+            object.__setattr__(self, "reconciler_model", self.model)
         if self.suite not in {"local", "external"}:
             raise ValueError("suite must be 'local' or 'external'.")
         if self.tier is not None and self.tier not in {"core", "stress"}:
@@ -419,6 +425,7 @@ def _run_trial(
     plan_factory: AgentPlanFactory | None,
     reconciliation_factory: ReconciliationFactory | None,
     agents: OpenAIAgents,
+    reconciler_agents: OpenAIAgents,
     empirical_reference_cache: dict[str, dict[str, Any]],
     variant: str = "standard",
     proposal_order: tuple[str, str] | None = None,
@@ -516,7 +523,7 @@ def _run_trial(
         perturbation_id=perturbation_id,
         split_seed=experimental_split_seed,
         llm_repetition=trial_number,
-        model=config.model,
+        model=config.planner_model,
         prompt_schema_version=config.prompt_schema_version,
         training_profile=training_profile,
     )
@@ -530,7 +537,7 @@ def _run_trial(
         plan = cached_plan
         proposal_cache_hit = True
         agent_source = str((cached_proposal or {}).get("source") or "cached")
-        agent_model = str((cached_proposal or {}).get("model") or config.model)
+        agent_model = str((cached_proposal or {}).get("model") or config.planner_model)
         agent_request_status = "cached"
         agent_request_error = None
     elif config.gate_mode == "deterministic_only":
@@ -558,7 +565,7 @@ def _run_trial(
     else:
         plan = initial_plan_override
         agent_source = initial_source_override or "cached_order_swap"
-        agent_model = initial_model_override or config.model
+        agent_model = initial_model_override or config.planner_model
         agent_request_status = initial_request_status_override or "cached"
         agent_request_error = initial_request_error_override
     initial_validation = _validate_initial_plan(
@@ -682,12 +689,12 @@ def _run_trial(
             reconciliation_status = "not_invoked"
         else:
             gate_agent = _EvaluationGateAgent(
-                live_agents=None if plan_factory is not None or config.offline else agents,
+                live_agents=None if plan_factory is not None or config.offline else reconciler_agents,
                 reconciliation_factory=reconciliation_factory,
                 context=context,
             )
             gate_offline = config.offline or (
-                plan_factory is None and not agents.available and reconciliation_factory is None
+                plan_factory is None and not reconciler_agents.available and reconciliation_factory is None
             )
             try:
                 gate_sources: dict[str, str] = {}
@@ -964,6 +971,10 @@ def _run_trial(
             and config.gate_mode != "deterministic_only"
         ),
         "agent_model": agent_model,
+        "planner_model": config.planner_model,
+        "reconciler_model": config.reconciler_model,
+        "planner_model_effective": agents.model,
+        "reconciler_model_effective": reconciler_agents.model,
         "repository_commit": config.repository_commit,
         "agent_request_status": agent_request_status,
         "agent_request_error": agent_request_error,
@@ -1284,7 +1295,9 @@ def _failed_trial_record(
         "split_contract": split.as_dict(),
         "agent_source": "failed",
         "requested_live_trial": not config.offline and config.gate_mode != "deterministic_only",
-        "agent_model": config.model,
+        "agent_model": config.planner_model,
+        "planner_model": config.planner_model,
+        "reconciler_model": config.reconciler_model,
         "repository_commit": config.repository_commit,
         "agent_request_status": "failed",
         "agent_request_error": _redact_error(error),
@@ -1355,6 +1368,8 @@ def run_evaluation(
     seed: int = 42,
     test_size: float = 0.2,
     model: str = "gpt-4.1-mini",
+    planner_model: str | None = None,
+    reconciler_model: str | None = None,
     offline: bool = False,
     include_perturbations: bool = False,
     thresholds: dict[str, float] | None = None,
@@ -1415,6 +1430,8 @@ def run_evaluation(
         seed=seed,
         test_size=test_size,
         model=model,
+        planner_model=planner_model or model,
+        reconciler_model=reconciler_model or model,
         offline=offline,
         include_perturbations=include_perturbations,
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
@@ -1449,6 +1466,8 @@ def run_evaluation(
         raise ValueError("No benchmark cases selected.")
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
+    agents = OpenAIAgents(model=config.planner_model)
+    reconciler_agents = OpenAIAgents(model=config.reconciler_model)
     stable_config = {
         "config_version": "2026-08-24.evaluation.v4-intervention-quality",
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
@@ -1462,7 +1481,14 @@ def run_evaluation(
         "llm_repetitions": config.repetitions,
         "test_size": config.test_size,
         "agent_mode": "offline" if config.offline else "live_required" if config.require_live else "live_or_fallback",
+        "model": config.model,
+        "planner_model": config.planner_model,
+        "reconciler_model": config.reconciler_model,
         "agent_model_requested": config.model,
+        "planner_model_requested": config.planner_model,
+        "reconciler_model_requested": config.reconciler_model,
+        "planner_model_effective": agents.model,
+        "reconciler_model_effective": reconciler_agents.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
         "gate_mode": config.gate_mode,
         "reconciliation_mode": config.reconciliation_mode,
@@ -1525,7 +1551,21 @@ def run_evaluation(
             raise ValueError("--resume requires an existing evaluation bundle with config.json and trials.jsonl.")
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
         compare_keys = [key for key in stable_config if key != "repository_commit"]
-        legacy_defaults = {"suite": "local", "tier": None}
+        legacy_model = existing_config.get(
+            "agent_model_requested",
+            existing_config.get("model", "gpt-4.1-mini"),
+        )
+        legacy_defaults = {
+            "suite": "local",
+            "tier": None,
+            "model": legacy_model,
+            "planner_model": legacy_model,
+            "reconciler_model": legacy_model,
+            "planner_model_requested": legacy_model,
+            "reconciler_model_requested": legacy_model,
+            "planner_model_effective": legacy_model,
+            "reconciler_model_effective": legacy_model,
+        }
         mismatches = [
             key
             for key in compare_keys
@@ -1577,7 +1617,6 @@ def run_evaluation(
             key = item.pop("cache_key", None)
             if key is not None and isinstance(item, dict):
                 proposal_cache[str(key)] = item
-    agents = OpenAIAgents(model=model)
     completed_trial_ids = {
         trial.get("trial_id")
         for trial in trials
@@ -1633,6 +1672,7 @@ def run_evaluation(
                                 plan_factory=agent_plan_factory,
                                 reconciliation_factory=reconciliation_factory,
                                 agents=agents,
+                                reconciler_agents=reconciler_agents,
                                 empirical_reference_cache=empirical_reference_cache,
                                 variant=variant,
                                 proposal_order=proposal_order,

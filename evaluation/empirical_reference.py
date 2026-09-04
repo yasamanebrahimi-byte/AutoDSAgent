@@ -22,6 +22,7 @@ from app.validation import (
     ValidationResult,
     modeling_arrays,
     validate_training_plan,
+    validated_row_positions,
 )
 
 
@@ -267,10 +268,7 @@ def evaluate_holdout_plan(
     if validation.status != "passed":
         return {"status": "invalid", "holdout_metrics": {}, "validation": validation.as_dict()}
     features, target = modeling_arrays(dataframe, validation)
-    positions = np.arange(len(dataframe), dtype=int) if row_positions is None else np.asarray(row_positions)
-    valid_positions = positions[np.asarray(
-        dataframe[target_column].notna().to_numpy(), dtype=bool
-    )]
+    valid_positions = validated_row_positions(dataframe, validation, row_positions)
     train_mask = np.isin(valid_positions, np.asarray(split.train_row_positions, dtype=int))
     holdout_mask = np.isin(valid_positions, np.asarray(split.holdout_row_positions, dtype=int))
     X_train = features.loc[train_mask].copy()

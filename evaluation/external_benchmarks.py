@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,6 +41,11 @@ class OpenMLBenchmarkSpec:
     tier: BenchmarkTier = "core"
     notes: str = ""
     source_suite: int | None = None
+    # The frozen AMLB dimensions were recorded from the complete supervised
+    # table, while OpenML's X/y APIs return X without the target.  Keep this
+    # compatibility detail out of the serialized manifest and default direct
+    # test/custom specs to the historical raw-feature interpretation.
+    feature_count_includes_target: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.task_id <= 0:
@@ -71,6 +76,12 @@ class OpenMLBenchmarkSpec:
     def source_suite_label(self) -> str:
         kind = "classification" if self.expected_task_type == "classification" else "regression"
         return f"AMLB {kind} suite {self.source_suite}"
+
+    @property
+    def expected_input_features(self) -> int:
+        """Expected columns in OpenML's feature matrix before the target is added."""
+
+        return self.expected_features - int(self.feature_count_includes_target)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -120,6 +131,7 @@ def _classification(
         tier,
         notes,
         AMLB_CLASSIFICATION_SUITE_ID,
+        True,
     )
 
 
@@ -142,6 +154,7 @@ def _regression(
         tier,
         notes,
         AMLB_REGRESSION_SUITE_ID,
+        True,
     )
 
 
@@ -295,7 +308,7 @@ def _get_raw_task_data(task: Any) -> tuple[Any, Any, str | None, Any | None]:
 def _shape_error(spec: OpenMLBenchmarkSpec, actual_rows: int, actual_features: int) -> ValueError:
     return ValueError(
         f"OpenML task ID {spec.task_id} ({spec.name}) shape validation failed: "
-        f"expected shape rows={spec.expected_rows}, features={spec.expected_features}; "
+        f"expected shape rows={spec.expected_rows}, features={spec.expected_input_features}; "
         f"actual shape rows={actual_rows}, features={actual_features}; "
         f"dataset name={spec.name!r}."
     )
@@ -337,12 +350,12 @@ def load_openml_task_data(spec: OpenMLBenchmarkSpec) -> OpenMLBenchmarkData:
     target = target.reset_index(drop=True)
     actual_rows = len(features)
     actual_features = features.shape[1]
-    if actual_rows != spec.expected_rows or actual_features != spec.expected_features:
+    if actual_rows != spec.expected_rows or actual_features != spec.expected_input_features:
         raise _shape_error(spec, actual_rows, actual_features)
     if len(target) != spec.expected_rows:
         raise ValueError(
             f"OpenML task ID {spec.task_id} ({spec.name}) shape validation failed: "
-            f"expected shape rows={spec.expected_rows}, features={spec.expected_features}; "
+            f"expected shape rows={spec.expected_rows}, features={spec.expected_input_features}; "
             f"actual shape rows={actual_rows}, features={actual_features}; "
             f"actual target length={len(target)}; dataset name={spec.name!r}."
         )
@@ -351,7 +364,7 @@ def load_openml_task_data(spec: OpenMLBenchmarkSpec) -> OpenMLBenchmarkData:
         if observed_classes != spec.expected_classes:
             raise ValueError(
                 f"OpenML task ID {spec.task_id} ({spec.name}) class-count validation failed: "
-                f"expected shape rows={spec.expected_rows}, features={spec.expected_features}; "
+                f"expected shape rows={spec.expected_rows}, features={spec.expected_input_features}; "
                 f"actual shape rows={actual_rows}, features={actual_features}; "
                 f"expected classes={spec.expected_classes}, actual classes={observed_classes}; "
                 f"dataset name={spec.name!r}."
