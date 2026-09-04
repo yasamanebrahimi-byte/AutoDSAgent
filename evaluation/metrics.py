@@ -20,8 +20,40 @@ DEFAULT_THRESHOLDS = {
     # intervention outcome.  It is expressed in normalized-regret units so
     # it is comparable across the supported task metrics.
     "neutral_tolerance": 0.02,
+    # Evaluation-only absolute tolerance in the primary holdout metric's
+    # native units.  It is deliberately separate from runtime thresholds.
+    "holdout_neutral_tolerance": 0.02,
     "catastrophic_regret_threshold": 0.10,
 }
+
+
+def holdout_intervention_delta(
+    task_type: str,
+    initial_holdout_metric: float | None,
+    final_holdout_metric: float | None,
+) -> float | None:
+    """Return paired exact-plan holdout improvement; positive always helps."""
+
+    return normalized_performance_delta(
+        task_type, initial_holdout_metric, final_holdout_metric
+    )
+
+
+def classify_holdout_intervention_outcome(
+    delta: float | None,
+    neutral_tolerance: float,
+    *,
+    intervention_occurred: bool,
+) -> str:
+    """Classify an intervention using untouched-holdout evidence only."""
+
+    if not intervention_occurred:
+        return "not_intervened"
+    if delta is None:
+        return "not_comparable"
+    if abs(float(delta)) <= float(neutral_tolerance):
+        return "neutral"
+    return "beneficial" if delta > 0 else "harmful"
 
 
 @dataclass(frozen=True)
@@ -405,6 +437,76 @@ def _soft_decision_records(records: list[dict[str, Any]], decision: str) -> list
     return [record for record in _soft_challenges(records) if _soft_decision(record) == decision]
 
 
+def _intervention_occurred(record: dict[str, Any]) -> bool:
+    """Use the canonical saved soft-change signal, excluding hard repair."""
+
+    if record.get("intervention_occurred") is not None:
+        return bool(record["intervention_occurred"])
+    if record.get("gate_changed_initial_plan") is False or record.get("proceeded_unchanged") is True:
+        return False
+    return _soft_decision(record) == "challenge"
+
+
+def _holdout_pair(record: dict[str, Any]) -> tuple[float | None, float | None, str | None, float | None]:
+    """Extract explicit paired holdout values, with legacy nested-field fallback."""
+
+    initial = record.get("initial_holdout_metric")
+    final = record.get("final_holdout_metric")
+    metric_name = record.get("holdout_metric_name")
+    if initial is None or final is None:
+        initial_metrics = record.get("agent_initial_holdout_metrics") or {}
+        final_metrics = record.get("gated_final_holdout_metrics") or {}
+        task_type = record.get("task_type")
+        metric_name = metric_name or ("macro_f1" if task_type == "classification" else "rmse")
+        initial = initial_metrics.get(metric_name)
+        final = final_metrics.get(metric_name)
+    delta = record.get("holdout_intervention_delta")
+    if delta is None and initial is not None and final is not None:
+        delta = holdout_intervention_delta(record.get("task_type", "classification"), float(initial), float(final))
+    return (
+        float(initial) if initial is not None else None,
+        float(final) if final is not None else None,
+        str(metric_name) if metric_name is not None else None,
+        float(delta) if delta is not None else None,
+    )
+
+
+def _holdout_health(records: list[dict[str, Any]], tolerance: float) -> dict[str, Any]:
+    interventions = [record for record in records if _intervention_occurred(record)]
+    paired = [record for record in interventions if _holdout_pair(record)[3] is not None]
+    outcomes = Counter(
+        classify_holdout_intervention_outcome(
+            _holdout_pair(record)[3], tolerance, intervention_occurred=True
+        )
+        for record in paired
+    )
+    deltas = [_holdout_pair(record)[3] for record in paired]
+    beneficial = outcomes.get("beneficial", 0)
+    harmful = outcomes.get("harmful", 0)
+    neutral = outcomes.get("neutral", 0)
+    denominator = len(paired)
+    return {
+        "intervention_count": len(interventions),
+        "valid_paired_holdout_comparison_count": denominator,
+        "missing_or_failed_holdout_count": len(interventions) - denominator,
+        "beneficial_intervention_count": beneficial,
+        "harmful_intervention_count": harmful,
+        "neutral_intervention_count": neutral,
+        "intervention_precision": _rate(beneficial, denominator),
+        "harmful_intervention_rate": _rate(harmful, denominator),
+        "holdout_neutral_intervention_rate": _rate(neutral, denominator),
+        "mean_holdout_intervention_delta": _mean(deltas),
+        "median_holdout_intervention_delta": _median(deltas),
+        "holdout_intervention_delta_ci": _bootstrap_interval([float(v) for v in deltas]),
+        "outcome_counts": {
+            "beneficial": beneficial,
+            "harmful": harmful,
+            "neutral": neutral,
+            "not_comparable": len(interventions) - denominator,
+        },
+    }
+
+
 def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dict[str, int]:
     challenges = _soft_decision_records(records, "challenge")
     outcomes = Counter(_outcome(record, tolerance) for record in challenges)
@@ -487,6 +589,7 @@ def _gate_health(
     records: list[dict[str, Any]],
     *,
     tolerance: float,
+    holdout_tolerance: float | None = None,
     catastrophic_threshold: float,
     weights: GateUtilityWeights,
 ) -> dict[str, Any]:
@@ -505,6 +608,20 @@ def _gate_health(
     worsened = challenge_outcomes.count("worsened")
     neutral = challenge_outcomes.count("neutral")
     comparable_challenges = improved + worsened + neutral
+    holdout = _holdout_health(valid, tolerance if holdout_tolerance is None else holdout_tolerance)
+    # New rows use paired untouched-holdout outcomes as the primary gate
+    # health definition. Legacy rows retain the prior training-reference
+    # definition until they can be re-evaluated.
+    has_holdout_outcomes = any(
+        record.get("holdout_intervention_delta") is not None
+        or record.get("initial_holdout_metric") is not None
+        for record in valid
+    )
+    primary_improved = holdout["beneficial_intervention_count"] if has_holdout_outcomes else improved
+    primary_harmful = holdout["harmful_intervention_count"] if has_holdout_outcomes else worsened
+    primary_neutral = holdout["neutral_intervention_count"] if has_holdout_outcomes else neutral
+    primary_denominator = holdout["valid_paired_holdout_comparison_count"] if has_holdout_outcomes else len(challenges)
+    precision_denominator = primary_denominator if has_holdout_outcomes else primary_improved + primary_harmful
     deltas = [float(_record_regret_reduction(record)) for record in paired]
     challenge_deltas = [
         float(_record_regret_reduction(record))
@@ -716,15 +833,19 @@ def _gate_health(
         "total_disagreements": sum(_soft_status(record) == "disagreement" for record in valid),
         "total_challenges": len(challenges),
         "total_abstentions": len(abstentions),
-        "improved_interventions": improved,
-        "worsened_interventions": worsened,
-        "neutral_interventions": neutral,
-        "intervention_precision": _rate(improved, improved + worsened),
-        "intervention_precision_including_neutral": _rate(improved, len(challenges)),
-        "challenge_yield": _rate(improved, len(challenges)),
-        "harmful_intervention_rate": _rate(worsened, len(challenges)),
-        "unnecessary_intervention_count": neutral,
-        "unnecessary_intervention_rate": _rate(neutral, len(challenges)),
+        "improved_interventions": primary_improved,
+        "worsened_interventions": primary_harmful,
+        "neutral_interventions": primary_neutral,
+        "intervention_precision": _rate(primary_improved, precision_denominator),
+        "intervention_precision_including_neutral": _rate(primary_improved, primary_denominator),
+        "challenge_yield": _rate(primary_improved, primary_denominator),
+        "harmful_intervention_rate": _rate(primary_harmful, primary_denominator),
+        "unnecessary_intervention_count": primary_neutral,
+        "unnecessary_intervention_rate": _rate(primary_neutral, primary_denominator),
+        "holdout_intervention_metrics": holdout,
+        "training_reference_intervention_precision": _rate(improved, improved + worsened),
+        "training_reference_harmful_intervention_rate": _rate(worsened, len(challenges)),
+        "training_reference_unnecessary_intervention_rate": _rate(neutral, len(challenges)),
         "challenge_recall": _rate(beneficial_challenges, beneficial_opportunities),
         "beneficial_challenge_count": beneficial_challenges,
         "beneficial_opportunity_count": beneficial_opportunities,
@@ -782,7 +903,7 @@ def _dataset_weighted_health(
     for record in records:
         grouped.setdefault(str(record.get("benchmark_case", record.get("dataset_id", "unknown"))), []).append(record)
     per_dataset = {
-        dataset: _gate_health(group, tolerance=tolerance, catastrophic_threshold=catastrophic_threshold, weights=weights)
+        dataset: _gate_health(group, tolerance=tolerance, holdout_tolerance=tolerance, catastrophic_threshold=catastrophic_threshold, weights=weights)
         for dataset, group in sorted(grouped.items())
     }
     numeric = (
@@ -904,6 +1025,9 @@ def summarize_trials(
     neutral_tolerance = float(
         configured.get("neutral_tolerance", configured["paired_normalized_regret"])
     )
+    holdout_tolerance = float(
+        configured.get("holdout_neutral_tolerance", DEFAULT_THRESHOLDS["holdout_neutral_tolerance"])
+    )
     if utility_weights is None:
         weights = DEFAULT_GATE_UTILITY_WEIGHTS
     elif isinstance(utility_weights, GateUtilityWeights):
@@ -964,11 +1088,15 @@ def summarize_trials(
         health = _gate_health(
             valid_records,
             tolerance=neutral_tolerance,
+            holdout_tolerance=holdout_tolerance,
             catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
             weights=weights,
         )
         improvements = _paired_improvements(paired)
         holdout_improvements = _holdout_improvements(paired)
+        holdout_paired = [record for record in valid_records if _holdout_pair(record)[3] is not None]
+        holdout_initial = [_holdout_pair(record)[0] for record in holdout_paired]
+        holdout_final = [_holdout_pair(record)[1] for record in holdout_paired]
         outcomes = Counter(_outcome(record, float(configured["paired_normalized_regret"])) for record in paired)
         task_unsafe = [
             record for record in valid_records
@@ -1173,6 +1301,12 @@ def summarize_trials(
             "paired_holdout_improvement_mean": _mean(holdout_improvements),
             "paired_holdout_improvement_median": _median(holdout_improvements),
             "paired_holdout_improvement_std": _std(holdout_improvements),
+            "mean_initial_holdout_metric": _mean([float(v) for v in holdout_initial if v is not None]),
+            "mean_final_holdout_metric": _mean([float(v) for v in holdout_final if v is not None]),
+            "paired_mean_holdout_intervention_delta": _mean([
+                float(_holdout_pair(record)[3]) for record in holdout_paired
+            ]),
+            "valid_paired_holdout_comparison_count": len(holdout_paired),
             "performance_comparable_count": len(paired),
             "gating_outcome_counts": {
                 "improved": outcomes.get("improved", 0),
@@ -1242,6 +1376,7 @@ def summarize_trials(
     }
     overall_selective = aggregate_for(completed)
     overall_gate_health = overall_selective["gate_health"]
+    overall_holdout = overall_gate_health["holdout_intervention_metrics"]
     dataset_gate_health = _dataset_weighted_health(
         completed,
         tolerance=neutral_tolerance,
@@ -1259,6 +1394,7 @@ def summarize_trials(
             leave_one_dataset_out[dataset_name] = _gate_health(
                 remaining,
                 tolerance=neutral_tolerance,
+                holdout_tolerance=holdout_tolerance,
                 catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
                 weights=weights,
             )
@@ -1282,6 +1418,9 @@ def summarize_trials(
             "challenge_yield": "improved_interventions/total_challenges",
             "harmful_intervention_rate": "worsened_interventions/total_challenges",
             "unnecessary_intervention_rate": "neutral_interventions/total_challenges",
+            "holdout_intervention_delta_classification": "final_holdout_macro_f1-initial_holdout_macro_f1",
+            "holdout_intervention_delta_regression": "initial_holdout_rmse-final_holdout_rmse",
+            "holdout_intervention_outcome": "beneficial/harmful/neutral for changed soft plans; not_intervened otherwise; missing paired evaluations are not_comparable",
             "challenge_recall": "beneficial_challenges_made/all_disagreements_where_deterministic_alternative_would_help",
             "potentially_unnecessary_intervention": "valid initial plan AND method disagreement AND final method changed AND initial regret within the task tolerance",
         },
@@ -1292,6 +1431,8 @@ def summarize_trials(
             "catastrophic_regret_threshold": configured["catastrophic_regret_threshold"],
             "utility_weights": weights.as_dict(),
             "calibration_data_role": "policy development only; final evaluation is never used to tune these values",
+            "holdout_data_role": "evaluation-only; never available to runtime policy decisions",
+            "holdout_neutral_tolerance": holdout_tolerance,
         },
         "thresholds": configured,
         "trial_count": total,
@@ -1374,6 +1515,20 @@ def summarize_trials(
         "challenge_yield": overall_selective["challenge_yield"],
         "harmful_intervention_rate": overall_selective["harmful_intervention_rate"],
         "unnecessary_intervention_rate": overall_selective["unnecessary_intervention_rate"],
+        "holdout_intervention_precision": overall_holdout["intervention_precision"],
+        "holdout_harmful_intervention_rate": overall_holdout["harmful_intervention_rate"],
+        "holdout_neutral_intervention_rate": overall_holdout["holdout_neutral_intervention_rate"],
+        "holdout_intervention_count": overall_holdout["intervention_count"],
+        "valid_paired_holdout_comparison_count": overall_holdout[
+            "valid_paired_holdout_comparison_count"
+        ],
+        "missing_or_failed_holdout_count": overall_holdout["missing_or_failed_holdout_count"],
+        "beneficial_intervention_count": overall_holdout["beneficial_intervention_count"],
+        "harmful_intervention_count": overall_holdout["harmful_intervention_count"],
+        "neutral_intervention_count": overall_holdout["neutral_intervention_count"],
+        "mean_holdout_intervention_delta": overall_holdout["mean_holdout_intervention_delta"],
+        "median_holdout_intervention_delta": overall_holdout["median_holdout_intervention_delta"],
+        "holdout_intervention_outcome_counts": overall_holdout["outcome_counts"],
         "challenge_recall": overall_selective["challenge_recall"],
         "missed_rescue_count": overall_selective["missed_rescue_count"],
         "good_abstention_count": overall_selective["good_abstention_count"],

@@ -5,9 +5,31 @@ only by the evaluation and policy-development packages. Runtime decisions do
 not receive empirical-reference outcomes, holdout scores, regret, or whether a
 prior intervention helped.
 
+## Runtime/evaluation boundary
+
+Runtime intervention decisions use training-side validation, cross-validation,
+and bounded empirical probes only. Untouched holdout data is never provided to
+the gate, probe, abstention logic, reconciliation, prompts, thresholds, or
+final-plan selection. The final plan is frozen first; only then are the initial
+and final complete plans (including preprocessing) evaluated on the same
+untouched holdout split.
+
 ## Trial outcomes
 
-For a comparable trial, `normalized_gate_delta` is
+The primary intervention outcome is the paired exact-plan holdout result. For
+classification, `holdout_intervention_delta` is
+`final_holdout_macro_f1 - initial_holdout_macro_f1`. For regression it is
+`initial_holdout_rmse - final_holdout_rmse`. Positive always means the
+safeguard improved performance. A changed soft plan is `beneficial`, `harmful`,
+or `neutral` using the configurable native-metric
+`holdout_neutral_tolerance`; an unchanged plan is `not_intervened`, and a
+missing/failed pair is `not_comparable`.
+
+The holdout-based intervention precision, harmful-intervention rate, neutral
+rate, mean delta, median delta, and valid paired denominator are reported
+alongside the training-side diagnostics below.
+
+For training-side diagnostic analysis, `normalized_gate_delta` is
 `initial_normalized_regret - final_normalized_regret`. Positive means that the
 gate reduced regret. The same direction is obtained directly from primary
 scores with `final_macro_f1 - initial_macro_f1` for classification and
@@ -22,7 +44,11 @@ reference result. Classification regret is `max(0, best_macro_f1 - selected_macr
 regression regret is `max(0, selected_rmse - best_rmse) / max(abs(best_rmse), 1e-12)`.
 Regret reduction is `initial_regret - final_regret`.
 
-## Primary gate-health metrics
+These regret-based values remain diagnostics of what training-side evidence
+predicted; they are not the primary definition of realized intervention
+success or harm.
+
+## Training-side diagnostic metrics
 
 - `intervention_precision = improved / (improved + worsened)`. Neutral
   interventions are excluded from this denominator.

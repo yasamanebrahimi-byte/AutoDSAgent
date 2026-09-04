@@ -45,6 +45,7 @@ from evaluation.metrics import (
     catastrophic_transition,
     classify_intervention_outcome,
     normalized_performance_delta,
+    holdout_intervention_delta,
     normalized_regret,
     regret,
     regret_reduction,
@@ -764,6 +765,17 @@ def _run_trial(
         expected_task=case.expected_task_type,
     )
     unsafe_plan_intercepted = initial_validation.status == "failed" and not proceeded_unchanged
+    # A soft intervention is a changed final plan resulting from an actual
+    # challenge. Hard validation/repair remains a separate evaluation path.
+    soft_decision = (gate_result or {}).get("soft_challenge_decision") or (
+        (gate_result or {}).get("soft_challenge") or {}
+    ).get("decision")
+    intervention_occurred = bool(
+        soft_decision == "challenge"
+        and final_valid
+        and not proceeded_unchanged
+        and not unsafe_plan_intercepted
+    )
 
     # This is the only section that performs candidate-family fitting.  It is
     # intentionally after the gate call, so empirical results cannot influence
@@ -857,6 +869,34 @@ def _run_trial(
         if final_valid
         else None
     )
+    holdout_metric_name = (
+        "macro_f1" if case.expected_task_type == "classification" else "rmse"
+    )
+    initial_holdout_metric = (agent_holdout or {}).get("holdout_metrics", {}).get(holdout_metric_name)
+    final_holdout_metric = (gated_holdout or {}).get("holdout_metrics", {}).get(holdout_metric_name)
+    # This calculation is strictly post-decision evaluation. Nothing below is
+    # passed back into the gate, probe, reconciliation, or final-plan choice.
+    paired_holdout_delta = holdout_intervention_delta(
+        case.expected_task_type, initial_holdout_metric, final_holdout_metric
+    )
+    holdout_outcome = (
+        "not_intervened"
+        if not intervention_occurred
+        else (
+            "not_comparable"
+            if paired_holdout_delta is None
+            else (
+                "neutral"
+                if abs(paired_holdout_delta) <= float(
+                    config.thresholds.get(
+                        "holdout_neutral_tolerance",
+                        DEFAULT_THRESHOLDS["holdout_neutral_tolerance"],
+                    )
+                )
+                else ("beneficial" if paired_holdout_delta > 0 else "harmful")
+            )
+        )
+    )
     agent_regret = regret(case.expected_task_type, best_score, agent_family_score)
     gated_regret = regret(case.expected_task_type, best_score, gated_family_score)
     paired_cv_improvement = None
@@ -887,7 +927,9 @@ def _run_trial(
         (gate_result or {}).get("soft_challenge_decision")
         or (gate_result or {}).get("soft_challenge", {}).get("decision")
     )
-    soft_intervention_occurred = soft_decision == "challenge"
+    # Preserve the distinction between a challenge and an actual changed
+    # final plan; reconciliation may preserve the initial proposal.
+    soft_intervention_occurred = intervention_occurred
     alternative_regret_reduction = regret_reduction(
         initial_normalized_regret, deterministic_normalized_regret
     )
@@ -1089,6 +1131,7 @@ def _run_trial(
         "unsafe_plan_intercepted": unsafe_plan_intercepted,
         "proceeded_unchanged": proceeded_unchanged,
         "gate_changed_initial_plan": final_valid and not proceeded_unchanged,
+        "intervention_occurred": intervention_occurred,
         "deterministic_validation_intervened": unsafe_plan_intercepted,
         "hard_validation_intervened": bool(
             (gate_result or {}).get("hard_validation", {}).get("intervention_required")
@@ -1152,6 +1195,11 @@ def _run_trial(
         "gated_final_cv": gated_plan_cv,
         "agent_initial_holdout_metrics": (agent_holdout or {}).get("holdout_metrics", {}),
         "gated_final_holdout_metrics": (gated_holdout or {}).get("holdout_metrics", {}),
+        "initial_holdout_metric": initial_holdout_metric,
+        "final_holdout_metric": final_holdout_metric,
+        "holdout_metric_name": holdout_metric_name,
+        "holdout_intervention_delta": paired_holdout_delta,
+        "holdout_intervention_outcome": holdout_outcome,
         "agent_initial_holdout_split_contract": (agent_holdout or {})
         .get("validation", {})
         .get("split", {})
@@ -1299,6 +1347,12 @@ def _failed_trial_record(
         "candidate_cv_metrics": {},
         "agent_initial_cv_metric": None,
         "gated_final_cv_metric": None,
+        "initial_holdout_metric": None,
+        "final_holdout_metric": None,
+        "holdout_metric_name": None,
+        "holdout_intervention_delta": None,
+        "holdout_intervention_outcome": "not_comparable",
+        "intervention_occurred": False,
         "agent_normalized_regret": None,
         "gated_normalized_regret": None,
         "paired_cv_improvement": None,
@@ -1498,6 +1552,7 @@ def run_evaluation(
             "candidate_methods": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
             "candidate_selection_data": "frozen training partition only",
             "holdout_data": "final evaluation only",
+            "holdout_intervention_delta": "final_holdout_macro_f1-initial_holdout_macro_f1 for classification; initial_holdout_rmse-final_holdout_rmse for regression",
             "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor",
             "objective": "intervention quality; exact family match is diagnostic only",
             "neutrality": "normalized regret reduction within neutral_tolerance is neutral",
