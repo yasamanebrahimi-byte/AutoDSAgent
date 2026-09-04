@@ -119,7 +119,7 @@ python -m evaluation.run --suite external --offline --output evaluation_results/
 Run the primary paired ablation set offline:
 
 ```bash
-python -m evaluation.ablation --suite external --offline --output evaluation_results/external_ablation_offline --ablation llm_only --ablation blinded_always_reconcile --ablation selective_calibrated --ablation full
+python -m evaluation.ablation --suite external --offline --output evaluation_results/external_ablation_offline --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
 ```
 
 Run only one tier:
@@ -132,7 +132,7 @@ After the suite is frozen and live research approval is in place, run the full
 suite live with strict failure reporting:
 
 ```bash
-python -m evaluation.ablation --suite external --live --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation blinded_always_reconcile --ablation selective_calibrated --ablation full
+python -m evaluation.ablation --suite external --live --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
 ```
 
 The default `python -m evaluation.run` command remains the local suite.

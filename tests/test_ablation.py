@@ -46,23 +46,30 @@ def _plan(context: dict) -> ModelingPlan:
 
 def test_named_presets_are_explicit_and_versioned():
     presets = ablation_presets()
-    assert set(presets) == {
+    assert set(PRIMARY_ABLATION_NAMES) == {
         "llm_only",
+        "hard_validation_only",
         "deterministic_only",
-        "blinded_always_reconcile",
-        "high_confidence_only",
-        "selective_calibrated",
-        "interaction_boundary_aware",
-        "empirical_probe",
-        "probe_first",
+        "always_reconcile",
+        "probe_direct",
         "full",
-    } <= set(presets)
+    }
     assert presets["selective_calibrated"].interaction_diagnostics is False
     assert presets["interaction_boundary_aware"].interaction_diagnostics is True
     assert presets["empirical_probe"].empirical_probe is True
-    assert presets["probe_first"].decision_mode == "probe_first"
+    assert presets["probe_first"].decision_mode == "probe_direct"
     assert presets["probe_first"].empirical_probe is True
     assert presets["full"].schema_version == "modeling-gate-ablation-v1"
+
+
+def test_primary_ablation_effective_specs_are_unique():
+    specs = ablation_presets()
+    keys = []
+    for name in PRIMARY_ABLATION_NAMES:
+        values = specs[name].as_dict()
+        values.pop("name")
+        keys.append(json.dumps(values, sort_keys=True))
+    assert len(keys) == len(set(keys))
 
 
 def test_default_ablation_set_is_the_primary_four(tmp_path: Path):

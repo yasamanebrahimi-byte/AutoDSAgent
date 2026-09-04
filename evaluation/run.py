@@ -38,8 +38,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--gate-mode",
-        choices=("llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"),
-        default="probe_first",
+        choices=("llm_only", "hard_validation_only", "deterministic_only", "always_reconcile", "selective", "probe_direct", "full", "probe_first"),
+        default="full",
         help="Select the current evaluation decision path.",
     )
     parser.add_argument(

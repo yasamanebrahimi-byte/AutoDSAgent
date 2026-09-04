@@ -70,6 +70,7 @@ def _run(
     strength: str,
     agents: _Agents | None = None,
     events: list[str] | None = None,
+    mode: str = "selective",
 ):
     frame = _frame()
     split = freeze_supervised_split(frame, "target", "classification")
@@ -120,6 +121,7 @@ def _run(
         approved_target="target",
         approved_task="classification",
         empirical_probe_policy=EmpiricalProbePolicy(random_state=42),
+        soft_challenge_mode=mode,
     )
     return result, captured, split
 
@@ -200,6 +202,31 @@ def test_moderate_or_strong_probe_invokes_blinded_reconciliation(monkeypatch: py
     }
     assert '"deterministic"' not in json.dumps(prompt_payload).lower()
     assert '"agent"' not in json.dumps(prompt_payload).lower()
+
+
+@pytest.mark.parametrize("strength", ["moderate", "strong"])
+def test_probe_direct_selects_probe_winner_without_reconciler(monkeypatch: pytest.MonkeyPatch, strength: str):
+    agents = _Agents(selected_method="tree_ensemble")
+    result, _, _ = _run(monkeypatch, strength, agents, mode="probe_direct")
+    assert result["selected_method"] in {"linear", "tree_ensemble"}
+    assert result["selected_proposal_source"] in {"agent", "deterministic"}
+    assert result["reconciliation"] is None
+    assert agents.calls == 0
+
+
+def test_always_reconcile_does_not_use_probe_gate(monkeypatch: pytest.MonkeyPatch):
+    agents = _Agents(selected_method="linear")
+    result, _, _ = _run(monkeypatch, "weak", agents, mode="always_reconcile")
+    assert result["reconciliation"] is not None
+    assert agents.calls == 1
+
+
+def test_hard_validation_only_retains_valid_llm_on_disagreement(monkeypatch: pytest.MonkeyPatch):
+    agents = _Agents(selected_method="tree_ensemble")
+    result, _, _ = _run(monkeypatch, "strong", agents, mode="hard_validation_only")
+    assert result["selected_method"] == "linear"
+    assert result["reconciliation"] is None
+    assert result["empirical_probe_invoked"] is False
 
 
 def test_probe_disabled_is_safe_abstention(monkeypatch: pytest.MonkeyPatch):

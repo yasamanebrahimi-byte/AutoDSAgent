@@ -21,8 +21,10 @@ from evaluation.runner import run_evaluation
 ABLATION_SCHEMA_VERSION = "modeling-gate-ablation-v1"
 PRIMARY_ABLATION_NAMES = (
     "llm_only",
-    "blinded_always_reconcile",
-    "selective_calibrated",
+    "hard_validation_only",
+    "deterministic_only",
+    "always_reconcile",
+    "probe_direct",
     "full",
 )
 
@@ -37,6 +39,13 @@ class AblationSpec:
     interaction_diagnostics: bool = True
     classification_boundary_diagnostics: bool = True
     empirical_probe: bool = False
+    challenger_enabled: bool = True
+    hard_validation_enabled: bool = True
+    reconciliation_enabled: bool = False
+    reconcile_on_any_disagreement: bool = False
+    direct_probe_selection_enabled: bool = False
+    abstention_enabled: bool = True
+    legacy: bool = False
     schema_version: str = ABLATION_SCHEMA_VERSION
     deterministic_policy_version: str = "4"
     soft_challenge_policy_version: str = "v1"
@@ -50,6 +59,13 @@ class AblationSpec:
             "interaction_diagnostics": self.interaction_diagnostics,
             "classification_boundary_diagnostics": self.classification_boundary_diagnostics,
             "empirical_probe": self.empirical_probe,
+            "challenger_enabled": self.challenger_enabled,
+            "hard_validation_enabled": self.hard_validation_enabled,
+            "reconciliation_enabled": self.reconciliation_enabled,
+            "reconcile_on_any_disagreement": self.reconcile_on_any_disagreement,
+            "direct_probe_selection_enabled": self.direct_probe_selection_enabled,
+            "abstention_enabled": self.abstention_enabled,
+            "legacy": self.legacy,
             "schema_version": self.schema_version,
             "deterministic_policy_version": self.deterministic_policy_version,
             "soft_challenge_policy_version": self.soft_challenge_policy_version,
@@ -66,13 +82,29 @@ def ablation_presets() -> dict[str, AblationSpec]:
     }
     return {
         "llm_only": AblationSpec(
-            "llm_only", "llm_only", "calibrated", empirical_probe=False, **common
+            "llm_only", "llm_only", "calibrated", empirical_probe=False,
+            challenger_enabled=False, hard_validation_enabled=True, abstention_enabled=False, **common
+        ),
+        "hard_validation_only": AblationSpec(
+            "hard_validation_only", "hard_validation_only", "calibrated", empirical_probe=False,
+            reconciliation_enabled=False, abstention_enabled=False, **common
         ),
         "deterministic_only": AblationSpec(
-            "deterministic_only", "deterministic_only", "calibrated", empirical_probe=False, **common
+            "deterministic_only", "deterministic_only", "calibrated", empirical_probe=False,
+            reconciliation_enabled=False, abstention_enabled=False, **common
         ),
+        "always_reconcile": AblationSpec(
+            "always_reconcile", "always_reconcile", "calibrated", empirical_probe=False,
+            reconciliation_enabled=True, reconcile_on_any_disagreement=True, abstention_enabled=False, **common
+        ),
+        # Backward-compatible name for the former primary baseline.
         "blinded_always_reconcile": AblationSpec(
-            "blinded_always_reconcile", "always_reconcile", "calibrated", empirical_probe=False, **common
+            "blinded_always_reconcile", "always_reconcile", "calibrated", empirical_probe=False,
+            reconciliation_enabled=True, reconcile_on_any_disagreement=True, legacy=True, **common
+        ),
+        "probe_direct": AblationSpec(
+            "probe_direct", "probe_direct", "calibrated", empirical_probe=True,
+            reconciliation_enabled=False, direct_probe_selection_enabled=True, **common
         ),
         "high_confidence_only": AblationSpec(
             "high_confidence_only", "selective", "high_confidence_only", empirical_probe=False, **common
@@ -84,6 +116,7 @@ def ablation_presets() -> dict[str, AblationSpec]:
             interaction_diagnostics=False,
             classification_boundary_diagnostics=False,
             empirical_probe=False,
+            legacy=True,
         ),
         "interaction_boundary_aware": AblationSpec(
             "interaction_boundary_aware", "selective", "calibrated", empirical_probe=False, **common
@@ -92,10 +125,12 @@ def ablation_presets() -> dict[str, AblationSpec]:
             "empirical_probe", "selective", "calibrated", empirical_probe=True, **common
         ),
         "probe_first": AblationSpec(
-            "probe_first", "probe_first", "calibrated", empirical_probe=True, **common
+            "probe_first", "probe_direct", "calibrated", empirical_probe=True,
+            reconciliation_enabled=False, direct_probe_selection_enabled=True, legacy=True, **common
         ),
         "full": AblationSpec(
-            "full", "probe_first", "calibrated", empirical_probe=True, **common
+            "full", "full", "calibrated", empirical_probe=True,
+            reconciliation_enabled=True, **common
         ),
     }
 
@@ -382,10 +417,10 @@ def run_ablation_study(
     rows_by_name = {name: trial_rows[name] for name in selected_names}
     pairs = [
         ("full", "llm_only"),
-        ("interaction_boundary_aware", "selective_calibrated"),
-        ("empirical_probe", "interaction_boundary_aware"),
-        ("probe_first", "selective_calibrated"),
-        ("selective_calibrated", "llm_only"),
+        ("hard_validation_only", "llm_only"),
+        ("deterministic_only", "hard_validation_only"),
+        ("always_reconcile", "full"),
+        ("probe_direct", "full"),
     ]
     paired = [
         _paired_comparison(rows_by_name, first, second)

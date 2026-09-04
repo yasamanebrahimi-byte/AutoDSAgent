@@ -783,7 +783,10 @@ def _validate_modeling_gate(
     if challenger_hard_validation.status != "passed" and agent_hard_validation.status == "passed":
         soft_status = "invalid"
 
-    if soft_challenge_mode not in {"selective", "always_reconcile", "probe_first"}:
+    if soft_challenge_mode not in {
+        "selective", "always_reconcile", "probe_first", "probe_direct",
+        "full", "hard_validation_only",
+    }:
         raise ValueError(f"Unsupported soft_challenge_mode: {soft_challenge_mode!r}")
 
     # The calibrated soft policy remains available as audit metadata, but it
@@ -804,7 +807,7 @@ def _validate_modeling_gate(
     probe_evidence_strength = "not_invoked"
     abstention_reason: str | None = None
 
-    if not hard_reconciliation_required and method_disagreement:
+    if soft_challenge_mode != "hard_validation_only" and not hard_reconciliation_required and method_disagreement:
         configured_probe_policy = empirical_probe_policy or EmpiricalProbePolicy()
         if configured_probe_policy.enabled:
             if configured_probe_policy.random_state is None:
@@ -904,7 +907,10 @@ def _validate_modeling_gate(
     )
     soft_reconciliation_required = method_disagreement and (
         soft_challenge_mode == "always_reconcile"
-        or probe_evidence_strength in {"moderate", "strong"}
+        or (
+            soft_challenge_mode in {"selective", "probe_first", "probe_direct", "full"}
+            and probe_evidence_strength in {"moderate", "strong"}
+        )
     )
     if hard_reconciliation_required:
         soft_decision = replace(
@@ -922,13 +928,33 @@ def _validate_modeling_gate(
                 else f"probe_{probe_evidence_strength}_evidence"
             ),
         )
-    elif method_disagreement:
+    elif method_disagreement and soft_challenge_mode != "hard_validation_only":
         soft_decision = replace(
             soft_decision,
             decision="abstain",
             decision_reason=abstention_reason or "probe_evidence_not_sufficient_for_reconciliation",
         )
-    if (
+    if soft_challenge_mode == "hard_validation_only":
+        # This mode measures invariants, not preference-based replacement. A
+        # valid initial proposal is authoritative; only an invalid proposal
+        # may be repaired by the deterministic challenger.
+        if agent_hard_validation.status == "passed":
+            selected_method = modeling_plan.recommended_method
+            selected_preprocessing = modeling_plan.preprocessing
+            justification = "The valid initial LLM plan was retained; hard validation supplied no soft override."
+            status = "hard_validation_only"
+        elif challenger_hard_validation.status == "passed":
+            selected_method = deterministic.recommended_method
+            selected_preprocessing = deterministic.preprocessing
+            justification = "The invalid initial LLM plan was minimally replaced by the valid deterministic plan for executability."
+            status = "hard_validation_correction"
+        else:
+            selected_method = modeling_plan.recommended_method
+            selected_preprocessing = modeling_plan.preprocessing
+            justification = "Neither proposal passed hard validation."
+            status = "hard_validation_failed"
+        resolution = None
+    elif (
         not hard_reconciliation_required
         and not soft_reconciliation_required
         and not method_disagreement
@@ -955,6 +981,26 @@ def _validate_modeling_gate(
             )
             status = "disagreement_abstained"
             resolution = None
+        elif soft_challenge_mode == "probe_direct":
+            # Probe-direct is deliberately identical to production up through
+            # evidence generation, but never invokes the LLM reconciler.
+            source_by_label = {
+                "A": blinded_reconciliation.proposal_a_source if blinded_reconciliation else None,
+                "B": blinded_reconciliation.proposal_b_source if blinded_reconciliation else None,
+            }
+            winner_source = source_by_label.get((empirical_probe or {}).get("winner"))
+            if winner_source == "deterministic":
+                selected_method = deterministic.recommended_method
+                selected_preprocessing = deterministic.preprocessing
+                selected_proposal = "B" if source_by_label.get("B") == "deterministic" else "A"
+                selected_proposal_source = "deterministic"
+            else:
+                selected_method = modeling_plan.recommended_method
+                selected_preprocessing = modeling_plan.preprocessing
+                selected_proposal = "B" if source_by_label.get("B") == "agent" else "A"
+                selected_proposal_source = "agent"
+            justification = "The moderate/strong training-only probe winner was selected directly without LLM reconciliation."
+            status = "disagreement_resolved"
         else:
             blinded_reconciliation = build_blinded_reconciliation(
                 reconciliation_profile,
@@ -1197,6 +1243,8 @@ def _validate_modeling_gate(
     decision_path = (
         "hard_validation_correction"
         if hard_reconciliation_required
+        else "hard_validation_only"
+        if soft_challenge_mode == "hard_validation_only"
         else "agreement"
         if not method_disagreement
         else "probe_triggered_blinded_reconciliation"

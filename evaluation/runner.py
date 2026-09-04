@@ -99,7 +99,10 @@ class EvaluationConfig:
             raise ValueError("repetitions must be at least one")
         if not 0.10 <= self.test_size <= 0.50:
             raise ValueError("test_size must be between 0.10 and 0.50")
-        if self.gate_mode not in {"llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"}:
+        if self.gate_mode not in {
+            "llm_only", "hard_validation_only", "deterministic_only",
+            "always_reconcile", "selective", "probe_first", "probe_direct", "full",
+        }:
             raise ValueError("Unsupported gate_mode.")
         if not self.split_seeds:
             raise ValueError("split_seeds must contain at least one seed.")
@@ -494,6 +497,13 @@ def _run_trial(
         "gate_mode": config.gate_mode,
         "ablation_name": config.ablation_name,
         "ablation_schema_version": config.ablation_schema_version,
+        "challenger_enabled": config.gate_mode != "llm_only",
+        "hard_validation_enabled": True,
+        "probe_enabled": config.empirical_probe_enabled and config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
+        "reconciliation_enabled": config.gate_mode in {"always_reconcile", "selective", "probe_first", "full"},
+        "reconcile_on_any_disagreement": config.gate_mode == "always_reconcile",
+        "direct_probe_selection_enabled": config.gate_mode == "probe_direct",
+        "abstention_enabled": config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
         "soft_challenge_strategy": config.soft_challenge_strategy,
         "deterministic_diagnostic_config": {
             "enable_regression_interaction_diagnostics": config.enable_regression_interaction_diagnostics,
@@ -930,6 +940,15 @@ def _run_trial(
     # Preserve the distinction between a challenge and an actual changed
     # final plan; reconciliation may preserve the initial proposal.
     soft_intervention_occurred = intervention_occurred
+    final_selection_source = (gate_result or {}).get("final", {}).get("selected_source")
+    if final_selection_source == "agent":
+        final_selection_source = "initial_llm"
+    elif final_selection_source == "deterministic":
+        final_selection_source = "deterministic"
+    elif final_selection_source == "reconciled_contract":
+        final_selection_source = "reconciled_A" if (gate_result or {}).get("selected_proposal") == "A" else "reconciled_B"
+    if final_selection_source is None and proceeded_unchanged:
+        final_selection_source = "initial_llm"
     alternative_regret_reduction = regret_reduction(
         initial_normalized_regret, deterministic_normalized_regret
     )
@@ -981,6 +1000,15 @@ def _run_trial(
         "trial_id": context["trial_id"],
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
+        "ablation_name": config.ablation_name,
+        "ablation_schema_version": config.ablation_schema_version,
+        "challenger_enabled": config.gate_mode != "llm_only",
+        "hard_validation_enabled": True,
+        "probe_enabled": config.empirical_probe_enabled and config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
+        "reconciliation_enabled": config.gate_mode in {"always_reconcile", "selective", "probe_first", "full"},
+        "reconcile_on_any_disagreement": config.gate_mode == "always_reconcile",
+        "direct_probe_selection_enabled": config.gate_mode == "probe_direct",
+        "abstention_enabled": config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
         "trial_status": "failed" if config.require_live and gate_error else "completed",
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": experimental_split_seed,
@@ -1132,6 +1160,9 @@ def _run_trial(
         "proceeded_unchanged": proceeded_unchanged,
         "gate_changed_initial_plan": final_valid and not proceeded_unchanged,
         "intervention_occurred": intervention_occurred,
+        "hard_repair_occurred": unsafe_plan_intercepted,
+        "soft_intervention_occurred": soft_intervention_occurred,
+        "final_selection_source": final_selection_source,
         "deterministic_validation_intervened": unsafe_plan_intercepted,
         "hard_validation_intervened": bool(
             (gate_result or {}).get("hard_validation", {}).get("intervention_required")
@@ -1319,6 +1350,13 @@ def _failed_trial_record(
         "gate_mode": config.gate_mode,
         "ablation_name": config.ablation_name,
         "ablation_schema_version": config.ablation_schema_version,
+        "challenger_enabled": config.gate_mode != "llm_only",
+        "hard_validation_enabled": True,
+        "probe_enabled": config.empirical_probe_enabled and config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
+        "reconciliation_enabled": config.gate_mode in {"always_reconcile", "selective", "probe_first", "full"},
+        "reconcile_on_any_disagreement": config.gate_mode == "always_reconcile",
+        "direct_probe_selection_enabled": config.gate_mode == "probe_direct",
+        "abstention_enabled": config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": experimental_split_seed,
         "split_random_state": split_seed,
@@ -1353,6 +1391,9 @@ def _failed_trial_record(
         "holdout_intervention_delta": None,
         "holdout_intervention_outcome": "not_comparable",
         "intervention_occurred": False,
+        "hard_repair_occurred": False,
+        "soft_intervention_occurred": False,
+        "final_selection_source": None,
         "agent_normalized_regret": None,
         "gated_normalized_regret": None,
         "paired_cv_improvement": None,
@@ -1538,7 +1579,8 @@ def run_evaluation(
             "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
             "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
             "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
-            "probe_first": "run the bounded pairwise training-only probe for every valid family disagreement; reconcile only for moderate or strong evidence",
+            "probe_direct": "run the bounded pairwise training-only probe; directly select a moderate or strong empirical winner",
+            "full": "run the bounded pairwise training-only probe; invoke blinded reconciliation only for moderate or strong evidence",
         },
         "prompt_schema_version": config.prompt_schema_version,
         "deterministic_policy_version": DeterministicPolicy().version,
