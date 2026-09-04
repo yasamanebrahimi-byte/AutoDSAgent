@@ -357,6 +357,20 @@ def validate_confirmatory_manifest(
             "Confirmatory manifest is not frozen; set status to 'frozen' only after "
             "the experiment definition has been intentionally selected."
         )
+    probe_policy = loaded.get("empirical_probe_policy") or {}
+    allowed_probe_fields = {
+        "policy_version", "configuration_sha256", "enabled", "cv_folds",
+        "minimum_rows", "max_rows", "max_configs_per_family",
+        "tie_relative_threshold", "moderate_relative_threshold",
+        "strong_relative_threshold", "variability_tie_multiplier",
+        "variability_weak_multiplier", "minimum_consistent_win_rate",
+    }
+    unknown_probe_fields = sorted(set(probe_policy) - allowed_probe_fields)
+    if unknown_probe_fields:
+        raise ValueError(
+            "Confirmatory empirical_probe_policy contains unknown/deprecated fields: "
+            + ", ".join(unknown_probe_fields)
+        )
     expected = _manifest_values(loaded)
     mismatches: list[str] = []
     expected_code_sha256 = loaded.get("expected_experiment_code_sha256")

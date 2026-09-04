@@ -193,11 +193,26 @@ class SoftChallengeArtifact(StrictModel):
     scores_are_empirical_performance_estimates: StrictBool = False
 
 
+class GateDecisionArtifact(StrictModel):
+    """Single causal record for the production modeling-gate outcome."""
+
+    action: Literal["preserve_original", "abstain", "reconcile", "hard_correction"]
+    reason_code: str
+    reason_text: str
+    trigger_reason_code: Optional[str] = None
+    probe_status: Literal["not_invoked", "completed", "unavailable", "failed"] = "not_invoked"
+    probe_strength: Literal["not_invoked", "tie", "weak", "moderate", "strong"] = "not_invoked"
+    disagreement_type: Literal["none", "method", "preprocessing", "method_and_preprocessing"] = "none"
+    hard_validation_status: Literal["passed", "failed", "unavailable"] = "passed"
+    reconciliation_invoked: StrictBool = False
+
+
 class ModelingGateArtifact(StrictModel):
     """Explicit hard-vs-soft-vs-final modeling decision artifact."""
 
     hard_validation: HardValidationArtifact
     soft_challenge: SoftChallengeArtifact
+    gate_decision: GateDecisionArtifact
     final: dict[str, Any] = Field(default_factory=dict)
 
 

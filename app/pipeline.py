@@ -39,6 +39,7 @@ from app.schemas import (
     FormulationComparison,
     FormulationPlan,
     FormulationResolution,
+    GateDecisionArtifact,
     HardValidationArtifact,
     ModelingGateArtifact,
     ModelingPlan,
@@ -976,8 +977,8 @@ def _validate_modeling_gate(
             selected_method = modeling_plan.recommended_method
             selected_preprocessing = modeling_plan.preprocessing
             justification = (
-                "The deterministic challenger recorded a model-family disagreement but abstained "
-                "because its heuristic confidence and calibration evidence did not justify intervention."
+                "The bounded training-only empirical probe was insufficient to justify intervention, "
+                "so the original plan was preserved."
             )
             status = "disagreement_abstained"
             resolution = None
@@ -1240,6 +1241,67 @@ def _validate_modeling_gate(
         if probe_evidence_strength not in {"tie", "weak", "moderate", "strong"}:
             probe_evidence_strength = "tie"
 
+    disagreement_type = (
+        "method_and_preprocessing" if method_disagreement and preprocessing_disagreement
+        else "method" if method_disagreement
+        else "preprocessing" if preprocessing_disagreement
+        else "none"
+    )
+    if hard_reconciliation_required:
+        gate_decision = GateDecisionArtifact(
+            action="hard_correction", reason_code="hard_validation_failure",
+            reason_text="The initial modeling plan failed hard validation; the executable plan was selected under the hard-safety contract.",
+            probe_status=probe_status, probe_strength=probe_evidence_strength,
+            disagreement_type=disagreement_type, hard_validation_status="failed",
+            reconciliation_invoked=resolution is not None,
+        )
+    elif not method_disagreement:
+        gate_decision = GateDecisionArtifact(
+            action="preserve_original",
+            reason_code="no_material_disagreement" if not preprocessing_disagreement else "preprocessing_disagreement_not_actionable",
+            reason_text=("The independent proposals had no material disagreement, so the original plan was preserved."
+                         if not preprocessing_disagreement else
+                         "The proposals differed only in preprocessing behavior outside the production intervention trigger, so the original plan was preserved."),
+            probe_status=probe_status, probe_strength=probe_evidence_strength,
+            disagreement_type=disagreement_type, hard_validation_status="passed",
+        )
+    elif soft_challenge_mode == "hard_validation_only":
+        gate_decision = GateDecisionArtifact(
+            action="preserve_original", reason_code="hard_validation_only_policy",
+            reason_text="The hard-validation-only mode preserves a valid initial plan; no preference-based intervention is applied.",
+            probe_status=probe_status, probe_strength=probe_evidence_strength,
+            disagreement_type=disagreement_type, hard_validation_status="passed",
+        )
+    elif resolution is None:
+        reason_code = ("probe_unavailable" if probe_status in {"unavailable", "failed"}
+                       else "probe_inconclusive" if probe_evidence_strength == "tie"
+                       else "probe_weak")
+        reason_text = {
+            "probe_unavailable": "The bounded training-only empirical probe was unavailable or failed, so there was insufficient evidence to justify intervention.",
+            "probe_inconclusive": "The bounded training-only empirical probe was inconclusive (tied), so there was insufficient evidence to justify intervention.",
+            "probe_weak": "The bounded training-only empirical probe provided weak evidence, so there was insufficient evidence to justify intervention.",
+        }[reason_code]
+        gate_decision = GateDecisionArtifact(
+            action="abstain", reason_code=reason_code, reason_text=reason_text,
+            trigger_reason_code=reason_code, probe_status=probe_status,
+            probe_strength=probe_evidence_strength, disagreement_type=disagreement_type,
+            hard_validation_status="passed",
+        )
+    else:
+        final_reason_code = ("reconciliation_selected_original" if final_source == "agent"
+                             else "reconciliation_selected_alternative" if final_source == "deterministic"
+                             else "probe_supports_intervention")
+        selected_text = ("reconciliation selected the original proposal." if final_source == "agent"
+                         else "reconciliation selected the alternative proposal." if final_source == "deterministic"
+                         else "the probe winner was selected directly.")
+        gate_decision = GateDecisionArtifact(
+            action="reconcile", reason_code=final_reason_code,
+            reason_text="The bounded training-only empirical probe provided sufficient evidence for intervention; " + selected_text,
+            trigger_reason_code="probe_supports_intervention", probe_status=probe_status,
+            probe_strength=probe_evidence_strength, disagreement_type=disagreement_type,
+            hard_validation_status="passed", reconciliation_invoked=resolution is not None,
+        )
+
     decision_path = (
         "hard_validation_correction"
         if hard_reconciliation_required
@@ -1318,6 +1380,7 @@ def _validate_modeling_gate(
     gate_artifact = ModelingGateArtifact(
         hard_validation=hard_artifact,
         soft_challenge=soft_artifact,
+        gate_decision=gate_decision,
         final=final_artifact,
     )
     validation = {
@@ -1362,6 +1425,7 @@ def _validate_modeling_gate(
         "probe_status": probe_status,
         "probe_evidence_strength": probe_evidence_strength,
         "abstention_reason": abstention_reason,
+        "gate_decision": gate_decision.model_dump(mode="json"),
         "decision_path": decision_path,
         "final": final_artifact,
         "hard_validation_intervened": agent_hard_validation.status != "passed",
@@ -1393,6 +1457,7 @@ def _validate_modeling_gate(
         "probe_status": probe_status,
         "probe_evidence_strength": probe_evidence_strength,
         "abstention_reason": abstention_reason,
+        "gate_decision": gate_decision.model_dump(mode="json"),
         "decision_path": decision_path,
         "final": final_artifact,
         "status": status,

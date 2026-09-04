@@ -169,6 +169,7 @@ def test_agreement_skips_probe_and_reconciliation(monkeypatch: pytest.MonkeyPatc
     assert agents.calls == 0
     assert result["selected_method"] == "linear"
     assert result["decision_path"] == "agreement"
+    assert result["gate_decision"]["reason_code"] == "no_material_disagreement"
 
 
 @pytest.mark.parametrize("strength", ["tie", "weak"])
@@ -182,6 +183,8 @@ def test_weak_or_tied_probe_abstains(monkeypatch: pytest.MonkeyPatch, strength: 
     assert result["reconciliation"] is None
     assert agents.calls == 0
     assert result["selected_method"] == "linear"
+    assert result["gate_decision"]["reason_code"] in {"probe_inconclusive", "probe_weak"}
+    assert "heuristic confidence" not in result["gate_decision"]["reason_text"]
 
 
 @pytest.mark.parametrize("strength", ["moderate", "strong"])
@@ -194,6 +197,8 @@ def test_moderate_or_strong_probe_invokes_blinded_reconciliation(monkeypatch: py
     assert result["reconciliation"] is not None
     assert agents.calls == 1
     assert result["selected_method"] == "linear"
+    assert result["gate_decision"]["reason_code"] in {"reconciliation_selected_original", "reconciliation_selected_alternative"}
+    assert result["gate_decision"]["trigger_reason_code"] == "probe_supports_intervention"
     assert result["selected_proposal_source"] in {"agent", "deterministic"}
     prompt_payload = {
         "proposal_a": (agents.payload or {}).get("proposal_a"),
@@ -288,4 +293,5 @@ def test_hard_invalid_proposal_skips_probe_and_keeps_hard_correction(monkeypatch
     )
     assert result["empirical_probe_invoked"] is False
     assert result["decision_path"] == "hard_validation_correction"
+    assert result["gate_decision"]["reason_code"] == "hard_validation_failure"
     assert result["reconciliation"] is not None

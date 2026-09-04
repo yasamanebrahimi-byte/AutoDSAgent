@@ -132,6 +132,13 @@ def test_clear_consistent_difference_is_strong(monkeypatch):
     assert result["proposal_b"]["fold_wins"] == 3
 
 
+def test_moderate_boundary_changes_evidence_classification():
+    policy = EmpiricalProbePolicy()
+    common = dict(difference=0.2, std_a=0.01, std_b=0.01, winner="A", fold_wins=3, fold_count=3, policy=policy)
+    assert probe._evidence_strength(policy.moderate_relative_threshold - 1e-6, **common) == "weak"
+    assert probe._evidence_strength(policy.moderate_relative_threshold, **common) == "moderate"
+
+
 def test_probe_failure_is_recorded_without_raising(monkeypatch):
     def fail(*args, **kwargs):
         raise ValueError("controlled estimator failure")

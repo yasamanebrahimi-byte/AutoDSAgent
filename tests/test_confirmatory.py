@@ -156,6 +156,13 @@ def test_changed_policy_parameters_change_the_frozen_hash():
         )
 
 
+def test_confirmatory_manifest_rejects_removed_empirical_probe_parameter():
+    manifest = _manifest()
+    manifest["empirical_probe_policy"]["weak_relative_threshold"] = 0.05
+    with pytest.raises(ValueError, match="unknown/deprecated.*weak_relative_threshold"):
+        validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
 def test_manifest_hash_is_canonical_and_changes_when_a_value_changes():
     manifest = _manifest()
     reordered = json.loads(json.dumps(manifest, sort_keys=False))

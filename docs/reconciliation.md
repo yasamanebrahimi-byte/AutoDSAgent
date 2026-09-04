@@ -126,6 +126,27 @@ enough; and whether blinded reconciliation improves on that direct choice.
 diagnostic modes. Calibration metadata is recorded for audit but is not the
 production reconciliation gate.
 
+## Auditable production gate record
+
+The modeling gate emits one structured `gate_decision` record. Its
+`reason_code` and `reason_text` are the causal production explanation used by
+evaluation output and reports; calibration fields in the soft-challenge
+artifact are supporting audit metadata only.
+
+| Signal / parameter | Production decision role | Audit only? | Configurable? |
+| --- | --- | --- | --- |
+| Deterministic compatibility diagnostics | Independently challenges the LLM proposal and identifies disagreements | No | Yes |
+| `tie_relative_threshold` plus variability tie multiplier | Classifies near-equal probe results as tied/inconclusive | No | Yes |
+| `moderate_relative_threshold`, win-rate, and variability criterion | Separates weak evidence from sufficient evidence that can trigger reconciliation | No | Yes |
+| `strong_relative_threshold` and strong variability criterion | Labels sufficiently large, consistent probe evidence as strong | No | Yes |
+| Calibration reliability and confidence metadata | Describes diagnostic/calibration context; does not trigger production intervention | Yes | Yes |
+
+The former `weak_relative_threshold` was removed because both sides of its
+classification branch returned `weak`; it had no behavioral consequence and is
+rejected as an unknown field in strict confirmatory manifests. The active
+empirical-probe parameters are represented by `EmpiricalProbePolicy.as_dict()`
+and the confirmatory manifest hash.
+
 ## Evaluation modes and metrics
 
 The evaluation harness supports the current modeling gate with:

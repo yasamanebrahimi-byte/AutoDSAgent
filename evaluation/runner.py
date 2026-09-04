@@ -1225,6 +1225,7 @@ def _run_trial(
         "probe_status": (gate_result or {}).get("probe_status") or ((gate_result or {}).get("empirical_probe") or {}).get("status"),
         "probe_evidence_strength": (gate_result or {}).get("probe_evidence_strength") or ((gate_result or {}).get("empirical_probe") or {}).get("evidence_strength"),
         "abstention_reason": (gate_result or {}).get("abstention_reason"),
+        "gate_decision": (gate_result or {}).get("gate_decision"),
         "decision_path": (gate_result or {}).get("decision_path"),
         "final_decision": gate_result.get("final") if gate_result else {
             **final_fields,

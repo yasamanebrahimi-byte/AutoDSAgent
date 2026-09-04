@@ -176,6 +176,10 @@ def test_disagreement_and_reconciliation_fields_are_recorded(tmp_path: Path):
     assert trial["reconciliation_method_source"] == "deterministic"
     assert trial["hard_validation"]["status"] == "passed"
     assert trial["soft_challenge"]["status"] == "disagreement"
+    assert trial["gate_decision"]["reason_code"] in {
+        "reconciliation_selected_original", "reconciliation_selected_alternative"
+    }
+    assert trial["gate_decision"]["reason_text"]
 
 
 def test_valid_soft_challenge_can_side_with_agent(tmp_path: Path):

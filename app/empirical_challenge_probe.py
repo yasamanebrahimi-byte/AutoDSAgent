@@ -42,7 +42,6 @@ class EmpiricalProbePolicy:
     max_rows: int | None = None
     max_configs_per_family: int = 1
     tie_relative_threshold: float = 0.02
-    weak_relative_threshold: float = 0.05
     moderate_relative_threshold: float = 0.10
     strong_relative_threshold: float = 0.20
     variability_tie_multiplier: float = 0.50
@@ -61,7 +60,6 @@ class EmpiricalProbePolicy:
             raise ValueError("max_configs_per_family must be between one and three.")
         thresholds = (
             self.tie_relative_threshold,
-            self.weak_relative_threshold,
             self.moderate_relative_threshold,
             self.strong_relative_threshold,
         )
@@ -69,7 +67,6 @@ class EmpiricalProbePolicy:
             raise ValueError("Evidence thresholds must be non-negative.")
         if not (
             self.tie_relative_threshold
-            <= self.weak_relative_threshold
             <= self.moderate_relative_threshold
             <= self.strong_relative_threshold
         ):
@@ -88,7 +85,6 @@ class EmpiricalProbePolicy:
             "max_rows": self.max_rows,
             "max_configs_per_family": self.max_configs_per_family,
             "tie_relative_threshold": self.tie_relative_threshold,
-            "weak_relative_threshold": self.weak_relative_threshold,
             "moderate_relative_threshold": self.moderate_relative_threshold,
             "strong_relative_threshold": self.strong_relative_threshold,
             "variability_tie_multiplier": self.variability_tie_multiplier,
@@ -278,8 +274,9 @@ def _evidence_strength(
         and abs(difference) >= policy.variability_weak_multiplier * variability
     ):
         return "moderate"
-    if relative_advantage >= policy.weak_relative_threshold:
-        return "weak"
+    # Any non-tie result below the moderate boundary is weak.  A separate
+    # weak threshold would be dead configuration because both branches return
+    # the same evidence class.
     return "weak"
 
 
