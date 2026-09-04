@@ -34,6 +34,37 @@ hash, insert it in the manifest, set `status` to `frozen`, commit the manifest,
 and then validate the run. The commit does not alter the experiment hash;
 changes to included result-affecting files do.
 
+## Confirmatory model matrix and repetitions
+
+The manifest is the authority for the LLM experiment matrix. Its
+`model_conditions` list contains a stable `condition_id`, planner model,
+paired reconciler model, proposal repetition count, and generation settings.
+The checked-in file intentionally remains `status: "draft"`; the researcher
+must fill in the final conditions before freezing it. Reconciler models are
+never silently substituted.
+
+Each repetition is a new initial stochastic proposal under fixed evidence.
+Stable `llm_repetition_ids` make its identity auditable. Initial proposals are
+cached and reused across compatible ablations, so ablation effects are not
+confounded with fresh planner samples. The cache identity includes benchmark
+case, perturbation, split seed, model condition, exact planner model,
+repetition number and ID, prompt schema, generation settings,
+training-profile digest, approved target, and approved task.
+
+Strict confirmatory validation rejects undeclared conditions, model or
+repetition overrides, generation-setting changes, and condition-set drift.
+Exploratory runs may use the ordinary single-model flags; after freeze those
+flags must agree with the selected condition. The complete matrix must be
+frozen before confirmatory outcomes are inspected.
+
+Rows record the manifest/configuration hash, condition and model IDs,
+repetition ID, cache identity, prompt/schema versions, generation settings,
+and reconciliation invocation/status. Proposal counts therefore differ from
+reconciliation API-call counts because proposals are reused and reconciliation
+is conditional. Summaries are emitted under `by_model_condition`; models are
+not silently pooled. Repetitions remain nested within dataset/task, and the
+dataset-cluster bootstrap treats dataset/task as the independent unit.
+
 The original AMLB citation is:
 
 > Pieter Gijsbers et al., “AMLB: an AutoML Benchmark,” *Journal of Machine

@@ -72,6 +72,26 @@
     "reconciliation_prompt_version": "2026-09-04.blinded-canonical-proposals.v1-empirical-probe",
     "reconciliation_mode": "blinded_evidence_comparison"
   },
+  "generation_settings": {
+    "temperature": null,
+    "top_p": null,
+    "seed": null,
+    "reasoning_effort": null
+  },
+  "model_conditions": [
+    {
+      "condition_id": "default",
+      "planner_model": "gpt-4.1-mini",
+      "reconciler_model": "gpt-4.1-mini",
+      "llm_repetitions": 1,
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": null
+      }
+    }
+  ],
   "modeling": {
     "requested_model": "gpt-4.1-mini",
     "planner_model": "gpt-4.1-mini",
@@ -94,7 +114,8 @@
   },
   "splits_and_repetitions": {
     "split_seeds": [42],
-    "llm_repetitions": 1
+    "llm_repetitions": 1,
+    "llm_repetition_ids": ["rep_001"]
   },
   "statistics": {
     "independent_unit": "dataset/task",

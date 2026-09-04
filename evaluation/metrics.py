@@ -1325,6 +1325,7 @@ def summarize_trials(
     *,
     thresholds: dict[str, float] | None = None,
     utility_weights: GateUtilityWeights | dict[str, float] | None = None,
+    include_model_condition_breakdown: bool = True,
 ) -> dict[str, Any]:
     """Aggregate rows while keeping operational and OpenAI-only views separate."""
 
@@ -1831,7 +1832,7 @@ def summarize_trials(
             "dataset_macro_confidence_intervals": task_macro_ci,
             "trial_weighted": by_task[task],
         }
-    return {
+    summary = {
         **_empirical_probe_summary(completed),
         "formulas": {
             "classification_regret": "max(0, best_macro_f1 - selected_macro_f1)",
@@ -2218,3 +2219,19 @@ def summarize_trials(
         },
         "source_counts": source_counts,
     }
+    # Model conditions are reporting strata, not independent dataset units.
+    # Each stratum retains the same dataset-clustered aggregation and CIs.
+    if include_model_condition_breakdown:
+        condition_ids = sorted({str(row.get("model_condition_id", "default")) for row in completed})
+        summary["by_model_condition"] = {
+            condition_id: summarize_trials(
+                [row for row in completed if str(row.get("model_condition_id", "default")) == condition_id],
+                thresholds=thresholds,
+                utility_weights=weights,
+                include_model_condition_breakdown=False,
+            )
+            for condition_id in condition_ids
+        }
+        summary["model_condition_reporting"] = "separate dataset-clustered summaries; no silent pooling across conditions"
+    summary["repetition_nesting"] = "LLM repetitions are nested within benchmark_case/model_condition_id and are not independent datasets"
+    return summary

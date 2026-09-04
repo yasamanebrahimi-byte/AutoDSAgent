@@ -35,6 +35,8 @@ from evaluation.confirmatory import (
     config_sha256,
     repository_commit as current_repository_commit,
     experiment_code_sha256,
+    model_conditions,
+    repetition_ids,
 )
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from app.deterministic_policy import DeterministicPolicy
@@ -545,6 +547,9 @@ def run_ablation_study(
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
             expected_experiment_code_sha256=experiment_code_sha256(),
             source_git_commit=current_repository_commit(),
+            model_conditions=model_conditions(manifest),
+            generation_settings={key: value for key, value in (manifest.get("generation_settings", {}) or {}).items() if value is not None},
+            llm_repetition_ids=repetition_ids(manifest),
         )
         if suite != "external":
             raise ValueError("Confirmatory manifest enforcement requires suite='external'.")

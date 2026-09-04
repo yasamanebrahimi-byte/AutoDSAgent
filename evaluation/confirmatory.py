@@ -160,6 +160,9 @@ def _manifest_values(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "expected_experiment_code_sha256": manifest.get("expected_experiment_code_sha256"),
         "planner_model": modeling.get("planner_model"),
         "reconciler_model": modeling.get("reconciler_model"),
+        "model_conditions": model_conditions(manifest),
+        "generation_settings": {key: value for key, value in (manifest.get("generation_settings", {}) or {}).items() if value is not None},
+        "llm_repetition_ids": repetition_ids(manifest),
         "split_seeds": repetitions.get("split_seeds"),
         "llm_repetitions": repetitions.get("llm_repetitions"),
         "holdout_fraction": holdout.get("fraction"),
@@ -185,6 +188,81 @@ def _manifest_values(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "benchmark_tranches": external.get("tranches"),
         "strict_live_required": manifest.get("strict_live_required"),
     }
+
+
+def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the frozen model matrix in a canonical, auditable form.
+
+    The legacy single-model fields remain readable for exploratory callers,
+    but a confirmatory manifest is normalized to explicit conditions here.
+    """
+    declared = manifest.get("model_conditions")
+    if declared is None:
+        modeling = manifest.get("modeling", {})
+        declared = [{
+            "condition_id": "default",
+            "planner_model": modeling.get("planner_model"),
+            "reconciler_model": modeling.get("reconciler_model"),
+            "llm_repetitions": (manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", 1),
+        }]
+    if not isinstance(declared, list) or not declared:
+        raise ValueError("Confirmatory manifest model_conditions must be a non-empty list.")
+    result = []
+    seen: set[str] = set()
+    for condition in declared:
+        if not isinstance(condition, Mapping):
+            raise ValueError("Each model condition must be an object.")
+        condition_id = str(condition.get("condition_id", "")).strip()
+        planner = str(condition.get("planner_model", "")).strip()
+        reconciler = str(condition.get("reconciler_model", planner)).strip()
+        repetitions = condition.get("llm_repetitions")
+        if not condition_id or condition_id in seen:
+            raise ValueError("Model condition IDs must be non-empty and unique.")
+        if not planner or not reconciler:
+            raise ValueError(f"Model condition {condition_id!r} must declare planner and reconciler models.")
+        if not isinstance(repetitions, int) or repetitions < 1:
+            raise ValueError(f"Model condition {condition_id!r} must declare positive llm_repetitions.")
+        seen.add(condition_id)
+        result.append({
+            "condition_id": condition_id,
+            "planner_model": planner,
+            "reconciler_model": reconciler,
+            "llm_repetitions": repetitions,
+            "generation_settings": {key: value for key, value in (condition.get("generation_settings", {}) or {}).items() if value is not None},
+        })
+    return result
+
+
+def repetition_ids(manifest: Mapping[str, Any]) -> list[str]:
+    repetitions = manifest.get("splits_and_repetitions", {}) or {}
+    declared = repetitions.get("llm_repetition_ids")
+    count = repetitions.get("llm_repetitions", 1)
+    if declared is None:
+        declared = [f"rep_{index:03d}" for index in range(1, int(count) + 1)]
+    if not isinstance(declared, list) or len(declared) != int(count):
+        raise ValueError("llm_repetition_ids must contain exactly llm_repetitions identifiers.")
+    values = [str(item).strip() for item in declared]
+    if not all(values) or len(set(values)) != len(values):
+        raise ValueError("llm_repetition_ids must be non-empty and unique.")
+    return values
+
+
+def expand_confirmatory_matrix(
+    manifest: Mapping[str, Any],
+    *,
+    dataset_ids: list[str] | tuple[str, ...] = (),
+    ablations: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Expand the declared condition/repetition matrix without making calls."""
+    names = list(ablations if ablations is not None else (manifest.get("ablations", {}) or {}).get("primary", []))
+    repetitions = repetition_ids(manifest)
+    rows = []
+    for dataset_id in dataset_ids or [None]:
+        for condition in model_conditions(manifest):
+            for repetition_id in repetitions[:condition["llm_repetitions"]]:
+                for ablation in names or [None]:
+                    rows.append({"dataset_id": dataset_id, **condition, "llm_repetition_id": repetition_id, "ablation": ablation})
+    return rows
 
 
 def runtime_manifest_values(
@@ -216,6 +294,9 @@ def runtime_manifest_values(
     benchmark_tranches: Mapping[str, Any] | None = None,
     benchmark_tier: str | None = None,
     preprocessing_option_space: list[str] | tuple[str, ...] | None = None,
+    model_conditions: list[Mapping[str, Any]] | None = None,
+    generation_settings: Mapping[str, Any] | None = None,
+    llm_repetition_ids: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Build the runtime projection compared with the frozen manifest."""
 
@@ -227,6 +308,9 @@ def runtime_manifest_values(
         "source_git_commit": source_git_commit,
         "planner_model": planner_model,
         "reconciler_model": reconciler_model,
+        "model_conditions": [dict(item) for item in model_conditions] if model_conditions is not None else [{"condition_id": "default", "planner_model": planner_model, "reconciler_model": reconciler_model, "llm_repetitions": int(llm_repetitions), "generation_settings": {}}],
+        "generation_settings": dict(generation_settings or {}),
+        "llm_repetition_ids": list(llm_repetition_ids) if llm_repetition_ids is not None else [f"rep_{index:03d}" for index in range(1, int(llm_repetitions) + 1)],
         "split_seeds": list(split_seeds),
         "llm_repetitions": int(llm_repetitions),
         "holdout_fraction": float(holdout_fraction),
