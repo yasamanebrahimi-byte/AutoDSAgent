@@ -608,6 +608,14 @@ def _holdout_health(
         for record in paired
     )
     deltas = [_holdout_pair(record)[3] for record in paired]
+    beneficial_deltas = [
+        delta for record, delta in zip(paired, deltas)
+        if delta > record_tolerance(record)
+    ]
+    harmful_deltas = [
+        delta for record, delta in zip(paired, deltas)
+        if delta < -record_tolerance(record)
+    ]
     delta_ci = (
         cluster_bootstrap_ci(
             paired,
@@ -659,6 +667,10 @@ def _holdout_health(
         "median_holdout_intervention_delta": _median(deltas),
         "mean_paper_holdout_delta": _mean(deltas),
         "median_paper_holdout_delta": _median(deltas),
+        "mean_beneficial_holdout_delta": _mean(beneficial_deltas),
+        "mean_harmful_holdout_delta": _mean(harmful_deltas),
+        "mean_beneficial_holdout_magnitude": _mean(beneficial_deltas),
+        "mean_harmful_holdout_magnitude": _mean([-delta for delta in harmful_deltas]),
         "holdout_intervention_delta_ci": delta_ci,
         "paper_holdout_delta_ci": delta_ci,
         "intervention_precision_ci": precision_ci,
@@ -1009,6 +1021,18 @@ def _gate_health(
         "total_abstentions": len(abstentions),
         "challenge_rate": _rate(len(challenges), len(challenges) + len(abstentions)),
         "abstention_rate": _rate(len(abstentions), len(challenges) + len(abstentions)),
+        "disagreement_rate": _rate(
+            sum(_soft_status(record) == "disagreement" for record in valid),
+            sum(_soft_status(record) in {"agreement", "disagreement"} for record in valid),
+        ),
+        "probe_invocation_rate_conditional_on_disagreement": _rate(
+            sum(bool(record.get("empirical_probe_invoked")) for record in valid),
+            sum(_soft_status(record) == "disagreement" for record in valid),
+        ),
+        "abstention_rate_conditional_on_disagreement": _rate(
+            len(abstentions),
+            sum(_soft_status(record) == "disagreement" for record in valid),
+        ),
         "improved_interventions": primary_improved,
         "worsened_interventions": primary_harmful,
         "neutral_interventions": primary_neutral,
@@ -1141,6 +1165,8 @@ def _dataset_macro_health(
         "neutral_intervention_incidence",
         "abstention_preservation_rate", "mean_paper_holdout_delta",
         "median_paper_holdout_delta",
+        "disagreement_rate", "probe_invocation_rate_conditional_on_disagreement",
+        "abstention_rate_conditional_on_disagreement",
     )
     return {
         "dataset_count": len(per_dataset),
@@ -1158,7 +1184,9 @@ def _dataset_macro_health(
                 "intervention_count", "valid_paired_holdout_comparison_count",
                 "beneficial_intervention_count", "harmful_intervention_count",
                 "neutral_intervention_count", "mean_paper_holdout_delta",
-                "median_paper_holdout_delta",
+                "median_paper_holdout_delta", "mean_beneficial_holdout_delta",
+                "mean_harmful_holdout_delta", "mean_beneficial_holdout_magnitude",
+                "mean_harmful_holdout_magnitude",
             )
         },
         "dataset_macro_holdout_intervention_metrics": {
@@ -1196,6 +1224,26 @@ def _dataset_macro_health(
                 float(item["holdout_intervention_metrics"]["median_paper_holdout_delta"])
                 for item in per_dataset.values()
                 if item["holdout_intervention_metrics"].get("median_paper_holdout_delta") is not None
+            ),
+            "mean_beneficial_holdout_delta": _mean(
+                float(item["holdout_intervention_metrics"]["mean_beneficial_holdout_delta"])
+                for item in per_dataset.values()
+                if item["holdout_intervention_metrics"].get("mean_beneficial_holdout_delta") is not None
+            ),
+            "mean_harmful_holdout_delta": _mean(
+                float(item["holdout_intervention_metrics"]["mean_harmful_holdout_delta"])
+                for item in per_dataset.values()
+                if item["holdout_intervention_metrics"].get("mean_harmful_holdout_delta") is not None
+            ),
+            "mean_beneficial_holdout_magnitude": _mean(
+                float(item["holdout_intervention_metrics"]["mean_beneficial_holdout_magnitude"])
+                for item in per_dataset.values()
+                if item["holdout_intervention_metrics"].get("mean_beneficial_holdout_magnitude") is not None
+            ),
+            "mean_harmful_holdout_magnitude": _mean(
+                float(item["holdout_intervention_metrics"]["mean_harmful_holdout_magnitude"])
+                for item in per_dataset.values()
+                if item["holdout_intervention_metrics"].get("mean_harmful_holdout_magnitude") is not None
             ),
             "dataset_count": len(per_dataset),
         },
@@ -1291,6 +1339,10 @@ def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "probe_invocation_rate": _rate(
             len(invoked),
             sum(record.get("method_disagreement") is True for record in records),
+        ),
+        "probe_invocation_rate_conditional_on_disagreement": _rate(
+            len(invoked),
+            sum(record.get("agreement_status") == "disagreement" for record in records),
         ),
         "probe_completion_count": len(completed),
         "probe_unavailable_count": len(unavailable),
@@ -1486,6 +1538,12 @@ def summarize_trials(
                 sum(record.get("agreement_status") == "disagreement" for record in valid_records),
                 sum(record.get("agreement_status") in {"agreement", "disagreement"} for record in valid_records),
             ),
+            "probe_invocation_rate_conditional_on_disagreement": health[
+                "probe_invocation_rate_conditional_on_disagreement"
+            ],
+            "abstention_rate_conditional_on_disagreement": health[
+                "abstention_rate_conditional_on_disagreement"
+            ],
             "reconciliation_success_rate": _rate(
                 sum(record.get("reconciliation_status") == "succeeded" for record in valid_records),
                 sum(_reconciliation_was_invoked(record) for record in valid_records),
@@ -1647,6 +1705,18 @@ def summarize_trials(
             "paper_holdout_delta_mean": health["holdout_intervention_metrics"]["mean_paper_holdout_delta"],
             "paper_holdout_delta_median": health["holdout_intervention_metrics"]["median_paper_holdout_delta"],
             "paper_holdout_delta_ci": health["holdout_intervention_metrics"]["paper_holdout_delta_ci"],
+            "mean_beneficial_holdout_delta": health["holdout_intervention_metrics"][
+                "mean_beneficial_holdout_delta"
+            ],
+            "mean_harmful_holdout_delta": health["holdout_intervention_metrics"][
+                "mean_harmful_holdout_delta"
+            ],
+            "mean_beneficial_holdout_magnitude": health["holdout_intervention_metrics"][
+                "mean_beneficial_holdout_magnitude"
+            ],
+            "mean_harmful_holdout_magnitude": health["holdout_intervention_metrics"][
+                "mean_harmful_holdout_magnitude"
+            ],
             "holdout_rmse_delta_raw_mean": _mean([
                 raw_holdout_performance_delta(
                     record.get("task_type", "classification"),
@@ -1863,10 +1933,15 @@ def summarize_trials(
             "intervention_precision": "beneficial actual interventions / actual interventions with evaluable holdout outcome; null when denominator is zero",
             "harmful_intervention_rate": "harmful actual interventions / actual interventions with evaluable holdout outcome; historical rows without holdout retain the deprecated training-reference fallback",
             "harm_rate": "same numerator and denominator as harmful_intervention_rate",
+            "mean_beneficial_holdout_magnitude": "mean positive paper_holdout_delta among beneficial interventions; null when unsupported",
+            "mean_harmful_holdout_magnitude": "mean absolute negative paper_holdout_delta among harmful interventions; null when unsupported",
             "challenge_rate": "challenged eligible initial plans / eligible soft disagreements (challenge plus abstention records after hard-validation eligibility); null when denominator is zero",
             "intervention_rate": "actual final-plan changes caused by the soft safeguard / completed eligible trials",
             "abstention_rate": "challenged eligible initial plans preserved because evidence was insufficient / eligible soft disagreements",
             "abstention_preservation_rate": "same conditional preservation rate as abstention_rate",
+            "disagreement_rate": "LLM/deterministic disagreements / eligible agreement-or-disagreement trials",
+            "probe_invocation_rate_conditional_on_disagreement": "training-only empirical probes invoked / eligible disagreements",
+            "abstention_rate_conditional_on_disagreement": "eligible disagreements preserved without intervention / eligible disagreements",
             "beneficial_intervention_incidence": "beneficial actual interventions / eligible completed trials",
             "harmful_intervention_incidence": "harmful actual interventions / eligible completed trials",
             "neutral_intervention_incidence": "neutral actual interventions / eligible completed trials",
@@ -1966,6 +2041,13 @@ def summarize_trials(
         "abstentions": overall_selective["abstentions"],
         "challenge_rate": dataset_gate_health["challenge_rate"],
         "abstention_rate": dataset_gate_health["abstention_rate"],
+        "disagreement_rate": dataset_gate_health["disagreement_rate"],
+        "probe_invocation_rate_conditional_on_disagreement": dataset_gate_health[
+            "probe_invocation_rate_conditional_on_disagreement"
+        ],
+        "abstention_rate_conditional_on_disagreement": dataset_gate_health[
+            "abstention_rate_conditional_on_disagreement"
+        ],
         "trial_weighted_challenge_rate": overall_selective["challenge_rate"],
         "trial_weighted_abstention_rate": overall_selective["abstention_rate"],
         "soft_challenge_reconciliation_invocation_count": sum(
@@ -2021,6 +2103,18 @@ def summarize_trials(
         "harmful_intervention_rate": dataset_gate_health["harmful_intervention_rate"],
         "harm_rate": dataset_gate_health["harm_rate"],
         "neutral_intervention_rate": dataset_gate_health["neutral_intervention_rate"],
+        "mean_beneficial_holdout_delta": overall_holdout[
+            "mean_beneficial_holdout_delta"
+        ],
+        "mean_harmful_holdout_delta": overall_holdout[
+            "mean_harmful_holdout_delta"
+        ],
+        "mean_beneficial_holdout_magnitude": overall_holdout[
+            "mean_beneficial_holdout_magnitude"
+        ],
+        "mean_harmful_holdout_magnitude": overall_holdout[
+            "mean_harmful_holdout_magnitude"
+        ],
         "beneficial_intervention_incidence": dataset_gate_health[
             "beneficial_intervention_incidence"
         ],

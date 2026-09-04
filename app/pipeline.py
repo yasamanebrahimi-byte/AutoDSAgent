@@ -740,8 +740,9 @@ def _validate_modeling_gate(
         return training_partition_frame(dataframe, split, row_positions)
 
     def hard_validate(method: str, preprocessing: PreprocessingContract) -> ValidationResult:
+        validation_frame = probe_training_frame()
         result = validate_training_plan(
-            dataframe,
+            validation_frame,
             approved_target,
             approved_task,
             method,
@@ -749,7 +750,8 @@ def _validate_modeling_gate(
             random_state=random_state,
             preprocessing=preprocessing,
             split=split,
-            row_positions=row_positions,
+            row_positions=list(range(len(validation_frame))),
+            training_only=True,
         )
         result.add_check(
             "approved_formulation_is_immutable",

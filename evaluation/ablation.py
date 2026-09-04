@@ -58,6 +58,7 @@ PRIMARY_ABLATION_NAMES = (
     "probe_direct",
     "full",
 )
+SECONDARY_ABLATION_NAMES = ("llm_with_diagnostics",)
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,8 @@ class AblationSpec:
     deterministic_policy_version: str = "4"
     soft_challenge_policy_version: str = "v1"
     empirical_probe_policy_version: str = "v1"
+    analysis_role: str = "secondary"
+    planner_evidence_mode: str = "training_profile_only"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +104,8 @@ class AblationSpec:
             "deterministic_policy_version": self.deterministic_policy_version,
             "soft_challenge_policy_version": self.soft_challenge_policy_version,
             "empirical_probe_policy_version": self.empirical_probe_policy_version,
+            "analysis_role": self.analysis_role,
+            "planner_evidence_mode": self.planner_evidence_mode,
         }
 
 
@@ -114,19 +119,21 @@ def ablation_presets() -> dict[str, AblationSpec]:
     return {
         "llm_only": AblationSpec(
             "llm_only", "llm_only", "calibrated", empirical_probe=False,
-            challenger_enabled=False, hard_validation_enabled=True, abstention_enabled=False, **common
+            challenger_enabled=False, hard_validation_enabled=True, abstention_enabled=False,
+            analysis_role="primary", **common
         ),
         "hard_validation_only": AblationSpec(
             "hard_validation_only", "hard_validation_only", "calibrated", empirical_probe=False,
-            reconciliation_enabled=False, abstention_enabled=False, **common
+            reconciliation_enabled=False, abstention_enabled=False, analysis_role="primary", **common
         ),
         "deterministic_only": AblationSpec(
             "deterministic_only", "deterministic_only", "calibrated", empirical_probe=False,
-            reconciliation_enabled=False, abstention_enabled=False, **common
+            reconciliation_enabled=False, abstention_enabled=False, analysis_role="primary", **common
         ),
         "always_reconcile": AblationSpec(
             "always_reconcile", "always_reconcile", "calibrated", empirical_probe=False,
-            reconciliation_enabled=True, reconcile_on_any_disagreement=True, abstention_enabled=False, **common
+            reconciliation_enabled=True, reconcile_on_any_disagreement=True, abstention_enabled=False,
+            analysis_role="primary", **common
         ),
         # Backward-compatible name for the former primary baseline.
         "blinded_always_reconcile": AblationSpec(
@@ -135,7 +142,7 @@ def ablation_presets() -> dict[str, AblationSpec]:
         ),
         "probe_direct": AblationSpec(
             "probe_direct", "probe_direct", "calibrated", empirical_probe=True,
-            reconciliation_enabled=False, direct_probe_selection_enabled=True, **common
+            reconciliation_enabled=False, direct_probe_selection_enabled=True, analysis_role="primary", **common
         ),
         "high_confidence_only": AblationSpec(
             "high_confidence_only", "selective", "high_confidence_only", empirical_probe=False, **common
@@ -161,7 +168,15 @@ def ablation_presets() -> dict[str, AblationSpec]:
         ),
         "full": AblationSpec(
             "full", "full", "calibrated", empirical_probe=True,
-            reconciliation_enabled=True, **common
+            reconciliation_enabled=True, analysis_role="primary", **common
+        ),
+        "llm_with_diagnostics": AblationSpec(
+            "llm_with_diagnostics", "llm_only", "calibrated", empirical_probe=False,
+            challenger_enabled=False, hard_validation_enabled=True,
+            reconciliation_enabled=False, abstention_enabled=False,
+            analysis_role="secondary",
+            planner_evidence_mode="training_only_structural_diagnostics",
+            **common,
         ),
     }
 
@@ -414,29 +429,39 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         f"- Planner model: `{payload.get('planner_model', payload.get('model'))}`",
         f"- Reconciler model: `{payload.get('reconciler_model', payload.get('model'))}`",
         f"- Strict live: `{payload['require_live']}`",
+        f"- Primary ablations: `{payload.get('selected_primary_ablations', [])}`",
+        f"- Secondary ablations: `{payload.get('selected_secondary_ablations', [])}`",
+        "- Primary and secondary ablations are separate analysis strata; secondary diagnostics are not pooled into the primary claim.",
+        "- When more than one model condition is present, combined summaries are descriptive audit totals only; all model-condition estimates remain in the separate condition table.",
         "",
         "## Central Comparison",
         "",
-        "| Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro, descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|",
+        "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro, descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|",
     ]
     for row in payload["central_table"]:
         api = row["api_usage"]
         probe = payload["summaries"][row["ablation"]].get("probe_invocation_count", 0)
+        role = (payload.get("ablation_definitions", {}).get(row["ablation"], {}) or {}).get(
+            "analysis_role", "secondary"
+        )
         lines.append(
-            f"| {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
+            f"| {role} | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
         )
     lines.extend(["", "## Paired Comparisons", ""])
     for item in payload["paired_comparisons"]:
         lines.append(
             f"- `{item['first']}` vs `{item['second']}`: dataset-macro untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Trial-weighted diagnostic mean: `{item['trial_weighted_mean_paired_holdout_delta_difference_first_advantage']}`. Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
         )
-    lines.extend(["", "## Model-Condition Summaries", "", "Model conditions are reported separately; repetitions remain nested within dataset/task."])
-    lines.extend(["", "| Model condition | Ablation | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta |", "|---|---|---:|---:|---:|---:|---:|---:|"])
+    lines.extend(["", "## Model-Condition Summaries", "", "Model conditions are reported separately; repetitions remain nested within dataset/task and are never silently pooled."])
+    lines.extend(["", "| Model condition | Analysis role | Ablation | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta |", "|---|---|---|---:|---:|---:|---:|---:|---:|"])
     for condition_id, condition_payload in payload.get("by_model_condition", {}).items():
         for ablation_name, summary in condition_payload.get("by_ablation", {}).items():
+            role = (payload.get("ablation_definitions", {}).get(ablation_name, {}) or {}).get(
+                "analysis_role", "secondary"
+            )
             lines.append(
-                f"| {condition_id} | {ablation_name} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} |"
+                f"| {condition_id} | {role} | {ablation_name} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} |"
             )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
@@ -446,7 +471,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         )
     lines.extend([
         "",
-        "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, model, prompt schema, training-profile digest, target, and task. They are generated once and reused across compatible ablations; reconciliation outputs are never shared across prompt variants.",
+        "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, model, prompt schema, training-profile digest, target, task, evidence mode, and diagnostics digest. Ordinary paired ablations reuse the same proposal; the diagnostics-enabled planner has a distinct cache namespace.",
         "",
         "Split-seed variation is represented by `split_seed`; stochastic LLM variation is represented independently by `trial`/LLM repetition. Every paired comparison uses the same unit key.",
     ])
@@ -500,6 +525,12 @@ def run_ablation_study(
         selected_cases = [case for case in selected_cases if case.tier == tier]
     if not selected_cases:
         raise ValueError("No benchmark cases selected.")
+    selected_primary_names = [
+        name for name in selected_names if all_specs[name].analysis_role == "primary"
+    ]
+    selected_secondary_names = [
+        name for name in selected_names if all_specs[name].analysis_role == "secondary"
+    ]
     resolved_planner_model = planner_model or model
     resolved_reconciler_model = reconciler_model or model
     split_seeds = tuple(int(seed) for seed in split_seeds)
@@ -597,6 +628,12 @@ def run_ablation_study(
         selected_specs = [all_specs[name] for name in selected_names]
     else:
         selected_specs = [all_specs[name] for name in selected_names]
+    selected_primary_names = [
+        name for name in selected_names if all_specs[name].analysis_role == "primary"
+    ]
+    selected_secondary_names = [
+        name for name in selected_names if all_specs[name].analysis_role == "secondary"
+    ]
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / "config.json"
@@ -648,6 +685,18 @@ def run_ablation_study(
         "require_live": require_live,
         "include_perturbations": include_perturbations,
         "selected_ablations": selected_names,
+        "selected_primary_ablations": selected_primary_names,
+        "selected_secondary_ablations": selected_secondary_names,
+        "analysis_separation": {
+            "primary": selected_primary_names,
+            "secondary": selected_secondary_names,
+            "rule": "primary and secondary ablations are reported in separate analysis strata and are never pooled for the confirmatory claim",
+        },
+        "model_condition_reporting": {
+            "condition_ids": [str(condition["condition_id"]) for condition in (frozen_conditions or [{"condition_id": "default"}])],
+            "per_condition_results": "by_model_condition.<condition_id>.by_ablation",
+            "combined_summary_role": "descriptive audit total only; never a pseudo-model estimate or confirmatory model comparison",
+        },
         "ablation_definitions": {name: spec.as_dict() for name, spec in all_specs.items()},
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "benchmark_task_ids": [
@@ -855,6 +904,11 @@ def run_ablation_study(
         "central_table": central,
         "central_by_ablation": {row["ablation"]: row for row in central},
         "summaries": summaries,
+        "analysis_summaries": {
+            "primary": {name: summaries[name] for name in selected_primary_names},
+            "secondary": {name: summaries[name] for name in selected_secondary_names},
+            "rule": "Only the primary stratum contributes to the confirmatory claim; secondary diagnostics are reported separately.",
+        },
         "paired_comparisons": paired,
         "live_integrity": {
             row["ablation"]: row["api_usage"] for row in central
@@ -866,6 +920,8 @@ def run_ablation_study(
                     ["summary"]
                     for name in selected_names
                 },
+                "primary_ablations": selected_primary_names,
+                "secondary_ablations": selected_secondary_names,
                 "aggregation_rule": "reported separately by model condition; no cross-condition pooling",
             }
             for condition in execution_conditions

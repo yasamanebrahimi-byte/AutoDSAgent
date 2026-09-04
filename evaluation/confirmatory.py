@@ -19,6 +19,41 @@ CONFIRMATORY_MANIFEST_SCHEMA_VERSION = "confirmatory-manifest-v1"
 CONFIRMATORY_EXPERIMENT_NAME = "selective-intervention-reliability"
 EXPERIMENT_CODE_PATHS = ("app", "evaluation", "pyproject.toml")
 CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.json"
+CONFIRMATORY_SPLIT_SEEDS = (42,)
+CONFIRMATORY_REPETITIONS = 3
+CONFIRMATORY_REPETITION_IDS = ("rep_001", "rep_002", "rep_003")
+CONFIRMATORY_PRIMARY_ABLATIONS = (
+    "llm_only",
+    "hard_validation_only",
+    "deterministic_only",
+    "always_reconcile",
+    "probe_direct",
+    "full",
+)
+CONFIRMATORY_SECONDARY_ABLATIONS = ("llm_with_diagnostics",)
+CONFIRMATORY_GENERATION_SETTINGS = {
+    "reasoning_effort": "medium",
+    "temperature": None,
+    "top_p": None,
+    "seed": None,
+}
+CONFIRMATORY_MODEL_CONDITIONS = (
+    {
+        "condition_id": "gpt5_mini_2025_08_07",
+        "planner_model": "gpt-5-mini-2025-08-07",
+        "reconciler_model": "gpt-5-mini-2025-08-07",
+    },
+    {
+        "condition_id": "gpt54_mini_2026_03_17",
+        "planner_model": "gpt-5.4-mini-2026-03-17",
+        "reconciler_model": "gpt-5.4-mini-2026-03-17",
+    },
+    {
+        "condition_id": "gpt54_2026_03_05",
+        "planner_model": "gpt-5.4-2026-03-05",
+        "reconciler_model": "gpt-5.4-2026-03-05",
+    },
+)
 _EXCLUDED_DIRECTORY_NAMES = {
     ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".cache", "cache", "caches", "evaluation_results", "results", "tmp", "temp",
@@ -269,6 +304,182 @@ def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def planned_model_conditions() -> list[dict[str, Any]]:
+    """Return the exact predeclared confirmatory model matrix."""
+
+    return [
+        {
+            **condition,
+            "llm_repetitions": CONFIRMATORY_REPETITIONS,
+            "llm_repetition_ids": list(CONFIRMATORY_REPETITION_IDS),
+            "generation_settings": dict(CONFIRMATORY_GENERATION_SETTINGS),
+        }
+        for condition in CONFIRMATORY_MODEL_CONDITIONS
+    ]
+
+
+def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
+    """Validate the paper-facing design independently of runtime execution.
+
+    This check is intentionally usable while the manifest is draft.  It is a
+    preflight of the protocol, not permission to run the external experiment.
+    """
+
+    mismatches: list[str] = []
+    if _normalise(model_conditions(loaded)) != _normalise(planned_model_conditions()):
+        mismatches.append("model_conditions do not match the three predeclared snapshot conditions")
+    repetitions = loaded.get("splits_and_repetitions") or {}
+    if repetitions.get("split_seeds") != list(CONFIRMATORY_SPLIT_SEEDS):
+        mismatches.append(f"split_seeds must be {list(CONFIRMATORY_SPLIT_SEEDS)!r}")
+    if repetitions.get("llm_repetitions") != CONFIRMATORY_REPETITIONS:
+        mismatches.append(f"llm_repetitions must be {CONFIRMATORY_REPETITIONS}")
+    if repetitions.get("llm_repetition_ids") != list(CONFIRMATORY_REPETITION_IDS):
+        mismatches.append("llm_repetition_ids must be rep_001, rep_002, rep_003")
+    if loaded.get("generation_settings") != CONFIRMATORY_GENERATION_SETTINGS:
+        mismatches.append("global generation_settings differ from the predeclared settings")
+    primary = (loaded.get("ablations") or {}).get("primary")
+    secondary = (loaded.get("ablations") or {}).get("secondary")
+    if primary != list(CONFIRMATORY_PRIMARY_ABLATIONS):
+        mismatches.append("primary ablations do not match the six predeclared variants")
+    if secondary != list(CONFIRMATORY_SECONDARY_ABLATIONS):
+        mismatches.append("secondary ablations must contain llm_with_diagnostics")
+    aliases = loaded.get("modeling") or {}
+    first = planned_model_conditions()[0]
+    for field in ("requested_model", "planner_model", "reconciler_model"):
+        value = aliases.get(field)
+        if value is not None and value != first[field if field != "requested_model" else "planner_model"]:
+            mismatches.append(f"deprecated modeling.{field} alias conflicts with the first model condition")
+    try:
+        from app.deterministic_policy import DeterministicPolicy
+        from app.empirical_challenge_probe import EmpiricalProbePolicy
+        from app.llm import PROMPT_SCHEMA_VERSION
+        from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
+        from evaluation.external_benchmarks import (
+            AMLB_CLASSIFICATION_SUITE_ID,
+            AMLB_REGRESSION_SUITE_ID,
+            EXTERNAL_BENCHMARK_SUITE_VERSION,
+            external_benchmark_manifest_sha256,
+            external_benchmark_specs,
+        )
+        policy = loaded.get("deterministic_policy") or {}
+        if policy.get("version") != DeterministicPolicy().version:
+            mismatches.append("deterministic-policy version differs from the runtime policy")
+        if policy.get("configuration_sha256") != config_sha256(deterministic_policy_config()):
+            mismatches.append("deterministic-policy configuration hash differs from the runtime policy")
+        probe = loaded.get("empirical_probe_policy") or {}
+        if probe.get("policy_version") != EmpiricalProbePolicy().policy_version:
+            mismatches.append("empirical-probe policy version differs from the runtime policy")
+        if probe.get("configuration_sha256") != config_sha256(empirical_probe_config()):
+            mismatches.append("empirical-probe policy configuration hash differs from the runtime policy")
+        prompts = loaded.get("prompts") or {}
+        if prompts.get("planner_schema_version") != PROMPT_SCHEMA_VERSION:
+            mismatches.append("planner prompt/schema version differs from the runtime prompt")
+        if prompts.get("reconciliation_prompt_version") != BLINDED_RECONCILIATION_PROMPT_VERSION:
+            mismatches.append("reconciliation prompt/schema version differs from the runtime prompt")
+
+        holdout = loaded.get("holdout") or {}
+        if holdout.get("fraction") != 0.2:
+            mismatches.append("holdout fraction must remain 0.2")
+        if holdout.get("classification_neutral_tolerance") != 0.02:
+            mismatches.append("classification neutral tolerance must remain 0.02")
+        if holdout.get("regression_neutral_tolerance") != 0.02:
+            mismatches.append("regression neutral tolerance must remain 0.02")
+        if holdout.get("primary_delta") != (
+            "classification=final_macro_f1-initial_macro_f1; "
+            "regression=(initial_rmse-final_rmse)/max(abs(initial_rmse),rmse_epsilon)"
+        ):
+            mismatches.append("primary holdout delta definition differs from the predeclared definition")
+
+        statistics = loaded.get("statistics") or {}
+        expected_statistics = {
+            "independent_unit": "dataset/task",
+            "primary_estimate": "dataset-macro",
+            "secondary_estimate": "trial-weighted",
+            "bootstrap_method": "dataset_cluster_bootstrap_percentile",
+            "bootstrap_replicates": 10000,
+            "confidence_level": 0.95,
+            "bootstrap_seed": 20260824,
+        }
+        for key, expected_value in expected_statistics.items():
+            if statistics.get(key) != expected_value:
+                mismatches.append(f"statistics.{key} differs from the predeclared definition")
+
+        modeling = loaded.get("modeling") or {}
+        if modeling.get("candidate_model_families") != [
+            "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
+        ]:
+            mismatches.append("candidate model-family space differs from the predeclared space")
+        if modeling.get("preprocessing_option_space") != [
+            "one_hot/categorical_unknown_handling=ignore",
+            "ordinal/categorical_unknown_handling=use_encoded_value",
+            "none/categorical_unknown_handling=ignore",
+        ]:
+            mismatches.append("preprocessing option space differs from the predeclared space")
+
+        specs = list(external_benchmark_specs())
+        external = loaded.get("external_benchmark") or {}
+        expected_ids = [spec.task_id for spec in specs]
+        expected_core = [spec.task_id for spec in specs if spec.tier == "core"]
+        expected_stress = [spec.task_id for spec in specs if spec.tier == "stress"]
+        benchmark_checks = {
+            "manifest_version": EXTERNAL_BENCHMARK_SUITE_VERSION,
+            "classification_suite": AMLB_CLASSIFICATION_SUITE_ID,
+            "regression_suite": AMLB_REGRESSION_SUITE_ID,
+            "task_count": len(specs),
+            "classification_count": sum(spec.expected_task_type == "classification" for spec in specs),
+            "regression_count": sum(spec.expected_task_type == "regression" for spec in specs),
+            "manifest_sha256": external_benchmark_manifest_sha256(),
+            "task_ids": expected_ids,
+            "tranches": {"core": expected_core, "stress": expected_stress},
+        }
+        for key, expected_value in benchmark_checks.items():
+            if external.get(key) != expected_value:
+                mismatches.append(f"external_benchmark.{key} differs from the frozen benchmark definition")
+
+        from evaluation.ablation import ablation_presets
+        presets = ablation_presets()
+        if any(presets[name].analysis_role != "primary" for name in CONFIRMATORY_PRIMARY_ABLATIONS):
+            mismatches.append("at least one primary ablation is not marked primary")
+        diagnostics_spec = presets.get("llm_with_diagnostics")
+        if diagnostics_spec is None or diagnostics_spec.analysis_role != "secondary":
+            mismatches.append("llm_with_diagnostics must be declared as secondary")
+        elif diagnostics_spec.planner_evidence_mode != "training_only_structural_diagnostics":
+            mismatches.append("llm_with_diagnostics must expose training-only structural diagnostics")
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        mismatches.append(f"runtime protocol definitions could not be checked: {exc}")
+    if mismatches:
+        raise ValueError("Confirmatory design preflight failed: " + "; ".join(mismatches))
+
+
+def validate_confirmatory_preflight(
+    manifest: Mapping[str, Any] | str | Path,
+) -> dict[str, Any]:
+    """Validate the draft protocol without freezing it or making any calls."""
+
+    loaded = load_confirmatory_manifest(manifest) if isinstance(manifest, (str, Path)) else dict(manifest)
+    if loaded.get("manifest_schema_version") != CONFIRMATORY_MANIFEST_SCHEMA_VERSION:
+        raise ValueError(
+            "Confirmatory manifest schema mismatch: expected "
+            f"{CONFIRMATORY_MANIFEST_SCHEMA_VERSION!r}, got {loaded.get('manifest_schema_version')!r}."
+        )
+    if loaded.get("status") != "draft":
+        raise ValueError("Confirmatory preflight is development-only and requires status='draft'.")
+    if loaded.get("expected_experiment_code_sha256") is not None:
+        raise ValueError("Draft confirmatory manifest must leave expected_experiment_code_sha256 unset/null.")
+    if loaded.get("source_git_commit") is not None:
+        raise ValueError("Draft confirmatory manifest must leave source_git_commit unset/null.")
+    _validate_confirmatory_design(loaded)
+    return {
+        "status": "draft",
+        "model_conditions": model_conditions(loaded),
+        "primary_ablations": list(CONFIRMATORY_PRIMARY_ABLATIONS),
+        "secondary_ablations": list(CONFIRMATORY_SECONDARY_ABLATIONS),
+        "split_seeds": list(CONFIRMATORY_SPLIT_SEEDS),
+        "llm_repetition_ids": list(CONFIRMATORY_REPETITION_IDS),
+        "generation_settings": dict(CONFIRMATORY_GENERATION_SETTINGS),
+    }
+
+
 def repetition_ids(manifest: Mapping[str, Any]) -> list[str]:
     repetitions = manifest.get("splits_and_repetitions", {}) or {}
     declared = repetitions.get("llm_repetition_ids")
@@ -514,6 +725,7 @@ def validate_confirmatory_manifest(
             "Confirmatory manifest is not frozen; set status to 'frozen' only after "
             "the experiment definition has been intentionally selected."
         )
+    _validate_confirmatory_design(loaded)
     probe_policy = loaded.get("empirical_probe_policy") or {}
     allowed_probe_fields = {
         "policy_version", "configuration_sha256", "enabled", "cv_folds",
@@ -560,20 +772,50 @@ def validate_confirmatory_manifest(
                 mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
             continue
         if key in {"planner_model", "reconciler_model"} and loaded.get("model_conditions") is not None:
-            declared_values = {
-                str(condition[key]) for condition in model_conditions(loaded)
-            }
-            if str(actual_value) not in declared_values:
+            selected_id = runtime_values.get("selected_model_condition_id")
+            selected_condition = next(
+                (item for item in model_conditions(loaded) if item["condition_id"] == selected_id), None
+            ) if selected_id is not None else None
+            expected_model = (
+                selected_condition[key]
+                if selected_condition is not None
+                else None
+            )
+            declared_values = {str(condition[key]) for condition in model_conditions(loaded)}
+            if expected_model is not None and str(actual_value) != str(expected_model):
+                mismatches.append(
+                    f"{key}: runtime model {actual_value!r} does not match selected condition "
+                    f"{selected_id!r} ({expected_model!r})"
+                )
+            elif expected_model is None and str(actual_value) not in declared_values:
                 mismatches.append(
                     f"{key}: runtime model {actual_value!r} is not declared in frozen model_conditions"
                 )
             continue
         if key == "model_conditions":
+            # Older callers projected a multi-condition manifest through the
+            # legacy single-model runtime arguments.  Keep that read path
+            # compatible, while every confirmatory runner now supplies the
+            # explicit condition matrix and is checked exactly.
+            legacy_projection = (
+                runtime_values.get("selected_model_condition_id") is None
+                and isinstance(actual_value, list)
+                and len(actual_value) == 1
+                and isinstance(actual_value[0], Mapping)
+                and actual_value[0].get("condition_id") == "default"
+            )
+            if legacy_projection:
+                continue
             if not _same(
                 _comparable_model_conditions(expected_value),
                 _comparable_model_conditions(actual_value),
             ):
                 mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
+            continue
+        if key == "generation_settings" and actual_value == {} and runtime_values.get("selected_model_condition_id") is None:
+            # Older development/test callers did not project generation
+            # settings at all.  Explicit confirmatory runners always supply
+            # the declared settings and therefore remain strictly checked.
             continue
         if key == "selected_ablations" and actual_value is None:
             continue

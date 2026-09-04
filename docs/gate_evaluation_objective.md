@@ -11,11 +11,16 @@ discovery capabilities.
 ## Runtime/evaluation boundary
 
 The initial LLM plan is generated from training-side information. An independent
-deterministic structural challenger evaluates that proposal using the same
-training-side evidence. Disagreements trigger a bounded empirical arbitration
-stage when configured. Weak or tied evidence leads to abstention and
-preservation of the LLM plan; sufficiently strong evidence can trigger blinded
-reconciliation before the final plan is frozen.
+deterministic/non-LLM structural challenger also operates only on the frozen
+training partition, but the representations are intentionally asymmetric: the
+LLM receives a compact profile while the challenger computes richer
+pre-specified structural diagnostics from that same partition. Disagreements
+trigger a bounded empirical arbitration stage when configured. Weak or tied
+evidence leads to abstention and preservation of the LLM plan; sufficiently
+strong evidence can trigger blinded reconciliation before the final plan is
+frozen. The secondary `llm_with_diagnostics` ablation gives the initial LLM the
+canonical training-only diagnostics without enabling the intervention gate, to
+test whether the information advantage alone explains an effect.
 
 These are pre-final-training validation stages: small training-only fits/CV
 probes are allowed inside the safeguard. They are not a claim of zero model
@@ -98,6 +103,15 @@ success or harm.
   completed trials as denominator.
 - `intervention_precision = beneficial actual interventions / actual
   interventions with evaluable holdout outcome`.
+- `probe_invocation_rate_conditional_on_disagreement` is the fraction of
+  eligible LLM/challenger disagreements that receive the bounded training-only
+  probe.
+- `abstention_rate_conditional_on_disagreement` is the fraction of eligible
+  disagreements preserved because the evidence was insufficient.
+- `mean_beneficial_holdout_magnitude` and
+  `mean_harmful_holdout_magnitude` summarize the positive improvement and
+  absolute harm among comparable actual interventions; they are null when
+  support is absent.
 - `harm_rate = harmful actual interventions / actual interventions with
   evaluable holdout outcome` (also exposed as `harmful_intervention_rate`).
 - A zero denominator returns `null` and renders as `n/a`; no rate silently
@@ -128,7 +142,9 @@ secondary diagnostics.
   diagnostic whose denominator is a training-only empirical-reference
   opportunity: the deterministic alternative is better than the initial plan
   under the configured training CV reference. It never uses holdout outcomes
-  to make a runtime decision and is not an oracle claim.
+  to make a runtime decision and is not an oracle claim or true intervention
+  recall. The experiment does not evaluate an oracle alternative for every
+  non-intervened case, so complete harmful-plan recall is not identifiable.
 - `mean_regret_reduction` and `median_regret_reduction` are both reported.
 - Catastrophic regret is normalized regret at or above the configurable
   `catastrophic_regret_threshold` (default `0.10`). Prevention is

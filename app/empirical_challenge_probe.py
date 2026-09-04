@@ -188,6 +188,7 @@ def _prepare_candidate_data(
             test_size=0.2,
             random_state=random_state,
             preprocessing=preprocessing,
+            training_only=True,
         )
     if validation.status != "passed":
         raise ValueError(

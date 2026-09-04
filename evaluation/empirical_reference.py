@@ -108,6 +108,7 @@ def _validated_training_data(
         method,
         random_state=random_state,
         preprocessing=preprocessing,
+        training_only=True,
     )
     if validation.status != "passed":
         return validation, pd.DataFrame(), pd.Series(dtype=float)

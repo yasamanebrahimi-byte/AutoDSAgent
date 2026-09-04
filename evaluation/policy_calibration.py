@@ -27,6 +27,7 @@ from evaluation.benchmarks import (
     BenchmarkRole,
     default_benchmark_cases,
 )
+from evaluation.confirmatory import config_sha256, deterministic_policy_config
 from evaluation.empirical_reference import evaluate_empirical_reference, evaluate_holdout_plan
 from evaluation.metrics import (
     DEFAULT_GATE_UTILITY_WEIGHTS,
@@ -81,7 +82,7 @@ class PolicyCandidate:
 
 
 def policy_candidates(baseline: DeterministicPolicy | None = None) -> list[PolicyCandidate]:
-    """Return four intentionally small candidates around the frozen baseline."""
+    """Return the existing small development candidates around the baseline."""
 
     current = baseline or DeterministicPolicy()
     return [
@@ -128,6 +129,80 @@ def policy_candidates(baseline: DeterministicPolicy | None = None) -> list[Polic
             rationale="Tests a modestly earlier response to missingness evidence.",
         ),
     ]
+
+
+_NEARBY_FLOAT_THRESHOLDS = (
+    "low_sample_feature_ratio",
+    "moderate_sample_feature_ratio",
+    "healthy_sample_feature_ratio",
+    "moderate_missing_fraction",
+    "high_missing_fraction",
+    "widespread_missing_feature_fraction",
+    "nonlinear_moderate_threshold",
+    "nonlinear_high_threshold",
+    "classification_boundary_moderate_threshold",
+    "classification_boundary_high_threshold",
+    "interaction_moderate_threshold",
+    "interaction_high_threshold",
+    "interaction_strong_pair_threshold",
+    "interaction_report_threshold",
+    "regression_weak_association_threshold",
+    "classification_weak_association_threshold",
+    "structural_complexity_moderate_threshold",
+    "structural_complexity_high_threshold",
+    "outlier_moderate_fraction",
+    "high_class_imbalance_fraction",
+    "high_target_skewness",
+    "target_outlier_high_fraction",
+)
+
+
+def nearby_threshold_candidates(
+    baseline: DeterministicPolicy | None = None,
+) -> list[PolicyCandidate]:
+    """Return a small, predeclared +/-10% and +/-20% threshold sensitivity grid.
+
+    This is development-only machinery. It changes no runtime default and
+    deliberately excludes categorical logic, integer limits, compatibility
+    points, and bounded correlation thresholds whose upward perturbations could
+    leave their mathematical domain.
+    """
+
+    current = baseline or DeterministicPolicy()
+    candidates = [
+        PolicyCandidate(
+            name="current",
+            policy=current,
+            complexity=0,
+            rationale="Existing frozen runtime policy; mandatory sensitivity baseline.",
+        )
+    ]
+    for label, multiplier in (
+        ("minus_10pct", 0.90),
+        ("plus_10pct", 1.10),
+        ("minus_20pct", 0.80),
+        ("plus_20pct", 1.20),
+    ):
+        values = {
+            field: round(float(getattr(current, field)) * multiplier, 8)
+            for field in _NEARBY_FLOAT_THRESHOLDS
+        }
+        candidates.append(
+            PolicyCandidate(
+                name=f"global_thresholds_{label}",
+                policy=replace(
+                    current,
+                    version=f"{current.version}-sensitivity-{label}",
+                    **values,
+                ),
+                complexity=len(values),
+                rationale=(
+                    f"Development-only one-factor sensitivity: multiply the continuous "
+                    f"thresholds in the declared grid by {multiplier:.2f}."
+                ),
+            )
+        )
+    return candidates
 
 
 def _validate_registry(cases: Sequence[BenchmarkCase]) -> list[BenchmarkCase]:
@@ -1044,10 +1119,13 @@ def build_calibration_artifact(
     soft_calibration = build_soft_challenge_calibration(current_records)
     return {
         "calibration_schema_version": CALIBRATION_SCHEMA_VERSION,
+        "development_only": True,
+        "production_policy_unchanged": True,
         "evaluation_role": BenchmarkRole.POLICY_DEVELOPMENT.value,
         "benchmark_role": BenchmarkRole.POLICY_DEVELOPMENT.value,
         "benchmark_suite_version": BENCHMARK_SUITE_VERSION,
         "policy_version_under_test": DeterministicPolicy().version,
+        "production_policy_config_sha256": config_sha256(deterministic_policy_config()),
         "git_commit": _repository_commit(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "dataset_count": len(cases),
@@ -1141,7 +1219,7 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
         [
             "## Sensitivity analysis",
             "",
-            "The four candidates are a deliberately small neighborhood around the current interpretable thresholds; no continuous optimizer or LLM is used.",
+            "The candidate set is a deliberately small, predeclared neighborhood around the current interpretable thresholds; no continuous optimizer or LLM is used. The sensitivity rows are development evidence only and do not modify the production policy.",
             "",
         ]
     )

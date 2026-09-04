@@ -362,11 +362,15 @@ def validate_training_plan(
     split: FrozenSplit | None = None,
     row_positions: Sequence[int] | None = None,
     evidence_dataframe: pd.DataFrame | None = None,
+    training_only: bool = False,
 ) -> ValidationResult:
-    """Evaluate one complete plan against the actual modeling dataframe.
+    """Evaluate one complete plan against a modeling or training-only frame.
 
     The function returns all available evidence, including failures.  Callers
-    at a training boundary must call ``raise_if_failed`` before fitting.
+    at a training boundary must call ``raise_if_failed`` before fitting.  When
+    ``training_only`` is true, the caller must pass only the frozen training
+    partition; split feasibility is checked within that frame and no holdout
+    target values are inspected.
     """
 
     result = ValidationResult(
@@ -561,7 +565,7 @@ def validate_training_plan(
 
     requested_positions = [column_names.index(name) for name in requested_names]
     evidence_mask = evidence_valid_mask.to_numpy(dtype=bool, copy=True)
-    if split is not None and evidence_dataframe is None:
+    if split is not None and evidence_dataframe is None and not training_only:
         current_positions_for_evidence = (
             np.arange(len(dataframe), dtype=int)
             if row_positions is None
@@ -849,7 +853,18 @@ def validate_training_plan(
         severity="warning",
     )
 
-    if split is None:
+    if training_only:
+        split_evidence = _validate_split_and_cv(
+            normalized_for_model,
+            str(task_type),
+            test_size,
+            random_state,
+        )
+        split_evidence["scope"] = "training_only"
+        split_evidence["holdout_rows_seen"] = 0
+        if split is not None:
+            split_evidence["frozen_split_contract"] = split.as_dict()
+    elif split is None:
         split_evidence = _validate_split_and_cv(
             normalized_for_model,
             str(task_type),

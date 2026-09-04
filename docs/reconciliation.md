@@ -7,9 +7,14 @@ validation. For a valid model-family disagreement, the bounded pairwise probe
 runs first on the frozen training partition. Only moderate or strong evidence
 authorizes reconsideration; unavailable, tied, or weak evidence preserves the
 initial LLM plan. The initial modeling proposal and deterministic recommendation
-remain independent. The deterministic recommendation is an advisory hypothesis,
-and its compatibility scores are heuristics rather than predicted accuracy or
-probabilities.
+remain independent. Both are restricted to the frozen training partition, but
+they do not necessarily receive identical representations: the LLM sees a
+compact profile while the challenger may use richer pre-specified structural
+diagnostics. The deterministic recommendation is an advisory hypothesis, and
+its compatibility scores are heuristics rather than predicted accuracy or
+probabilities. The secondary `llm_with_diagnostics` ablation exposes the same
+canonical training-only structural diagnostics to the initial LLM without
+enabling the intervention gate.
 
 ## Prompt contract
 
@@ -117,6 +122,7 @@ other source-specific recommendation fields.
 | `always_reconcile` | yes | yes | yes | no | no | every valid disagreement | no |
 | `probe_direct` | yes | yes | yes | yes | weak/tied/unavailable | no | moderate/strong winner |
 | `full` | yes | yes | yes | yes | weak/tied/unavailable | moderate/strong disagreement | no |
+| `llm_with_diagnostics` (secondary) | yes + training-only structural diagnostics | minimum execution guard | no soft use | no | no | no | no |
 
 The primary sequence answers distinct causal questions: the quality of the raw
 planner; the safety contribution of invariants; the deterministic alternative;

@@ -122,6 +122,21 @@ def test_frozen_manifest_rejects_runtime_mismatch(field, value, message):
         validate_confirmatory_manifest(manifest, _runtime(manifest, **{field: value}))
 
 
+def test_frozen_manifest_rejects_declared_but_wrong_selected_condition_model():
+    manifest = _manifest()
+    with pytest.raises(ValueError, match="selected condition"):
+        validate_confirmatory_manifest(
+            manifest,
+            _runtime(
+                manifest,
+                model_conditions=manifest["model_conditions"],
+                selected_model_condition_id="gpt5_mini_2025_08_07",
+                planner_model="gpt-5.4-mini-2026-03-17",
+                reconciler_model="gpt-5.4-mini-2026-03-17",
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

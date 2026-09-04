@@ -1,0 +1,161 @@
+{
+  "artifact_name": "deterministic-policy-v4-development-justification",
+  "artifact_schema_version": "1",
+  "development_only": true,
+  "production_policy_unchanged": true,
+  "policy_version_under_test": "4",
+  "production_policy_config_sha256": "9a450828f27dcce86b005f0c21d0271ca08a0b19e6dd8a802e047ec39effcc90",
+  "benchmark_suite_version": "external-benchmark-v1",
+  "development_cases": [
+    "breast_cancer",
+    "diabetes",
+    "synthetic_regression",
+    "synthetic_linear_regression",
+    "synthetic_nonlinear_regression",
+    "synthetic_high_dim_regression",
+    "synthetic_binary_linear",
+    "synthetic_binary_nonlinear",
+    "synthetic_imbalanced_classification",
+    "synthetic_multiclass",
+    "synthetic_missingness",
+    "synthetic_outlier_regression"
+  ],
+  "split_seeds": [
+    42,
+    123,
+    2027
+  ],
+  "record_count": 288,
+  "candidate_set": [
+    "current",
+    "nonlinear_sensitive",
+    "high_dimensional_sensitive",
+    "missingness_sensitive",
+    "global_thresholds_minus_10pct",
+    "global_thresholds_plus_10pct",
+    "global_thresholds_minus_20pct",
+    "global_thresholds_plus_20pct"
+  ],
+  "sensitivity_definition": {
+    "multipliers": [
+      0.8,
+      0.9,
+      1.1,
+      1.2
+    ],
+    "scope": "continuous structural thresholds only",
+    "excluded": [
+      "compatibility point table",
+      "categorical logic",
+      "integer resource limits",
+      "bounded correlation thresholds"
+    ],
+    "purpose": "stress-test nearby policy bands without selecting or rewriting production configuration"
+  },
+  "selection_rule": "development diagnostic ranking by lower catastrophic-regret introduction, lower harmful-intervention rate, higher catastrophic prevention, higher intervention precision, higher challenge recall, higher transparent utility and median regret reduction, and lower unnecessary-intervention rate",
+  "observed_sensitivity": [
+    {
+      "candidate": "current",
+      "policy_version": "4",
+      "mean_normalized_regret": 0.2924657312,
+      "harmful_intervention_rate": 0.3,
+      "intervention_precision": 0.3333333333,
+      "challenge_recall": 1.0,
+      "utility": -22.75,
+      "catastrophic_prevented_count": 3,
+      "catastrophic_introduced_count": 4,
+      "exact_reference_match_rate": 0.5555555556
+    },
+    {
+      "candidate": "nonlinear_sensitive",
+      "policy_version": "4-candidate-nonlinear",
+      "mean_normalized_regret": 0.3843692662,
+      "harmful_intervention_rate": 0.3333333333,
+      "intervention_precision": 0.4166666667,
+      "challenge_recall": 1.0,
+      "utility": -21.25,
+      "catastrophic_prevented_count": 5,
+      "catastrophic_introduced_count": 5,
+      "exact_reference_match_rate": 0.5833333333
+    },
+    {
+      "candidate": "high_dimensional_sensitive",
+      "policy_version": "4-candidate-dimensionality",
+      "mean_normalized_regret": 0.2924657312,
+      "harmful_intervention_rate": 0.3,
+      "intervention_precision": 0.3333333333,
+      "challenge_recall": 1.0,
+      "utility": -22.75,
+      "catastrophic_prevented_count": 3,
+      "catastrophic_introduced_count": 4,
+      "exact_reference_match_rate": 0.5555555556
+    },
+    {
+      "candidate": "missingness_sensitive",
+      "policy_version": "4-candidate-missingness",
+      "mean_normalized_regret": 0.2924657312,
+      "harmful_intervention_rate": 0.3,
+      "intervention_precision": 0.3333333333,
+      "challenge_recall": 1.0,
+      "utility": -22.75,
+      "catastrophic_prevented_count": 3,
+      "catastrophic_introduced_count": 4,
+      "exact_reference_match_rate": 0.5555555556
+    },
+    {
+      "candidate": "global_thresholds_minus_10pct",
+      "policy_version": "4-sensitivity-minus_10pct",
+      "mean_normalized_regret": 0.3815754705,
+      "harmful_intervention_rate": 0.3333333333,
+      "intervention_precision": 0.4615384615,
+      "challenge_recall": 1.0,
+      "utility": -15.0,
+      "catastrophic_prevented_count": 5,
+      "catastrophic_introduced_count": 4,
+      "exact_reference_match_rate": 0.5833333333
+    },
+    {
+      "candidate": "global_thresholds_plus_10pct",
+      "policy_version": "4-sensitivity-plus_10pct",
+      "mean_normalized_regret": 0.0410239572,
+      "harmful_intervention_rate": 0.1666666667,
+      "intervention_precision": 0.25,
+      "challenge_recall": 1.0,
+      "utility": -10.5,
+      "catastrophic_prevented_count": 1,
+      "catastrophic_introduced_count": 1,
+      "exact_reference_match_rate": 0.5555555556
+    },
+    {
+      "candidate": "global_thresholds_minus_20pct",
+      "policy_version": "4-sensitivity-minus_20pct",
+      "mean_normalized_regret": 0.3815754705,
+      "harmful_intervention_rate": 0.3333333333,
+      "intervention_precision": 0.4615384615,
+      "challenge_recall": 1.0,
+      "utility": -15.0,
+      "catastrophic_prevented_count": 5,
+      "catastrophic_introduced_count": 4,
+      "exact_reference_match_rate": 0.5833333333
+    },
+    {
+      "candidate": "global_thresholds_plus_20pct",
+      "policy_version": "4-sensitivity-plus_20pct",
+      "mean_normalized_regret": 0.0492926099,
+      "harmful_intervention_rate": 0.1666666667,
+      "intervention_precision": 0.0,
+      "challenge_recall": null,
+      "utility": -14.75,
+      "catastrophic_prevented_count": 0,
+      "catastrophic_introduced_count": 1,
+      "exact_reference_match_rate": 0.5277777778
+    }
+  ],
+  "development_interpretation": {
+    "diagnostic_leader_in_this_local_panel": "global_thresholds_plus_10pct",
+    "observed_mean_regret_improvement_vs_current": 0.251441774,
+    "observed_harmful_intervention_rate_change_vs_current": -0.1333333333,
+    "promotion_decision": "none; production remains policy version 4",
+    "caveat": "These are development-panel diagnostics, not evidence of globally optimal thresholds or confirmatory external performance."
+  }
+}

@@ -37,11 +37,13 @@ changes to included result-affecting files do.
 ## Confirmatory model matrix and repetitions
 
 The manifest is the authority for the LLM experiment matrix. Its
-`model_conditions` list contains a stable `condition_id`, planner model,
-paired reconciler model, proposal repetition count, and generation settings.
-The checked-in file intentionally remains `status: "draft"`; the researcher
-must fill in the final conditions before freezing it. Reconciler models are
-never silently substituted.
+`model_conditions` list contains three stable `condition_id` values, paired
+planner/reconciler snapshots (`gpt-5-mini-2025-08-07`,
+`gpt-5.4-mini-2026-03-17`, and `gpt-5.4-2026-03-05`), three proposal
+repetitions per condition, and the declared reasoning settings. The checked-in
+file intentionally remains `status: "draft"`; it must still pass independent
+review and a local/synthetic live smoke test before the later freeze. Reconciler
+models are never silently substituted.
 
 Each repetition is a new initial stochastic proposal under fixed evidence.
 Stable `llm_repetition_ids` make its identity auditable. Initial proposals are
@@ -49,7 +51,10 @@ cached and reused across compatible ablations, so ablation effects are not
 confounded with fresh planner samples. The cache identity includes benchmark
 case, perturbation, split seed, model condition, exact planner model,
 repetition number and ID, prompt schema, generation settings,
-training-profile digest, approved target, and approved task.
+training-profile digest, approved target, approved task, planner evidence mode,
+and a canonical structural-diagnostics digest. Therefore the ordinary paired
+ablations share proposals, while `llm_with_diagnostics` has a separate cache
+namespace.
 
 Strict confirmatory validation rejects undeclared conditions, model or
 repetition overrides, generation-setting changes, and condition-set drift.

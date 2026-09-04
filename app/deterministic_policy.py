@@ -269,7 +269,11 @@ def score_model_families(
     *,
     policy: DeterministicPolicy | None = None,
 ) -> dict[Method, DeterministicMethodAssessment]:
-    """Score all supported families from diagnostics without fitting models."""
+    """Score supported families from deterministic diagnostics.
+
+    The scoring step itself fits nothing. Some diagnostics supplied to it may
+    be bounded, reproducible fits performed on the training partition only.
+    """
 
     policy = policy or DeterministicPolicy()
     scores: dict[Method, int] = {method: 50 for method in SUPPORTED_METHOD_ORDER}

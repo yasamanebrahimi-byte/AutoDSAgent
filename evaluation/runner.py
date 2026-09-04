@@ -119,6 +119,7 @@ class EvaluationConfig:
     llm_repetition_id: str | None = None
     generation_settings: dict[str, Any] = field(default_factory=dict)
     llm_repetition_ids: tuple[str, ...] | None = None
+    planner_evidence_mode: str = "training_profile_only"
 
     def __post_init__(self) -> None:
         if self.planner_model is None:
@@ -142,6 +143,11 @@ class EvaluationConfig:
             raise ValueError("split_seeds must contain at least one seed.")
         if self.soft_challenge_strategy not in {"calibrated", "high_confidence_only"}:
             raise ValueError("Unsupported soft_challenge_strategy.")
+        if self.planner_evidence_mode not in {
+            "training_profile_only",
+            "training_only_structural_diagnostics",
+        }:
+            raise ValueError("Unsupported planner_evidence_mode.")
 
 
 class _EvaluationGateAgent:
@@ -269,6 +275,20 @@ def _plan_fields(
     }
 
 
+def _canonical_diagnostics(value: Any) -> dict[str, Any] | None:
+    """Return a stable JSON-safe structural-diagnostics payload.
+
+    The payload contains only deterministic diagnostics computed from the
+    frozen training partition.  It deliberately excludes the challenger
+    recommendation, candidate CV results, and every holdout-derived value.
+    """
+
+    if value is None:
+        return None
+    raw = _jsonable(value)
+    return json.loads(json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str))
+
+
 def _plan_matches(
     target: str | None,
     task: str | None,
@@ -308,6 +328,7 @@ def _validate_initial_plan(
         preprocessing=plan.preprocessing,
         split=split,
         row_positions=list(range(len(dataframe))),
+        training_only=True,
     )
     return result
 
@@ -319,6 +340,7 @@ def _choose_source(
     plan_factory: ModelingPlanFactory | None,
     context: dict[str, Any],
     training_profile: dict[str, Any],
+    planner_diagnostics: dict[str, Any] | None,
     case: BenchmarkCase,
     warnings: list[str],
     require_live: bool = False,
@@ -348,7 +370,10 @@ def _choose_source(
             case.question,
             case.target_column,
             case.expected_task_type,
+            deterministic_structural_diagnostics=planner_diagnostics,
         )
+        if require_live:
+            agents.assert_effective_model(expected_model=config.planner_model)
         return (
             ModelingPlan(
                 recommended_method=modeling_plan.recommended_method,
@@ -398,6 +423,8 @@ def _proposal_cache_key(
     llm_repetition_id: str | None = None,
     model_condition_id: str = "default",
     generation_settings: dict[str, Any] | None = None,
+    evidence_mode: str = "training_profile_only",
+    planner_diagnostics: dict[str, Any] | None = None,
     training_profile: dict[str, Any],
 ) -> str:
     """Identify only the evidence that is legal for the initial proposal."""
@@ -417,6 +444,11 @@ def _proposal_cache_key(
         "approved_target": case.target_column,
         "approved_task": case.expected_task_type,
         "generation_settings": _jsonable(generation_settings or {}),
+        "planner_evidence_mode": evidence_mode,
+        "planner_diagnostics_digest": hashlib.sha256(
+            json.dumps(_jsonable(planner_diagnostics), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if planner_diagnostics is not None else None,
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -441,6 +473,19 @@ def _redact_error(error: Exception) -> str:
     if secret:
         message = message.replace(secret, "[REDACTED]")
     return message
+
+
+def _effective_model_from_provenance(
+    provenance: dict[str, Any] | None,
+) -> str | None:
+    """Extract a provider-resolved model ID from a saved request artifact."""
+
+    if not isinstance(provenance, dict):
+        return None
+    value = provenance.get("model_effective")
+    if value is None:
+        value = (provenance.get("response_metadata") or {}).get("model")
+    return str(value) if value else None
 
 
 def _write_proposal_cache(path: Path, cache: dict[str, dict[str, Any]]) -> None:
@@ -469,6 +514,7 @@ def _run_trial(
     initial_model_override: str | None = None,
     initial_request_status_override: str | None = None,
     initial_request_error_override: str | None = None,
+    initial_api_provenance_override: dict[str, Any] | None = None,
     requested_split_seed: int | None = None,
     proposal_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -513,6 +559,30 @@ def _run_trial(
     )
     training_profile = profile_dataframe(training_frame)
     warnings: list[str] = []
+    deterministic: DeterministicRecommendation | None = None
+    deterministic_failure: str | None = None
+    try:
+        policy = DeterministicPolicy(
+            enable_regression_interaction_diagnostics=config.enable_regression_interaction_diagnostics,
+            enable_classification_boundary_diagnostics=config.enable_classification_boundary_diagnostics,
+        )
+        deterministic = deterministic_recommendation(
+            training_frame,
+            case.question,
+            case.target_column,
+            task_type=case.expected_task_type,
+            policy=policy,
+        )
+    except Exception as exc:
+        deterministic_failure = _redact_error(exc)
+        warnings.append(f"Deterministic recommendation failed closed: {_redact_error(exc)}")
+
+    planner_diagnostics = (
+        _canonical_diagnostics(deterministic.diagnostics)
+        if config.planner_evidence_mode == "training_only_structural_diagnostics"
+        and deterministic is not None
+        else None
+    )
     repetition_id = config.llm_repetition_id or f"rep_{trial_number + 1:03d}"
     trial_id = (
         f"{config.model_condition_id}:{case.name}:{perturbation_id}:split{experimental_split_seed}:"
@@ -537,6 +607,8 @@ def _run_trial(
         "planner_model": config.planner_model,
         "reconciler_model": config.reconciler_model,
         "generation_settings": dict(config.generation_settings),
+        "planner_evidence_mode": config.planner_evidence_mode,
+        "training_only_structural_diagnostics": planner_diagnostics,
     }
     initial_input_artifact = {
         "evaluation_mode": "modeling_gate",
@@ -560,6 +632,9 @@ def _run_trial(
         "benchmark_target_constraint": case.target_column,
         "benchmark_task_constraint": case.expected_task_type,
         "training_profile": training_profile,
+        "planner_evidence_mode": config.planner_evidence_mode,
+        "planner_structural_diagnostics_exposed": planner_diagnostics is not None,
+        "planner_structural_diagnostics": planner_diagnostics,
         "holdout_included": False,
         "deterministic_recommendation_included": False,
         "empirical_reference_included": False,
@@ -579,6 +654,8 @@ def _run_trial(
         model=config.planner_model,
         prompt_schema_version=config.prompt_schema_version,
         generation_settings=config.generation_settings,
+        evidence_mode=config.planner_evidence_mode,
+        planner_diagnostics=planner_diagnostics,
         training_profile=training_profile,
     )
     proposal_cache_hit = False
@@ -600,6 +677,13 @@ def _run_trial(
         agent_request_status = "cached"
         agent_request_error = None
         planner_api_provenance = (cached_proposal or {}).get("api_provenance")
+        if config.require_live:
+            effective_model = _effective_model_from_provenance(planner_api_provenance)
+            if effective_model != str(config.planner_model):
+                raise LLMUnavailable(
+                    "Strict-live cached proposal has no matching effective planner model: "
+                    f"expected {config.planner_model!r}, got {effective_model!r}."
+                )
     elif config.gate_mode == "deterministic_only":
         plan = _fallback_modeling_plan(
             training_profile,
@@ -618,6 +702,7 @@ def _run_trial(
             plan_factory=plan_factory,
             context=context,
             training_profile=training_profile,
+            planner_diagnostics=planner_diagnostics,
             case=case,
             warnings=warnings,
             require_live=config.require_live,
@@ -633,8 +718,16 @@ def _run_trial(
         agent_model = initial_model_override or config.planner_model
         agent_request_status = initial_request_status_override or "cached"
         agent_request_error = initial_request_error_override
+        planner_api_provenance = initial_api_provenance_override
+        if config.require_live and agent_source == "openai":
+            effective_model = _effective_model_from_provenance(planner_api_provenance)
+            if effective_model != str(config.planner_model):
+                raise LLMUnavailable(
+                    "Strict-live reused proposal has no matching effective planner model: "
+                    f"expected {config.planner_model!r}, got {effective_model!r}."
+                )
     initial_validation = _validate_initial_plan(
-        frame,
+        training_frame,
         split,
         plan,
         expected_target=case.target_column,
@@ -647,24 +740,6 @@ def _run_trial(
         target_column=case.target_column,
         task_type=case.expected_task_type,
     )
-    deterministic: DeterministicRecommendation | None = None
-    deterministic_failure: str | None = None
-    try:
-        policy = DeterministicPolicy(
-            enable_regression_interaction_diagnostics=config.enable_regression_interaction_diagnostics,
-            enable_classification_boundary_diagnostics=config.enable_classification_boundary_diagnostics,
-        )
-        deterministic = deterministic_recommendation(
-            training_frame,
-            case.question,
-            case.target_column,
-            task_type=case.expected_task_type,
-            policy=policy,
-        )
-    except Exception as exc:
-        deterministic_failure = _redact_error(exc)
-        warnings.append(f"Deterministic recommendation failed closed: {_redact_error(exc)}")
-
     if config.gate_mode == "deterministic_only" and deterministic is not None:
         plan = ModelingPlan(
             recommended_method=deterministic.recommended_method,
@@ -673,7 +748,7 @@ def _run_trial(
             confidence={"low": 0.35, "medium": 0.65, "high": 0.90}[deterministic.confidence],
         )
         initial_validation = _validate_initial_plan(
-            frame,
+            training_frame,
             split,
             plan,
             expected_target=case.target_column,
@@ -706,6 +781,8 @@ def _run_trial(
             "approved_target": case.target_column,
             "approved_task": case.expected_task_type,
             "generation_settings": _jsonable(config.generation_settings),
+            "planner_evidence_mode": config.planner_evidence_mode,
+            "planner_structural_diagnostics": planner_diagnostics,
             "api_provenance": _jsonable(planner_api_provenance),
         }
 
@@ -795,6 +872,18 @@ def _run_trial(
                     ),
                 )
                 reconciliation_invoked = gate_result.get("reconciliation") is not None
+                if reconciliation_invoked and gate_sources.get("modeling_reconciliation") == "openai":
+                    reconciler_api_provenance = getattr(
+                        reconciler_agents, "last_request_provenance", None
+                    )
+                if (
+                    config.require_live
+                    and reconciliation_invoked
+                    and gate_sources.get("modeling_reconciliation") == "openai"
+                ):
+                    reconciler_agents.assert_effective_model(
+                        expected_model=config.reconciler_model
+                    )
                 reconciliation_status = (
                     "succeeded" if reconciliation_invoked else "not_invoked"
                 )
@@ -804,10 +893,8 @@ def _run_trial(
                         reconciliation_agent_source = "mock"
                     elif config.offline:
                         reconciliation_agent_source = "offline_fallback"
-                    reconciler_api_provenance = (
-                        getattr(reconciler_agents, "last_request_provenance", None)
-                        if reconciliation_agent_source == "openai" else None
-                    )
+                    if reconciliation_agent_source != "openai":
+                        reconciler_api_provenance = None
                 final_fields = {
                     "target": gate_result["selected_target_column"],
                     "task": gate_result["selected_task_type"],
@@ -867,11 +954,13 @@ def _run_trial(
         and not unsafe_plan_intercepted
     )
 
-    # This is the only section that performs candidate-family fitting.  It is
-    # intentionally after the gate call, so empirical results cannot influence
-    # the runtime decision above.  Repetitions share this training-only cache
-    # entry because their split, profile, and candidate configuration are
-    # identical.
+    # Full empirical-reference candidate fitting is intentionally after the
+    # gate call, so final summary results cannot influence the runtime
+    # decision. The separate bounded pairwise arbitration probe, when needed,
+    # is fit earlier on the frozen training partition only and is passed to
+    # the gate as explicitly labeled evidence. Repetitions share this
+    # training-only reference cache because their split and candidate
+    # configuration are identical.
     cache_key = json.dumps(
         {
             "case": case.name,
@@ -1076,6 +1165,16 @@ def _run_trial(
     initial_failure_codes = [failure["code"] for failure in _failed_checks(initial_validation)]
     final_failure_codes = _blocking_failed_check_codes(final_validation)
     validation_failure_codes = sorted(set(initial_failure_codes) | set(final_failure_codes))
+    planner_effective_model = (
+        (planner_api_provenance or {}).get("model_effective")
+        or ((planner_api_provenance or {}).get("response_metadata") or {}).get("model")
+        or (agents.model if agent_source in {"openai", "offline_fallback"} else agent_model)
+    )
+    reconciler_effective_model = (
+        (reconciler_api_provenance or {}).get("model_effective")
+        or ((reconciler_api_provenance or {}).get("response_metadata") or {}).get("model")
+        or (reconciler_agents.model if reconciliation_agent_source in {"openai", "offline_fallback"} else config.reconciler_model)
+    )
     record = {
         "benchmark_case": case.name,
         "dataset_source": case.dataset_source,
@@ -1113,8 +1212,8 @@ def _run_trial(
         "agent_model": agent_model,
         "planner_model": config.planner_model,
         "reconciler_model": config.reconciler_model,
-        "planner_model_effective": agents.model,
-        "reconciler_model_effective": reconciler_agents.model,
+        "planner_model_effective": planner_effective_model,
+        "reconciler_model_effective": reconciler_effective_model,
         "repository_commit": config.repository_commit,
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
         "require_live": config.require_live,
@@ -1143,6 +1242,9 @@ def _run_trial(
             and initial_plan_override is None
         ),
         "generation_settings": dict(config.generation_settings),
+        "planner_evidence_mode": config.planner_evidence_mode,
+        "planner_structural_diagnostics_exposed": planner_diagnostics is not None,
+        "planner_structural_diagnostics": planner_diagnostics,
         "planner_api_provenance": planner_api_provenance,
         "reconciler_api_provenance": reconciler_api_provenance,
         "planner_prompt_schema_version": config.prompt_schema_version,
@@ -1661,6 +1763,11 @@ def run_evaluation(
         )
         ablation_name = spec_values.get("name", ablation_name)
         ablation_schema_version = spec_values.get("schema_version", ablation_schema_version)
+        planner_evidence_mode = spec_values.get(
+            "planner_evidence_mode", "training_profile_only"
+        )
+    else:
+        planner_evidence_mode = "training_profile_only"
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
     if require_live and (modeling_plan_factory is not None or reconciliation_factory is not None):
@@ -1696,6 +1803,7 @@ def run_evaluation(
         llm_repetition_id=llm_repetition_id,
         generation_settings=dict(generation_settings or {}),
         llm_repetition_ids=tuple(str(value) for value in llm_repetition_ids) if llm_repetition_ids is not None else None,
+        planner_evidence_mode=planner_evidence_mode,
     )
     if cases is not None:
         selected_cases = list(cases)
@@ -1715,6 +1823,7 @@ def run_evaluation(
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
     confirmatory_metadata: dict[str, Any] | None = None
+    legacy_offline_condition_projection = False
     if confirmatory_config_path is not None:
         if config.suite != "external":
             raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
@@ -1725,15 +1834,35 @@ def run_evaluation(
             None,
         )
         if selected_condition is None:
-            raise ValueError(
-                f"Confirmatory model condition {config.model_condition_id!r} is not declared in the frozen manifest."
-            )
+            if (
+                config.offline
+                and not config.require_live
+                and config.model_condition_id == "default"
+                and len(declared_conditions) > 1
+            ):
+                # Compatibility for offline artifact/copy tests and legacy
+                # exploratory callers.  This path is never permitted for a
+                # strict-live confirmatory run, and the selected condition is
+                # recorded explicitly below rather than being hidden.
+                selected_condition = declared_conditions[0]
+                object.__setattr__(config, "model_condition_id", selected_condition["condition_id"])
+                object.__setattr__(config, "model", selected_condition["planner_model"])
+                object.__setattr__(config, "repetitions", int(selected_condition["llm_repetitions"]))
+                object.__setattr__(config, "planner_model", selected_condition["planner_model"])
+                object.__setattr__(config, "reconciler_model", selected_condition["reconciler_model"])
+                legacy_offline_condition_projection = True
+            else:
+                raise ValueError(
+                    f"Confirmatory model condition {config.model_condition_id!r} is not declared in the frozen manifest."
+                )
+        object.__setattr__(config, "model", selected_condition["planner_model"])
         selected_repetitions = selected_condition["llm_repetitions"]
         if config.repetitions != selected_repetitions:
             raise ValueError(
                 f"Confirmatory repetition mismatch for {config.model_condition_id!r}: "
                 f"manifest declares {selected_repetitions}, runtime requested {config.repetitions}."
             )
+        repetitions = int(selected_repetitions)
         if config.planner_model != selected_condition["planner_model"] or config.reconciler_model != selected_condition["reconciler_model"]:
             raise ValueError(
                 "Confirmatory model override conflicts with the frozen model condition "
@@ -1840,6 +1969,8 @@ def run_evaluation(
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
         "confirmatory_config_snapshot": CONFIRMATORY_CONFIG_SNAPSHOT,
         "confirmatory_mode": confirmatory_metadata is not None,
+        "legacy_offline_condition_projection": legacy_offline_condition_projection
+        if confirmatory_config_path is not None else False,
         "confirmatory_config_status": (
             confirmatory_metadata["status"] if confirmatory_metadata else "not_selected"
         ),
@@ -1885,6 +2016,8 @@ def run_evaluation(
         "planner_model_requested": config.planner_model,
         "reconciler_model_requested": config.reconciler_model,
         "generation_settings": dict(config.generation_settings),
+        "planner_evidence_mode": config.planner_evidence_mode,
+        "planner_structural_diagnostics_exposed": config.planner_evidence_mode == "training_only_structural_diagnostics",
         "planner_model_effective": agents.model,
         "reconciler_model_effective": reconciler_agents.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
@@ -2069,6 +2202,7 @@ def run_evaluation(
                     cached_pair_model = None
                     cached_pair_request_status = None
                     cached_pair_request_error = None
+                    cached_pair_api_provenance = None
                     if config.order_swap:
                         prior_ab = next(
                             (record for record in trials if record.get("trial_id") == f"{base_trial_id}:order_ab"),
@@ -2080,6 +2214,7 @@ def run_evaluation(
                             cached_pair_model = prior_ab.get("agent_model")
                             cached_pair_request_status = prior_ab.get("agent_request_status")
                             cached_pair_request_error = prior_ab.get("agent_request_error")
+                            cached_pair_api_provenance = prior_ab.get("planner_api_provenance")
                     for variant, proposal_order in variants:
                         trial_id = base_trial_id if variant == "standard" else f"{base_trial_id}:{variant}"
                         if trial_id in completed_trial_ids:
@@ -2103,6 +2238,7 @@ def run_evaluation(
                                 initial_model_override=cached_pair_model,
                                 initial_request_status_override=cached_pair_request_status,
                                 initial_request_error_override=cached_pair_request_error,
+                                initial_api_provenance_override=cached_pair_api_provenance,
                                 requested_split_seed=requested_split_seed,
                                 proposal_cache=proposal_cache,
                             )
@@ -2135,6 +2271,7 @@ def run_evaluation(
                             cached_pair_model = trial.get("agent_model")
                             cached_pair_request_status = trial.get("agent_request_status")
                             cached_pair_request_error = trial.get("agent_request_error")
+                            cached_pair_api_provenance = trial.get("planner_api_provenance")
                         _write_outputs(
                             output_path,
                             config_payload,

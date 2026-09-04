@@ -326,6 +326,10 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         modeling_plan_factory=factory,
     )
     assert set(result["summary"]["by_model_condition"]) == {"model_a", "model_b"}
+    assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
+        "descriptive audit total"
+    )
+    assert result["summary"]["analysis_summaries"]["secondary"] == {}
     assert len(result["summary"]["summaries"]["llm_only"]["by_dataset"]) == 2
     # The combined summary is condition-aware; inspect persisted trial rows from both ablations.
     persisted = []
