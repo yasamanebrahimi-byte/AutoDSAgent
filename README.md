@@ -2,6 +2,12 @@
 
 AutoDS Agent is an auditable workflow for classification and regression on tabular CSV data. It combines optional OpenAI agent suggestions with deterministic validation, preprocessing, model training, and reporting.
 
+The repository also contains a narrower research evaluation. Its paper-facing
+claim concerns LLM-based model-family/preprocessing planning for supervised
+tabular classification and regression under a selective deterministic
+safeguard. It is not a claim that the confirmatory experiment validates every
+capability of the broader autonomous data-science product.
+
 The workflow:
 
 1. Infers or validates the target and task.
@@ -85,7 +91,15 @@ pytest
 ```
 
 More detailed design and evaluation notes are in [`docs/`](docs/), including [reconciliation](docs/reconciliation.md) and the [evaluation objective](docs/gate_evaluation_objective.md).
-The optional frozen AMLB/OpenML external evaluation suite is documented in [external benchmark](docs/external_benchmark.md).
+The optional frozen AMLB/OpenML external evaluation suite is documented in [external benchmark](docs/external_benchmark.md), including its [selection and freeze record](docs/external_benchmark_selection.md).
+
+Development and confirmatory evaluation are separate. Live API smoke tests
+must use local or synthetic development cases. The external suite may be
+prefetched and schema-validated before confirmation, but live external pilot
+outcomes are not part of the normal publication-readiness workflow. Freeze the
+configuration snapshot at
+[`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
+before launching a strict-live external run.
 
 ## License
 

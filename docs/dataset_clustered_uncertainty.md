@@ -19,7 +19,11 @@ explicitly secondary diagnostic estimate; `dataset_weighted_gate_health` remains
 as a compatibility alias. The headline confidence intervals recompute this same
 dataset-macro statistic inside each clustered bootstrap replicate.
 Conditional rates retain their event-count denominator semantics and missing
-holdout outcomes are excluded rather than converted to zero.
+holdout outcomes are excluded rather than converted to zero. The same
+dataset-cluster bootstrap is used for the dimensionless paper holdout delta,
+beneficial/harmful/neutral intervention rates, and intervention precision.
+Regression rows contribute relative RMSE improvement, never native-unit RMSE
+differences, to cross-dataset paper summaries.
 
 The old row-level helper is retained as explicitly named `iid_bootstrap_ci`
 for diagnostics and is not used for paper-facing intervals.

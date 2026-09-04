@@ -42,16 +42,23 @@ from evaluation.empirical_reference import (
 from evaluation.metrics import (
     DEFAULT_THRESHOLDS,
     GATE_OBJECTIVE_VERSION,
+    HOLDOUT_METRIC_SCHEMA_VERSION,
     catastrophic_transition,
     classify_intervention_outcome,
+    holdout_neutral_tolerance,
     normalized_performance_delta,
-    holdout_intervention_delta,
+    paper_holdout_delta,
+    raw_holdout_performance_delta,
     normalized_regret,
     regret,
     regret_reduction,
     summarize_trials,
 )
 from evaluation.perturbations import Perturbation, default_perturbations
+
+
+EXPERIMENT_CONFIG_VERSION = "paper-confirmatory-v1"
+CONFIRMATORY_CONFIG_SNAPSHOT = "evaluation/configs/paper_confirmatory_v1.json"
 
 
 ModelingPlanFactory = Callable[[dict[str, Any]], ModelingPlan]
@@ -531,8 +538,12 @@ def _run_trial(
     proposal_cache_hit = False
     cached_proposal = proposal_cache.get(proposal_key) if proposal_cache is not None else None
     cached_plan = _plan_from_cache_payload(cached_proposal or {})
+    # A strict confirmatory run may reuse an exact live proposal, but never a
+    # proposal created by an offline fallback or an injected development mock.
+    # This prevents a stale development cache from silently contaminating a
+    # live-required result bundle.
     can_use_cached = cached_plan is not None and not (
-        config.require_live and (cached_proposal or {}).get("source") not in {"openai", "mock"}
+        config.require_live and (cached_proposal or {}).get("source") != "openai"
     )
     if initial_plan_override is None and can_use_cached:
         plan = cached_plan
@@ -564,6 +575,10 @@ def _run_trial(
             require_live=config.require_live,
         )
     else:
+        if config.require_live and initial_source_override != "openai":
+            raise LLMUnavailable(
+                "Strict live order-swap trials may reuse only an OpenAI initial proposal."
+            )
         plan = initial_plan_override
         agent_source = initial_source_override or "cached_order_swap"
         agent_model = initial_model_override or config.planner_model
@@ -649,6 +664,7 @@ def _run_trial(
     reconciliation_method_source = None
     reconciliation_preprocessing_source = None
     reconciliation_agent_source = None
+    gate_sources: dict[str, str] = {}
     gate_result: dict[str, Any] | None = None
     gate_error: str | None = None
     final_fields = _plan_fields(None)
@@ -695,7 +711,6 @@ def _run_trial(
                 plan_factory is None and not reconciler_agents.available and reconciliation_factory is None
             )
             try:
-                gate_sources: dict[str, str] = {}
                 gate_result = _validate_modeling_gate(
                     gate_agent,
                     training_profile,
@@ -743,11 +758,15 @@ def _run_trial(
                 training_allowed = final_valid
             except InvariantViolation as exc:
                 gate_error = _redact_error(exc)
+                reconciliation_invoked = "modeling_reconciliation" in gate_sources
+                reconciliation_agent_source = gate_sources.get("modeling_reconciliation")
                 reconciliation_status = "failed" if reconciliation_invoked else "not_invoked"
                 if exc.result is not None:
                     final_validation = exc.result.as_dict()
             except Exception as exc:
                 gate_error = _redact_error(exc)
+                reconciliation_invoked = "modeling_reconciliation" in gate_sources
+                reconciliation_agent_source = gate_sources.get("modeling_reconciliation")
                 reconciliation_status = "failed" if reconciliation_invoked else "not_invoked"
 
         if reconciliation_invoked and reconciliation_status == "succeeded":
@@ -886,8 +905,17 @@ def _run_trial(
     final_holdout_metric = (gated_holdout or {}).get("holdout_metrics", {}).get(holdout_metric_name)
     # This calculation is strictly post-decision evaluation. Nothing below is
     # passed back into the gate, probe, reconciliation, or final-plan choice.
-    paired_holdout_delta = holdout_intervention_delta(
+    holdout_delta_raw = raw_holdout_performance_delta(
         case.expected_task_type, initial_holdout_metric, final_holdout_metric
+    )
+    paired_holdout_delta = paper_holdout_delta(
+        case.expected_task_type,
+        initial_holdout_metric,
+        final_holdout_metric,
+        epsilon=float(config.thresholds["holdout_rmse_epsilon"]),
+    )
+    holdout_tolerance = holdout_neutral_tolerance(
+        case.expected_task_type, config.thresholds
     )
     holdout_outcome = (
         "not_intervened"
@@ -897,12 +925,7 @@ def _run_trial(
             if paired_holdout_delta is None
             else (
                 "neutral"
-                if abs(paired_holdout_delta) <= float(
-                    config.thresholds.get(
-                        "holdout_neutral_tolerance",
-                        DEFAULT_THRESHOLDS["holdout_neutral_tolerance"],
-                    )
-                )
+                if abs(paired_holdout_delta) <= holdout_tolerance
                 else ("beneficial" if paired_holdout_delta > 0 else "harmful")
             )
         )
@@ -1027,6 +1050,12 @@ def _run_trial(
         "planner_model_effective": agents.model,
         "reconciler_model_effective": reconciler_agents.model,
         "repository_commit": config.repository_commit,
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "require_live": config.require_live,
+        "benchmark_suite_version": (
+            case.benchmark_suite_version
+            or "local-2"
+        ),
         "agent_request_status": agent_request_status,
         "agent_request_error": agent_request_error,
         "live_request_failed": agent_request_status == "failed_fallback",
@@ -1239,7 +1268,30 @@ def _run_trial(
         "initial_holdout_metric": initial_holdout_metric,
         "final_holdout_metric": final_holdout_metric,
         "holdout_metric_name": holdout_metric_name,
-        "holdout_intervention_delta": paired_holdout_delta,
+        "holdout_metric_schema_version": HOLDOUT_METRIC_SCHEMA_VERSION,
+        "holdout_rmse_epsilon": float(config.thresholds["holdout_rmse_epsilon"]),
+        "holdout_neutral_tolerance": holdout_tolerance,
+        "holdout_neutral_tolerance_units": (
+            "absolute macro-F1 delta"
+            if case.expected_task_type == "classification"
+            else "relative RMSE improvement"
+        ),
+        "holdout_macro_f1_delta": (
+            holdout_delta_raw if case.expected_task_type == "classification" else None
+        ),
+        "holdout_rmse_delta_raw": (
+            holdout_delta_raw if case.expected_task_type == "regression" else None
+        ),
+        "holdout_rmse_relative_improvement": (
+            paired_holdout_delta if case.expected_task_type == "regression" else None
+        ),
+        "paper_holdout_delta": paired_holdout_delta,
+        # Preserve the historical field in its native-unit meaning.  New
+        # paper-facing consumers must use paper_holdout_delta or the explicit
+        # task-specific fields above.
+        "holdout_intervention_delta": holdout_delta_raw,
+        "holdout_intervention_delta_raw": holdout_delta_raw,
+        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use paper_holdout_delta for paper analysis",
         "holdout_intervention_outcome": holdout_outcome,
         "agent_initial_holdout_split_contract": (agent_holdout or {})
         .get("validation", {})
@@ -1379,6 +1431,9 @@ def _failed_trial_record(
         "planner_model_effective": config.planner_model,
         "reconciler_model_effective": config.reconciler_model,
         "repository_commit": config.repository_commit,
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "require_live": config.require_live,
+        "benchmark_suite_version": case.benchmark_suite_version or "local-2",
         "agent_request_status": "failed",
         "agent_request_error": _redact_error(error),
         "live_request_failed": not config.offline,
@@ -1402,7 +1457,17 @@ def _failed_trial_record(
         "initial_holdout_metric": None,
         "final_holdout_metric": None,
         "holdout_metric_name": None,
+        "holdout_metric_schema_version": HOLDOUT_METRIC_SCHEMA_VERSION,
+        "holdout_rmse_epsilon": float(config.thresholds["holdout_rmse_epsilon"]),
+        "holdout_neutral_tolerance": None,
+        "holdout_neutral_tolerance_units": None,
+        "holdout_macro_f1_delta": None,
+        "holdout_rmse_delta_raw": None,
+        "holdout_rmse_relative_improvement": None,
+        "paper_holdout_delta": None,
         "holdout_intervention_delta": None,
+        "holdout_intervention_delta_raw": None,
+        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use paper_holdout_delta for paper analysis",
         "holdout_intervention_outcome": "not_comparable",
         "intervention_occurred": False,
         "hard_repair_occurred": False,
@@ -1508,6 +1573,10 @@ def run_evaluation(
         ablation_schema_version = spec_values.get("schema_version", ablation_schema_version)
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
+    if require_live and (modeling_plan_factory is not None or reconciliation_factory is not None):
+        raise ValueError(
+            "require_live is incompatible with injected mock planner/reconciler factories."
+        )
     selected_split_seeds = tuple(int(value) for value in (split_seeds or [seed]))
     config = EvaluationConfig(
         suite=suite,
@@ -1554,10 +1623,18 @@ def run_evaluation(
     agents = OpenAIAgents(model=config.planner_model)
     reconciler_agents = OpenAIAgents(model=config.reconciler_model)
     stable_config = {
-        "config_version": "2026-08-24.evaluation.v4-intervention-quality",
+        "config_version": "2026-09-04.evaluation.v5-paper-metrics",
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "confirmatory_config_snapshot": CONFIRMATORY_CONFIG_SNAPSHOT,
+        "result_schema_version": HOLDOUT_METRIC_SCHEMA_VERSION,
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "suite": config.suite,
         "tier": config.tier,
+        "benchmark_manifest_version": (
+            selected_cases[0].benchmark_suite_version
+            if selected_cases and selected_cases[0].benchmark_suite_version
+            else "local-2"
+        ),
         "benchmark_cases": [case.as_dict() for case in selected_cases],
         "perturbations": [perturbation.as_dict() for perturbation in perturbations],
         "repetitions": config.repetitions,
@@ -1579,6 +1656,7 @@ def run_evaluation(
         "order_swap": config.order_swap,
         "empirical_probe_enabled": config.empirical_probe_enabled,
         "require_live": config.require_live,
+        "live_required": config.require_live,
         "soft_challenge_strategy": config.soft_challenge_strategy,
         "diagnostic_configuration": {
             "enable_regression_interaction_diagnostics": config.enable_regression_interaction_diagnostics,
@@ -1608,13 +1686,22 @@ def run_evaluation(
             "candidate_methods": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
             "candidate_selection_data": "frozen training partition only",
             "holdout_data": "final evaluation only",
-            "holdout_intervention_delta": "final_holdout_macro_f1-initial_holdout_macro_f1 for classification; initial_holdout_rmse-final_holdout_rmse for regression",
+            "holdout_macro_f1_delta": "final_holdout_macro_f1-initial_holdout_macro_f1",
+            "holdout_rmse_delta_raw": "initial_holdout_rmse-final_holdout_rmse (diagnostic/native units)",
+            "holdout_rmse_relative_improvement": "(initial_holdout_rmse-final_holdout_rmse)/max(abs(initial_holdout_rmse), holdout_rmse_epsilon)",
+            "paper_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
             "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor",
             "objective": "intervention quality; exact family match is diagnostic only",
-            "neutrality": "normalized regret reduction within neutral_tolerance is neutral",
+            "neutrality": "training-side regret uses neutral_tolerance; holdout outcomes use task-specific classification/regression tolerances",
             "catastrophic_regret": "normalized regret at or above catastrophic_regret_threshold",
         },
         "thresholds": config.thresholds,
+        "holdout_neutral_tolerances": {
+            "classification": holdout_neutral_tolerance(
+                "classification", config.thresholds
+            ),
+            "regression": holdout_neutral_tolerance("regression", config.thresholds),
+        },
         "limitations": [
             (
                 "Frozen external AMLB/OpenML suite is not representative of every tabular data-science domain."

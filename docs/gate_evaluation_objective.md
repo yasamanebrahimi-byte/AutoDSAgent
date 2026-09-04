@@ -1,33 +1,60 @@
 # Gate evaluation objective
 
-The evaluation objective is versioned as `intervention-quality-v1`. It is used
-only by the evaluation and policy-development packages. Runtime decisions do
-not receive empirical-reference outcomes, holdout scores, regret, or whether a
-prior intervention helped.
+The evaluation objective is versioned as `intervention-quality-v1`. The
+paper-facing claim is deliberately narrow: selective reliability safeguards
+for LLM-based model-family and preprocessing planning in supervised tabular
+classification and regression. AutoDSAgent remains a broader end-to-end
+data-science product; this evaluation does not validate arbitrary EDA,
+cleaning, reporting, causal reasoning, time series, clustering, or target
+discovery capabilities.
 
 ## Runtime/evaluation boundary
 
-Runtime intervention decisions use training-side validation, cross-validation,
-and bounded empirical probes only. Untouched holdout data is never provided to
-the gate, probe, abstention logic, reconciliation, prompts, thresholds, or
-final-plan selection. The final plan is frozen first; only then are the initial
-and final complete plans (including preprocessing) evaluated on the same
-untouched holdout split.
+The initial LLM plan is generated from training-side information. An independent
+deterministic structural challenger evaluates that proposal using the same
+training-side evidence. Disagreements trigger a bounded empirical arbitration
+stage when configured. Weak or tied evidence leads to abstention and
+preservation of the LLM plan; sufficiently strong evidence can trigger blinded
+reconciliation before the final plan is frozen.
+
+These are pre-final-training validation stages: small training-only fits/CV
+probes are allowed inside the safeguard. They are not a claim of zero model
+fitting of any kind. The train/holdout split is frozen before planning, and the
+untouched holdout target values, scores, winner comparisons, and intervention
+outcomes are unavailable to the planner, challenger, hard validator, probe,
+reconciler, abstention logic, and final-plan selection. Only after the final
+plan is frozen are the initial and final plans evaluated on the same holdout.
 
 ## Trial outcomes
 
-The primary intervention outcome is the paired exact-plan holdout result. For
-classification, `holdout_intervention_delta` is
-`final_holdout_macro_f1 - initial_holdout_macro_f1`. For regression it is
-`initial_holdout_rmse - final_holdout_rmse`. Positive always means the
-safeguard improved performance. A changed soft plan is `beneficial`, `harmful`,
-or `neutral` using the configurable native-metric
-`holdout_neutral_tolerance`; an unchanged plan is `not_intervened`, and a
-missing/failed pair is `not_comparable`.
+The primary intervention outcome is the paired exact-plan untouched-holdout
+result. `paper_holdout_delta` is dimensionless and positive always means the
+final/intervened plan is better:
+
+```text
+classification:
+    holdout_macro_f1_delta = final_holdout_macro_f1 - initial_holdout_macro_f1
+regression:
+    holdout_rmse_relative_improvement =
+        (initial_holdout_rmse - final_holdout_rmse)
+        / max(abs(initial_holdout_rmse), holdout_rmse_epsilon)
+```
+
+`holdout_rmse_delta_raw = initial_holdout_rmse - final_holdout_rmse` remains
+available for regression diagnostics, but is native-unit and is never averaged
+with classification deltas for a paper-facing cross-dataset estimate.
+
+Classification neutrality uses
+`classification_holdout_neutral_tolerance` in absolute macro-F1 points.
+Regression neutrality uses `regression_holdout_neutral_tolerance` in relative
+RMSE-improvement units. A changed soft plan is `beneficial`, `harmful`, or
+`neutral`; an unchanged plan is `not_intervened`, and a missing/failed pair is
+`not_comparable`.
 
 The holdout-based intervention precision, harmful-intervention rate, neutral
-rate, mean delta, median delta, and valid paired denominator are reported
-alongside the training-side diagnostics below.
+rate, scale-free mean/median delta, dataset-macro estimate, clustered CI, and
+valid paired denominator are reported alongside the training-side diagnostics
+below.
 
 For training-side diagnostic analysis, `normalized_gate_delta` is
 `initial_normalized_regret - final_normalized_regret`. Positive means that the
@@ -48,14 +75,36 @@ These regret-based values remain diagnostics of what training-side evidence
 predicted; they are not the primary definition of realized intervention
 success or harm.
 
+## Paper-facing intervention metrics
+
+- `challenge_rate = challenged_disagreements / eligible_disagreements`.
+- `intervention_rate = changed_soft_plans / completed_trials`.
+- `abstention_preservation_rate = abstained_disagreements /
+  (challenged_disagreements + abstained_disagreements)`.
+- `beneficial_intervention_rate`, `harmful_intervention_rate`, and
+  `neutral_intervention_rate` use the task-appropriate holdout delta and its
+  task-specific tolerance.
+- `intervention_precision = beneficial / all comparable actual interventions`.
+- `harm_rate = harmful / all comparable actual interventions` (also exposed as
+  `harmful_intervention_rate`).
+
+All rates return `null` when their denominator is zero. Primary estimates are
+dataset-macro; trial-weighted values are retained and explicitly labeled as
+secondary diagnostics.
+
 ## Training-side diagnostic metrics
 
-- `intervention_precision = improved / (improved + worsened)`. Neutral
-  interventions are excluded from this denominator.
+- `training_reference_intervention_precision = improved / (improved +
+  worsened)`. Neutral interventions are excluded from this denominator; this
+  is distinct from the primary holdout `intervention_precision`.
 - `challenge_yield = improved / total_challenges`.
 - `harmful_intervention_rate = worsened / total_challenges`.
 - `unnecessary_intervention_rate = neutral / total_challenges`.
-- `challenge_recall = beneficial_challenges_made / beneficial_disagreement_opportunities`.
+- `challenge_recall` (also exposed as `rescue_recall`) is an optional post-hoc
+  diagnostic whose denominator is a training-only empirical-reference
+  opportunity: the deterministic alternative is better than the initial plan
+  under the configured training CV reference. It never uses holdout outcomes
+  to make a runtime decision and is not an oracle claim.
 - `mean_regret_reduction` and `median_regret_reduction` are both reported.
 - Catastrophic regret is normalized regret at or above the configurable
   `catastrophic_regret_threshold` (default `0.10`). Prevention is
@@ -98,10 +147,13 @@ never tunes weights or thresholds.
 
 ## Aggregation and uncertainty
 
-Summary JSON reports both trial-weighted and dataset-weighted gate-health
-metrics. Dataset-weighted values first summarize repeated trials within each
-dataset, then average the dataset summaries. Key mean metrics include a fixed-
-seed percentile bootstrap interval; support below 20 is marked unstable.
+Summary JSON reports both trial-weighted and dataset-macro gate-health metrics.
+Dataset-macro values first summarize all eligible repeated trials within each
+dataset/task, then give every dataset/task one equal weight. A clustered
+percentile bootstrap samples dataset/task IDs with replacement and retains all
+rows belonging to each sampled task, including repeated splits and LLM
+repetitions. It is never an IID row bootstrap. Key mean metrics include a
+fixed-seed dataset-clustered interval; support below 20 is marked unstable.
 
 Reports include decision-path, deterministic-confidence, empirical-probe-
 strength, task/regime, per-dataset, repetition-aware, concentration, and

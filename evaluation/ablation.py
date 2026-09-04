@@ -18,6 +18,11 @@ from typing import Any, Sequence
 from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
 from evaluation.runner import run_evaluation
 from evaluation.statistics import cluster_bootstrap_ci
+from evaluation.metrics import DEFAULT_THRESHOLDS, holdout_neutral_tolerance, paper_holdout_delta
+from app.deterministic_policy import DeterministicPolicy
+from app.empirical_challenge_probe import EmpiricalProbePolicy
+from app.llm import PROMPT_SCHEMA_VERSION
+from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
 
 
 ABLATION_SCHEMA_VERSION = "modeling-gate-ablation-v1"
@@ -162,17 +167,45 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
             bool(row.get("reconciliation_request_failed")) for row in result.get("trials", [])
         ),
         "fallback_rows": sum(bool(row.get("fallback_row")) for row in result.get("trials", [])),
+        "planner_live_success": sum(
+            bool(row.get("requested_live_trial")) and row.get("agent_source") == "openai"
+            for row in result.get("trials", [])
+        ),
+        "reconciler_live_success": sum(
+            bool(row.get("reconciliation_api_call_made"))
+            for row in result.get("trials", [])
+        ),
     }
     return {
         "ablation": name,
         "spec": spec.as_dict(),
         "trial_count": summary.get("trial_count", 0),
+        "valid_trial_count": summary.get("valid_trial_count", 0),
+        "invalid_trial_count": summary.get("failed_trial_count", 0) + summary.get("invalid_trial_count", 0),
+        "n_datasets": summary.get("dataset_macro_gate_health", {}).get("dataset_count", 0),
         "improved": health.get("improved_interventions", 0),
         "worsened": health.get("worsened_interventions", 0),
         "neutral": health.get("neutral_interventions", 0),
         "intervention_precision": health.get("intervention_precision"),
+        "intervention_rate": health.get("intervention_rate"),
+        "abstention_rate": health.get("abstention_rate"),
+        "abstention_preservation_rate": health.get("abstention_preservation_rate"),
+        "beneficial_intervention_rate": health.get("beneficial_intervention_rate"),
         "harmful_intervention_rate": health.get("harmful_intervention_rate"),
+        "harm_rate": health.get("harm_rate", health.get("harmful_intervention_rate")),
+        "neutral_intervention_rate": health.get("neutral_intervention_rate"),
         "unnecessary_intervention_rate": health.get("unnecessary_intervention_rate"),
+        "paper_holdout_delta_mean": summary.get("dataset_macro_paper_holdout_delta_mean"),
+        "paper_holdout_delta_median": summary.get("dataset_macro_paper_holdout_delta_median"),
+        "paper_holdout_delta_ci": summary.get("dataset_macro_paper_holdout_delta_ci"),
+        "paper_holdout_outcome_cis": {
+            name: summary.get("dataset_macro_gate_health", {})
+            .get("confidence_intervals", {}).get(name)
+            for name in (
+                "beneficial_intervention_rate", "harmful_intervention_rate",
+                "neutral_intervention_rate", "intervention_precision",
+            )
+        },
         "challenge_recall": health.get("challenge_recall"),
         "mean_regret_reduction": health.get("mean_regret_reduction"),
         "median_regret_reduction": health.get("median_regret_reduction"),
@@ -183,6 +216,7 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         "integrity": {
             "strict_live": bool(result.get("config", {}).get("require_live", False)),
             "fallback_rows_zero": live["fallback_rows"] == 0,
+            "strict_live_valid": summary.get("strict_live_valid", True),
         },
     }
 
@@ -201,45 +235,87 @@ def _paired_comparison(
     rows_by_name: dict[str, list[dict[str, Any]]],
     first: str,
     second: str,
-    tolerance: float = 1e-12,
+    tolerance: float | dict[str, float] = 1e-12,
 ) -> dict[str, Any]:
     left = {_unit_key(row): row for row in rows_by_name.get(first, []) if row.get("trial_status") != "failed"}
     right = {_unit_key(row): row for row in rows_by_name.get(second, []) if row.get("trial_status") != "failed"}
     shared = sorted(set(left) & set(right), key=str)
-    differences: list[float] = []
-    paired_rows: list[dict[str, Any]] = []
+    holdout_differences: list[float] = []
+    holdout_rows: list[dict[str, Any]] = []
     first_better = second_better = tied = 0
+    diagnostic_differences: list[float] = []
+    diagnostic_rows: list[dict[str, Any]] = []
     for key in shared:
-        a = left[key].get("gated_normalized_regret")
-        b = right[key].get("gated_normalized_regret")
-        if a is None or b is None:
+        first_row = left[key]
+        second_row = right[key]
+        first_delta = first_row.get("paper_holdout_delta")
+        second_delta = second_row.get("paper_holdout_delta")
+        if first_delta is None:
+            first_delta = paper_holdout_delta(
+                str(first_row.get("task_type", "classification")),
+                first_row.get("initial_holdout_metric"),
+                first_row.get("final_holdout_metric"),
+            )
+        if second_delta is None:
+            second_delta = paper_holdout_delta(
+                str(second_row.get("task_type", "classification")),
+                second_row.get("initial_holdout_metric"),
+                second_row.get("final_holdout_metric"),
+            )
+        if first_delta is not None and second_delta is not None:
+            # Positive means the first configuration produced the better
+            # untouched-holdout intervention outcome.
+            difference = float(first_delta) - float(second_delta)
+            holdout_differences.append(difference)
+            holdout_rows.append({"benchmark_case": key[0], "difference": difference})
+        a = first_row.get("gated_normalized_regret")
+        b = second_row.get("gated_normalized_regret")
+        if a is not None and b is not None:
+            # Training/reference regret remains available as a diagnostic,
+            # never as the primary paired comparison.
+            diagnostic_difference = float(b) - float(a)
+            diagnostic_differences.append(diagnostic_difference)
+            diagnostic_rows.append({"benchmark_case": key[0], "difference": diagnostic_difference})
+        if first_delta is None or second_delta is None:
             continue
-        # Positive means the first configuration has lower regret.
-        difference = float(b) - float(a)
-        differences.append(difference)
-        paired_rows.append({"benchmark_case": key[0], "difference": difference})
-        if difference > tolerance:
+        pair_tolerance = (
+            holdout_neutral_tolerance(str(first_row.get("task_type", "classification")), tolerance)
+            if isinstance(tolerance, dict)
+            else float(tolerance)
+        )
+        if difference > pair_tolerance:
             first_better += 1
-        elif difference < -tolerance:
+        elif difference < -pair_tolerance:
             second_better += 1
         else:
             tied += 1
-    difference_ci = cluster_bootstrap_ci(
-        paired_rows,
+    holdout_difference_ci = cluster_bootstrap_ci(
+        holdout_rows,
+        lambda sample: mean(row["difference"] for row in sample) if sample else None,
+        "benchmark_case",
+    )
+    diagnostic_difference_ci = cluster_bootstrap_ci(
+        diagnostic_rows,
         lambda sample: mean(row["difference"] for row in sample) if sample else None,
         "benchmark_case",
     )
     return {
         "first": first,
         "second": second,
-        "paired_units": len(differences),
-        "n_paired_datasets": len({row["benchmark_case"] for row in paired_rows}),
+        "paired_units": len(holdout_differences),
+        "paired_holdout_units": len(holdout_differences),
+        "paired_training_diagnostic_units": len(diagnostic_differences),
+        "n_paired_datasets": len({row["benchmark_case"] for row in holdout_rows}),
         "first_better": first_better,
         "second_better": second_better,
         "tied": tied,
-        "mean_paired_regret_difference_first_advantage": mean(differences) if differences else None,
-        "median_paired_regret_difference_first_advantage": median(differences) if differences else None,
-        "paired_regret_difference_ci": difference_ci,
+        "mean_paired_holdout_delta_difference_first_advantage": mean(holdout_differences) if holdout_differences else None,
+        "median_paired_holdout_delta_difference_first_advantage": median(holdout_differences) if holdout_differences else None,
+        "paired_holdout_delta_ci": holdout_difference_ci,
+        "mean_paired_regret_difference_first_advantage": mean(diagnostic_differences) if diagnostic_differences else None,
+        "median_paired_regret_difference_first_advantage": median(diagnostic_differences) if diagnostic_differences else None,
+        "paired_regret_difference_ci": diagnostic_difference_ci,
+        "training_reference_comparison_role": "secondary diagnostic; primary comparison uses untouched holdout",
     }
 
 
@@ -257,19 +333,19 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Central Comparison",
         "",
-        "| Ablation | Improved | Worsened | Neutral | Precision | Harm rate | Median regret reduction | Catastrophic net | Initial calls | Reconciliation calls | Probe invocations |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (macro) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|",
     ]
     for row in payload["central_table"]:
         api = row["api_usage"]
         probe = payload["summaries"][row["ablation"]].get("probe_invocation_count", 0)
         lines.append(
-            f"| {row['ablation']} | {row['improved']} | {row['worsened']} | {row['neutral']} | {row['intervention_precision']} | {row['harmful_intervention_rate']} | {row['median_regret_reduction']} | {row['catastrophic_net']} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
+            f"| {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
         )
     lines.extend(["", "## Paired Comparisons", ""])
     for item in payload["paired_comparisons"]:
         lines.append(
-            f"- `{item['first']}` vs `{item['second']}`: first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first advantage `{item['mean_paired_regret_difference_first_advantage']}`."
+            f"- `{item['first']}` vs `{item['second']}`: primary untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
         )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
@@ -363,6 +439,11 @@ def run_ablation_study(
         "reconciler_model_requested": resolved_reconciler_model,
         "suite": suite,
         "tier": tier,
+        "benchmark_manifest_version": (
+            selected_cases[0].benchmark_suite_version
+            if selected_cases[0].benchmark_suite_version
+            else "local-2"
+        ),
         "offline": offline,
         "require_live": require_live,
         "include_perturbations": include_perturbations,
@@ -374,9 +455,31 @@ def run_ablation_study(
             if case.openml_task_id is not None
         ],
         "prompt_schema_version": "modeling-gate-v1",
-        "deterministic_policy_version": "captured_in_each_child_evaluation_config",
-        "empirical_probe_policy_version": "captured_in_each_child_evaluation_config",
-        "thresholds": thresholds or "captured_in_each_child_evaluation_config",
+        "deterministic_policy_version": DeterministicPolicy().version,
+        "deterministic_policy": {
+            "version": DeterministicPolicy().version,
+            "parameters": "captured in evaluation/configs/paper_confirmatory_v1.json",
+        },
+        "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
+        "empirical_probe_policy": EmpiricalProbePolicy().as_dict(),
+        "reconciliation_prompt_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
+        "planner_prompt_schema_version": PROMPT_SCHEMA_VERSION,
+        "thresholds": {**DEFAULT_THRESHOLDS, **(thresholds or {})},
+        "holdout_fraction": 0.2,
+        "candidate_model_families": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
+        "preprocessing_option_space": [
+            "one_hot/categorical_unknown_handling=ignore",
+            "ordinal/categorical_unknown_handling=use_encoded_value",
+            "none/categorical_unknown_handling=ignore",
+        ],
+        "statistical_settings": {
+            "independent_unit": "dataset/task",
+            "bootstrap_method": "dataset_cluster_bootstrap_percentile",
+            "bootstrap_replicates": 10000,
+            "bootstrap_confidence_level": 0.95,
+            "bootstrap_seed": 20260824,
+        },
+        "confirmatory_config_snapshot": "evaluation/configs/paper_confirmatory_v1.json",
         "evaluation_objective": "intervention-quality-v1",
     }
     if suite == "external":
@@ -395,6 +498,9 @@ def run_ablation_study(
             "tier",
             "planner_model",
             "reconciler_model",
+            "benchmark_manifest_version",
+            "thresholds",
+            "confirmatory_config_snapshot",
         ):
             if existing.get(key) != root_config.get(key):
                 raise ValueError(f"Existing ablation configuration is incompatible for {key!r}.")
@@ -454,7 +560,19 @@ def run_ablation_study(
         ("probe_direct", "full"),
     ]
     paired = [
-        _paired_comparison(rows_by_name, first, second)
+        _paired_comparison(
+            rows_by_name,
+            first,
+            second,
+            tolerance={
+                "classification": holdout_neutral_tolerance(
+                    "classification", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+                ),
+                "regression": holdout_neutral_tolerance(
+                    "regression", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+                ),
+            },
+        )
         for first, second in pairs
         if first in rows_by_name and second in rows_by_name
     ]

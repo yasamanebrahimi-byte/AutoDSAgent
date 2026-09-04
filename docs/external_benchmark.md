@@ -9,6 +9,11 @@ recalibrate challenge policy, reconciliation, probing, or benchmark membership.
 Future calibration requires a separate development set and a newly versioned
 protocol.
 
+The manifest-selection record is documented separately in
+[`external_benchmark_selection.md`](external_benchmark_selection.md). The
+repository can document the current frozen manifest and objective metadata
+constraints, but it does not contain a complete historical selection log.
+
 The suite version is `1.0.0` and contains exactly 40 immutable OpenML task IDs:
 22 classification tasks from AMLB classification suite `271` and 18 regression
 tasks from AMLB regression suite `269`. OpenML task ID, rather than dataset
@@ -141,26 +146,26 @@ python -m evaluation.ablation --suite external --require-live --output evaluatio
 
 The default `python -m evaluation.run` command remains the local suite.
 
-## Publication-readiness smoke procedure
+## Publication-readiness development procedure
 
-1. Validate all 40 frozen tasks:
+1. Exercise live planner/reconciler/API behavior only on a local or synthetic
+development case:
+
+```bash
+python -m evaluation.run --suite local --case synthetic_binary_linear --live --require-live --gate-mode full --repetitions 1 --split-seed 42 --output evaluation_results/local_live_development_smoke
+```
+
+2. Validate all 40 frozen task schemas without running the LLM or exposing
+model-performance outcomes:
 
 ```bash
 python -m pip install -e ".[benchmark]"
 python scripts/prefetch_external_benchmarks.py
 ```
 
-2. Run one strict-live case and inspect `config.json`, `trials.jsonl`,
-`summary.json`, and `summary.md` for an OpenAI proposal, no fallback, requested
-and effective models, the final decision path, reconciliation status when
-invoked, the training-only empirical reference, holdout metrics, and preserved
-initial/final plans:
-
-```bash
-python -m evaluation.run --suite external --case adult --live --require-live --gate-mode full --repetitions 1 --split-seed 42 --output evaluation_results/external_adult_live_smoke
-```
-
-3. Run a small paired strict-live core-tier ablation. Live is implicit for
+3. Run a small paired strict-live core-tier ablation only after the
+configuration and manifest are frozen, and treat it as the confirmatory run
+itself. Live is implicit for
 `evaluation.ablation`; do not add `--live`:
 
 ```bash
@@ -168,5 +173,14 @@ python -m evaluation.ablation --suite external --tier core --require-live --outp
 ```
 
 Confirm that `proposal_cache.jsonl` gives compatible ablations the same initial
-proposal. Only after these stages succeed should the complete frozen strict-live
-ablation be launched.
+proposal before interpreting results. The strict-live output must report zero
+fallback rows, explicit planner/reconciler success counts, effective model IDs,
+and a valid confirmatory status. A failed or incomplete strict-live run is
+preserved for debugging and excluded from headline analysis.
+
+An external live pilot is not part of the normal publication-readiness
+workflow. If operational debugging requires one, predesignate the task before
+the run, record it as exploratory, and exclude that task/run from the
+confirmatory headline analysis. Do not tune policies, prompts, thresholds,
+candidate families, reconciliation, or benchmark membership after inspecting
+external live outcomes and then reuse those outcomes as untouched confirmation.

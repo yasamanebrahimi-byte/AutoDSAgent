@@ -16,7 +16,7 @@ def main() -> None:
         "--suite",
         choices=("local", "external"),
         default="local",
-        help="Benchmark suite to evaluate; local is the default.",
+        help="Benchmark suite to evaluate; local development is the default. External is frozen confirmatory infrastructure and is not a routine live smoke target.",
     )
     parser.add_argument(
         "--tier",
@@ -62,12 +62,12 @@ def main() -> None:
     parser.add_argument("--case", action="append", dest="cases", help="Benchmark case name; repeatable.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use the documented offline fallback.")
-    mode.add_argument("--live", action="store_true", help="Request live OpenAI trials (the default when not offline).")
+    mode.add_argument("--live", action="store_true", help="Request live OpenAI trials; use local/synthetic cases for development smoke tests.")
     parser.add_argument("--resume", action="store_true", help="Resume missing trial IDs from an existing compatible output bundle.")
     parser.add_argument(
         "--require-live",
         action="store_true",
-        help="Fail incomplete trials instead of substituting offline modeling or reconciliation fallbacks.",
+        help="Strict research mode: fail incomplete live trials instead of substituting fallbacks; failed/incomplete rows are non-confirmatory.",
     )
     parser.add_argument(
         "--include-perturbations",

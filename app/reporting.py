@@ -297,7 +297,9 @@ The workflow first validated what supervised problem to solve, before creating a
 
 ## Modeling decision gate: {agreement}
 
-The workflow intentionally made a modeling decision before fitting any model.
+The workflow intentionally froze the modeling decision before final model
+fitting. Evaluation safeguards may use bounded training-only validation/CV
+probes before that decision; these probes never receive holdout outcomes.
 
 Hard deterministic validation is authoritative for correctness, safety, leakage, preprocessing completeness, and executability. The deterministic model-family recommendation is an independent advisory hypothesis; compatibility scores are heuristics, not predicted accuracy or probabilities. A valid family disagreement is first tested by the bounded pairwise probe on frozen training rows. Weak, tied, or unavailable evidence preserves the original LLM plan; moderate or strong evidence permits blinded A/B reconciliation.
 

@@ -1,0 +1,121 @@
+{
+  "experiment_config_version": "paper-confirmatory-v1",
+  "freeze_rule": "Freeze this file and the git commit before inspecting external live outcomes.",
+  "research_scope": "LLM-based model-family and preprocessing planning for supervised tabular classification/regression under selective deterministic validation",
+  "result_schema_version": "holdout-metrics-v2",
+  "gate_objective_version": "intervention-quality-v1",
+  "deterministic_policy": {
+    "version": "4",
+    "enable_regression_interaction_diagnostics": true,
+    "enable_classification_boundary_diagnostics": true,
+    "high_correlation_threshold": 0.8,
+    "severe_correlation_threshold": 0.9,
+    "low_sample_feature_ratio": 3.0,
+    "moderate_sample_feature_ratio": 8.0,
+    "healthy_sample_feature_ratio": 20.0,
+    "high_effective_features": 100,
+    "very_high_effective_features": 300,
+    "low_effective_features": 20,
+    "moderate_missing_fraction": 0.1,
+    "high_missing_fraction": 0.25,
+    "widespread_missing_feature_fraction": 0.4,
+    "nonlinear_moderate_threshold": 0.15,
+    "nonlinear_high_threshold": 0.35,
+    "classification_boundary_moderate_threshold": 0.1,
+    "classification_boundary_high_threshold": 0.2,
+    "interaction_moderate_threshold": 0.18,
+    "interaction_high_threshold": 0.38,
+    "interaction_strong_pair_threshold": 0.3,
+    "interaction_report_threshold": 0.1,
+    "regression_weak_association_threshold": 0.2,
+    "classification_weak_association_threshold": 0.2,
+    "structural_complexity_moderate_threshold": 0.3,
+    "structural_complexity_high_threshold": 0.6,
+    "structural_complexity_weights": {
+      "mixed": 0.15,
+      "categorical": 0.15,
+      "nonlinear_fraction": 0.2,
+      "nonlinearity_strength": 0.25,
+      "heterogeneity": 0.15,
+      "weak_marginal": 0.1,
+      "boundary": 0.35,
+      "interaction": 0.2
+    },
+    "compatibility_points_source": "app.deterministic_policy.DEFAULT_COMPATIBILITY_POINTS at the recorded git commit"
+  },
+  "empirical_probe_policy": {
+    "policy_version": "v1",
+    "enabled": true,
+    "cv_folds": 3,
+    "minimum_rows": 12,
+    "max_rows": null,
+    "max_configs_per_family": 1,
+    "tie_relative_threshold": 0.02,
+    "weak_relative_threshold": 0.05,
+    "moderate_relative_threshold": 0.1,
+    "strong_relative_threshold": 0.2,
+    "variability_tie_multiplier": 0.5,
+    "variability_weak_multiplier": 0.5,
+    "minimum_consistent_win_rate": 0.6666666666666666
+  },
+  "prompts": {
+    "planner_schema_version": "2026-08-24.blinded-evidence-comparison.v3-empirical-probe",
+    "reconciliation_prompt_version": "2026-08-24.blinded-evidence-comparison.v2-empirical-probe",
+    "reconciliation_mode": "blinded_evidence_comparison"
+  },
+  "modeling": {
+    "requested_model": "gpt-4.1-mini",
+    "planner_model": "gpt-4.1-mini",
+    "reconciler_model": "gpt-4.1-mini",
+    "candidate_model_families": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
+    "preprocessing_option_space": [
+      "one_hot/categorical_unknown_handling=ignore",
+      "ordinal/categorical_unknown_handling=use_encoded_value",
+      "none/categorical_unknown_handling=ignore"
+    ]
+  },
+  "holdout": {
+    "fraction": 0.2,
+    "classification_neutral_tolerance": 0.02,
+    "regression_neutral_tolerance": 0.02,
+    "classification_tolerance_units": "absolute macro-F1 points",
+    "regression_tolerance_units": "relative RMSE improvement",
+    "rmse_epsilon": 1e-12,
+    "primary_delta": "classification=final_macro_f1-initial_macro_f1; regression=(initial_rmse-final_rmse)/max(abs(initial_rmse),rmse_epsilon)"
+  },
+  "splits_and_repetitions": {
+    "split_seeds": [42],
+    "llm_repetitions": 1
+  },
+  "statistics": {
+    "independent_unit": "dataset/task",
+    "primary_estimate": "dataset-macro",
+    "secondary_estimate": "trial-weighted",
+    "bootstrap_method": "dataset_cluster_bootstrap_percentile",
+    "bootstrap_replicates": 10000,
+    "confidence_level": 0.95,
+    "bootstrap_seed": 20260824
+  },
+  "external_benchmark": {
+    "manifest_version": "1.0.0",
+    "classification_suite": 271,
+    "regression_suite": 269,
+    "task_count": 40,
+    "classification_count": 22,
+    "regression_count": 18,
+    "selection_record": "docs/external_benchmark_selection.md"
+  },
+  "ablations": {
+    "schema_version": "modeling-gate-ablation-v1",
+    "primary": ["llm_only", "hard_validation_only", "deterministic_only", "always_reconcile", "probe_direct", "full"],
+    "definitions_source": "evaluation.ablation.ablation_presets"
+  },
+  "prohibited_after_freeze": [
+    "policy tuning based on external performance",
+    "threshold tuning based on external performance",
+    "prompt tuning based on external performance",
+    "candidate-family changes based on external performance",
+    "reconciliation changes based on external performance",
+    "benchmark membership changes based on external performance"
+  ]
+}
