@@ -92,6 +92,7 @@ def render_summary_markdown(
         f"- Repository commit: `{config.get('repository_commit') or 'unavailable'}`.",
         "- Each repetition keeps the case, frozen train/holdout membership, and training-only profile fixed; the intended varying factor is the stochastic LLM response.",
         "- These rows are `modeling_gate` evaluations: benchmark target/task values are fixed context, while `agent_initial` represents only the post-split model-family and preprocessing proposal. `gated_final` is the approved plan after comparison, optional reconciliation, and deterministic validation. Formulation accuracy requires a separate formulation-gate evaluation mode.",
+        "- Primary uncertainty: 95% confidence intervals use a nonparametric dataset/task-cluster bootstrap with replacement. All split seeds and stochastic repetitions belonging to a sampled dataset are retained together; the benchmark dataset/task is the independent sampling unit.",
         "- `empirical_reference` is an evaluation-only ranking of the four supported families using training-only CV; it is not an oracle and never enters runtime decisions.",
         "",
         "## Trial Coverage",

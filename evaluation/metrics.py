@@ -8,6 +8,13 @@ import random
 from statistics import median, pstdev
 from typing import Any
 
+from evaluation.statistics import (
+    DEFAULT_BOOTSTRAP_REPLICATES,
+    DEFAULT_BOOTSTRAP_SEED,
+    cluster_bootstrap_ci,
+    resolve_cluster_key,
+)
+
 
 GATE_OBJECTIVE_VERSION = "intervention-quality-v1"
 
@@ -481,6 +488,23 @@ def _holdout_health(records: list[dict[str, Any]], tolerance: float) -> dict[str
         for record in paired
     )
     deltas = [_holdout_pair(record)[3] for record in paired]
+    delta_ci = cluster_bootstrap_ci(
+        paired,
+        lambda sample: _mean([_holdout_pair(record)[3] for record in sample if _holdout_pair(record)[3] is not None]),
+        "benchmark_case",
+    )
+
+    def outcome_rate(sample: list[dict[str, Any]], name: str) -> float | None:
+        sample_pairs = [record for record in sample if _holdout_pair(record)[3] is not None]
+        counts = Counter(
+            classify_holdout_intervention_outcome(_holdout_pair(record)[3], tolerance, intervention_occurred=True)
+            for record in sample_pairs
+        )
+        return _rate(counts.get(name, 0), len(sample_pairs))
+
+    precision_ci = cluster_bootstrap_ci(paired, lambda sample: outcome_rate(sample, "beneficial"), "benchmark_case")
+    harmful_ci = cluster_bootstrap_ci(paired, lambda sample: outcome_rate(sample, "harmful"), "benchmark_case")
+    neutral_ci = cluster_bootstrap_ci(paired, lambda sample: outcome_rate(sample, "neutral"), "benchmark_case")
     beneficial = outcomes.get("beneficial", 0)
     harmful = outcomes.get("harmful", 0)
     neutral = outcomes.get("neutral", 0)
@@ -497,7 +521,12 @@ def _holdout_health(records: list[dict[str, Any]], tolerance: float) -> dict[str
         "holdout_neutral_intervention_rate": _rate(neutral, denominator),
         "mean_holdout_intervention_delta": _mean(deltas),
         "median_holdout_intervention_delta": _median(deltas),
-        "holdout_intervention_delta_ci": _bootstrap_interval([float(v) for v in deltas]),
+        "holdout_intervention_delta_ci": delta_ci,
+        "intervention_precision_ci": precision_ci,
+        "harmful_intervention_rate_ci": harmful_ci,
+        "neutral_intervention_rate_ci": neutral_ci,
+        "n_datasets_total": len({resolve_cluster_key(record) for record in records}),
+        "n_datasets_eligible": len({resolve_cluster_key(record) for record in paired}),
         "outcome_counts": {
             "beneficial": beneficial,
             "harmful": harmful,
@@ -518,8 +547,8 @@ def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dic
     }
 
 
-def _bootstrap_interval(values: list[float], seed: int = 20260824, samples: int = 1000) -> dict[str, Any]:
-    """Return a deterministic percentile bootstrap interval, or an explicit small-sample result."""
+def iid_bootstrap_ci(values: list[float], seed: int = 20260824, samples: int = 1000) -> dict[str, Any]:
+    """Legacy IID/row bootstrap retained for diagnostics, never paper-primary."""
 
     if not values:
         return {"lower": None, "upper": None, "support": 0, "stable": False}
@@ -860,7 +889,11 @@ def _gate_health(
         ),
         "mean_regret_reduction": _mean(deltas),
         "median_regret_reduction": _median(deltas),
-        "regret_reduction_ci": _bootstrap_interval(deltas),
+        "regret_reduction_ci": cluster_bootstrap_ci(
+            paired,
+            lambda sample: _mean([_record_regret_reduction(record) for record in sample if _record_regret_reduction(record) is not None]),
+            "benchmark_case",
+        ),
         "mean_intervention_regret_reduction": _mean(challenge_deltas),
         "median_intervention_regret_reduction": _median(challenge_deltas),
         "positive_delta_mean": _mean(positive),
@@ -1435,6 +1468,15 @@ def summarize_trials(
             "holdout_neutral_tolerance": holdout_tolerance,
         },
         "thresholds": configured,
+        "uncertainty": {
+            "uncertainty_method": "dataset_cluster_bootstrap_percentile",
+            "cluster_column": "benchmark_case",
+            "bootstrap_replicates": DEFAULT_BOOTSTRAP_REPLICATES,
+            "bootstrap_confidence_level": 0.95,
+            "bootstrap_seed": DEFAULT_BOOTSTRAP_SEED,
+            "independent_unit": "benchmark dataset/task; all split seeds and repetitions retained",
+            "point_estimate_semantics": "trial-weighted for gate_health; dataset-macro estimates are exposed separately",
+        },
         "trial_count": total,
         "completed_trial_count": len(completed),
         "failed_trial_count": len(failed),

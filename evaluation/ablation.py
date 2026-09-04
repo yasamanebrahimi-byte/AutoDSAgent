@@ -16,6 +16,7 @@ from typing import Any, Sequence
 
 from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
 from evaluation.runner import run_evaluation
+from evaluation.statistics import cluster_bootstrap_ci
 
 
 ABLATION_SCHEMA_VERSION = "modeling-gate-ablation-v1"
@@ -204,6 +205,7 @@ def _paired_comparison(
     right = {_unit_key(row): row for row in rows_by_name.get(second, []) if row.get("trial_status") != "failed"}
     shared = sorted(set(left) & set(right), key=str)
     differences: list[float] = []
+    paired_rows: list[dict[str, Any]] = []
     first_better = second_better = tied = 0
     for key in shared:
         a = left[key].get("gated_normalized_regret")
@@ -213,21 +215,29 @@ def _paired_comparison(
         # Positive means the first configuration has lower regret.
         difference = float(b) - float(a)
         differences.append(difference)
+        paired_rows.append({"benchmark_case": key[0], "difference": difference})
         if difference > tolerance:
             first_better += 1
         elif difference < -tolerance:
             second_better += 1
         else:
             tied += 1
+    difference_ci = cluster_bootstrap_ci(
+        paired_rows,
+        lambda sample: mean(row["difference"] for row in sample) if sample else None,
+        "benchmark_case",
+    )
     return {
         "first": first,
         "second": second,
         "paired_units": len(differences),
+        "n_paired_datasets": len({row["benchmark_case"] for row in paired_rows}),
         "first_better": first_better,
         "second_better": second_better,
         "tied": tied,
         "mean_paired_regret_difference_first_advantage": mean(differences) if differences else None,
         "median_paired_regret_difference_first_advantage": median(differences) if differences else None,
+        "paired_regret_difference_ci": difference_ci,
     }
 
 
