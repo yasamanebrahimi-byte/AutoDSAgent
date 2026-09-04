@@ -11,8 +11,13 @@ __pycache__/
 .pytest_eval_*/
 .pytest_full_tmp*/
 # Evaluation bundles are generated outputs; benchmark definitions and runner
-# code live under evaluation/ and remain tracked.
-evaluation_results/
+# code live under evaluation/ and remain tracked. Keep the compact experiment
+# manifest and human-readable report under source control for reproducibility;
+# raw trial rows and large derived JSON artifacts remain ignored.
+evaluation_results/**
+!evaluation_results/**/
+!evaluation_results/**/config.json
+!evaluation_results/**/summary.md
 
 # Optional OpenML cache; benchmark data must remain outside source control.
 .openml_cache/
