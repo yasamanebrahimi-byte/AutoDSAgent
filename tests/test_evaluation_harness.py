@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.schemas import AgentPlan, ConflictResolution, PreprocessingContract
+from app.schemas import ModelingPlan, ModelingResolution, PreprocessingContract
 from app.validation import freeze_supervised_split, training_profile_frame
 from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
 from evaluation.empirical_reference import evaluate_empirical_reference
@@ -49,10 +49,8 @@ def _case(frame: pd.DataFrame, name: str = "fixture", task: str = "classificatio
     )
 
 
-def _plan(method: str = "linear", preprocessing: PreprocessingContract | None = None) -> AgentPlan:
-    return AgentPlan(
-        target_column="target",
-        task_type="classification",
+def _plan(method: str = "linear", preprocessing: PreprocessingContract | None = None) -> ModelingPlan:
+    return ModelingPlan(
         recommended_method=method,
         preprocessing=preprocessing or PreprocessingContract(numeric_scaling="standard"),
         reasoning="The test agent selected a complete supported plan for the benchmark fixture.",
@@ -62,9 +60,7 @@ def _plan(method: str = "linear", preprocessing: PreprocessingContract | None = 
 
 def _deterministic_resolution(context, agent, deterministic):
     del context, agent
-    return ConflictResolution(
-        selected_target_column=deterministic.target_column,
-        selected_task_type=deterministic.task_type,
+    return ModelingResolution(
         selected_method=deterministic.recommended_method,
         selected_preprocessing=deterministic.preprocessing,
         checks=["deterministic_plan_checked"],
@@ -139,7 +135,7 @@ def test_invalid_agent_proposal_is_persisted_and_not_fitted(tmp_path: Path):
         tmp_path / "evaluation",
         cases=[case],
         offline=False,
-        agent_plan_factory=invalid_plan,
+        modeling_plan_factory=invalid_plan,
     )
     trial = _read_trials(tmp_path / "evaluation")[0]
     assert trial["agent_source"] == "mock"
@@ -169,7 +165,7 @@ def test_disagreement_and_reconciliation_fields_are_recorded(tmp_path: Path):
     run_evaluation(
         tmp_path / "evaluation",
         cases=[case],
-        agent_plan_factory=agent_plan,
+        modeling_plan_factory=agent_plan,
         reconciliation_factory=_deterministic_resolution,
     )
     trial = _read_trials(tmp_path / "evaluation")[0]
@@ -191,9 +187,7 @@ def test_valid_soft_challenge_can_side_with_agent(tmp_path: Path):
 
     def agent_resolution(context, agent, deterministic):
         del context, deterministic
-        return ConflictResolution(
-            selected_target_column=agent.target_column,
-            selected_task_type=agent.task_type,
+        return ModelingResolution(
             selected_method=agent.recommended_method,
             selected_preprocessing=agent.preprocessing,
             checks=["both_hard_validated", "agent_preserved"],
@@ -204,7 +198,7 @@ def test_valid_soft_challenge_can_side_with_agent(tmp_path: Path):
     run_evaluation(
         tmp_path / "evaluation",
         cases=[case],
-        agent_plan_factory=agent_plan,
+        modeling_plan_factory=agent_plan,
         reconciliation_factory=agent_resolution,
     )
     trial = _read_trials(tmp_path / "evaluation")[0]
@@ -224,7 +218,7 @@ def test_preprocessing_only_disagreement_is_material(tmp_path: Path):
     run_evaluation(
         tmp_path / "evaluation",
         cases=[case],
-        agent_plan_factory=agent_plan,
+        modeling_plan_factory=agent_plan,
         reconciliation_factory=_deterministic_resolution,
     )
     trial = _read_trials(tmp_path / "evaluation")[0]

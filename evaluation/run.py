@@ -16,7 +16,7 @@ def main() -> None:
         "--suite",
         choices=("local", "external"),
         default="local",
-        help="Benchmark suite to evaluate; local is the backwards-compatible default.",
+        help="Benchmark suite to evaluate; local is the default.",
     )
     parser.add_argument(
         "--tier",
@@ -40,13 +40,7 @@ def main() -> None:
         "--gate-mode",
         choices=("llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"),
         default="probe_first",
-        help="Compare the initial agent, historical gates, or the probe-first intervention gate.",
-    )
-    parser.add_argument(
-        "--reconciliation-mode",
-        choices=("blinded", "legacy"),
-        default="blinded",
-        help="Use source-neutral blinded reconciliation or the legacy prompt baseline.",
+        help="Select the current evaluation decision path.",
     )
     parser.add_argument(
         "--order-swap",
@@ -93,7 +87,6 @@ def main() -> None:
         include_perturbations=args.include_perturbations,
         case_names=args.cases,
         gate_mode=args.gate_mode,
-        reconciliation_mode=args.reconciliation_mode,
         order_swap=args.order_swap,
         empirical_probe_enabled=not args.no_empirical_probe,
         require_live=args.require_live,

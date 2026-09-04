@@ -41,7 +41,7 @@ performance or a guarantee of future generalization; fold variability matters an
 preprocessing was fitted inside each fold. Weigh strong, consistent direct evidence
 more heavily than heuristic point scores, but do not treat its winner as an
 automatic final decision. Do not use holdout values, empirical-reference rankings,
-or historical challenge reliability. Hard validation outcomes describe safety
+or calibration reliability. Hard validation outcomes describe safety
 constraints, not comparative predictive quality. Re-check preprocessing, leakage,
 immutable context, supported methods, and the complete contract before returning
 the selected plan.
@@ -61,8 +61,7 @@ Raw compatibility scores, ranked methods, score margins, deterministic
 confidence, soft-challenge calibration reliability, holdout results,
 candidate-model CV results, empirical-reference results, and source labels are
 not included in the default prompt. They remain in runtime artifacts and
-evaluation logs for audit, policy calibration, and reporting. A legacy prompt
-mode is retained for evaluation baselines only.
+evaluation logs for audit, policy calibration, and reporting.
 
 The structured response adds `selected_proposal` (`A` or `B`), concise strengths
 and weaknesses for both proposals, `decisive_evidence`, `selection_confidence`,
@@ -94,12 +93,11 @@ reconciler.
 
 ## Evaluation modes and metrics
 
-The evaluation harness supports equivalent runs with:
+The evaluation harness supports the current modeling gate with:
 
 ```text
-python -m evaluation.run --reconciliation-mode legacy ...
-python -m evaluation.run --reconciliation-mode blinded ...
-python -m evaluation.run --reconciliation-mode blinded --order-swap ...
+python -m evaluation.run --gate-mode selective ...
+python -m evaluation.run --gate-mode selective --order-swap ...
 ```
 
 `--order-swap` runs paired trials with the same split and evidence in A/B and

@@ -15,8 +15,7 @@ scores with `final_macro_f1 - initial_macro_f1` for classification and
 
 The default, configurable `neutral_tolerance` is `0.02` normalized-regret
 units. A delta whose absolute value is at most that tolerance is `neutral`;
-larger positive and negative deltas are `improved` and `worsened`. The legacy
-`tie` aliases remain in summary JSON so older artifacts remain interpretable.
+larger positive and negative deltas are `improved` and `worsened`.
 
 Normalized regret is zero for the best available training-only empirical
 reference result. Classification regret is `max(0, best_macro_f1 - selected_macro_f1)`;

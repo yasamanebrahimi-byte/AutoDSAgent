@@ -167,7 +167,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="evaluation_results/external_dataset_manifest.json",
+        default="runs/external_dataset_manifest.json",
         help="Manifest JSON output path.",
     )
     parser.add_argument("--case", action="append", dest="case_names", help="Task name; repeatable.")

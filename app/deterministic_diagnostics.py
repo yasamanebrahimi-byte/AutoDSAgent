@@ -1132,7 +1132,7 @@ def compute_deterministic_diagnostics(
         }.get(classification_boundary.boundary_diagnostic_confidence, 0.0)
         boundary_structure_score = classification_boundary.boundary_complexity_score * confidence_weight
     # This is a bounded structural prior for model-family compatibility.  The
-    # legacy relationship terms remain intact; classification boundary evidence
+    # Existing relationship terms remain intact; classification boundary evidence
     # is a separate confidence-weighted term, and regression interaction
     # evidence is added as one modest explicit term.  Neither can silently
     # dominate the policy or be counted as a second copy of every marginal

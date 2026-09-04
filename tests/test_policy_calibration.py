@@ -94,30 +94,54 @@ def test_selection_rule_prefers_expected_candidate_and_retains_when_not_better()
         "current": {
             "policy_candidate": "current",
             "policy_complexity": 0,
-            "mean_normalized_regret": 0.20,
-            "catastrophic_regret_rate": 0.25,
-            "top2_compatibility_rate": 0.70,
+            "utility": 0.0,
+            "catastrophic_introduced_count": 0,
+            "harmful_intervention_rate": 0.20,
+            "catastrophic_prevented_count": 1,
+            "intervention_precision": 0.70,
+            "challenge_recall": 0.70,
+            "median_regret_reduction": 0.20,
+            "unnecessary_intervention_rate": 0.25,
+            "exact_reference_match_rate": 0.70,
         },
         "nonlinear_sensitive": {
             "policy_candidate": "nonlinear_sensitive",
             "policy_complexity": 3,
-            "mean_normalized_regret": 0.10,
-            "catastrophic_regret_rate": 0.10,
-            "top2_compatibility_rate": 0.80,
+            "utility": 1.0,
+            "catastrophic_introduced_count": 0,
+            "harmful_intervention_rate": 0.10,
+            "catastrophic_prevented_count": 2,
+            "intervention_precision": 0.80,
+            "challenge_recall": 0.80,
+            "median_regret_reduction": 0.30,
+            "unnecessary_intervention_rate": 0.10,
+            "exact_reference_match_rate": 0.80,
         },
         "high_dimensional_sensitive": {
             "policy_candidate": "high_dimensional_sensitive",
             "policy_complexity": 3,
-            "mean_normalized_regret": 0.15,
-            "catastrophic_regret_rate": 0.15,
-            "top2_compatibility_rate": 0.75,
+            "utility": 0.5,
+            "catastrophic_introduced_count": 0,
+            "harmful_intervention_rate": 0.15,
+            "catastrophic_prevented_count": 1,
+            "intervention_precision": 0.75,
+            "challenge_recall": 0.75,
+            "median_regret_reduction": 0.25,
+            "unnecessary_intervention_rate": 0.15,
+            "exact_reference_match_rate": 0.75,
         },
         "missingness_sensitive": {
             "policy_candidate": "missingness_sensitive",
             "policy_complexity": 3,
-            "mean_normalized_regret": 0.18,
-            "catastrophic_regret_rate": 0.20,
-            "top2_compatibility_rate": 0.72,
+            "utility": 0.2,
+            "catastrophic_introduced_count": 0,
+            "harmful_intervention_rate": 0.18,
+            "catastrophic_prevented_count": 1,
+            "intervention_precision": 0.72,
+            "challenge_recall": 0.72,
+            "median_regret_reduction": 0.22,
+            "unnecessary_intervention_rate": 0.18,
+            "exact_reference_match_rate": 0.72,
         },
     }
     selected = select_policy_candidate(aggregates, candidates)
@@ -125,9 +149,14 @@ def test_selection_rule_prefers_expected_candidate_and_retains_when_not_better()
     assert selected["recommendation"] == "promote"
 
     for aggregate in aggregates.values():
-        aggregate["mean_normalized_regret"] = 0.20
-        aggregate["catastrophic_regret_rate"] = 0.25
-        aggregate["top2_compatibility_rate"] = 0.70
+        aggregate["utility"] = 0.0
+        aggregate["harmful_intervention_rate"] = 0.20
+        aggregate["catastrophic_prevented_count"] = 1
+        aggregate["intervention_precision"] = 0.70
+        aggregate["challenge_recall"] = 0.70
+        aggregate["median_regret_reduction"] = 0.20
+        aggregate["unnecessary_intervention_rate"] = 0.25
+        aggregate["exact_reference_match_rate"] = 0.70
     retained = select_policy_candidate(aggregates, candidates)
     assert retained["recommendation"] == "retain_current"
 

@@ -5,8 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.pipeline import _validate_before_training, run_analysis
-from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation
+from app.pipeline import run_analysis
 from app.validation import (
     InvariantViolation,
     freeze_supervised_split,
@@ -180,116 +179,6 @@ def test_target_name_indicator_is_advisory_only():
     assert result.status == "passed"
     assert _check(result, "target_name_leakage_review")["severity"] == "warning"
     assert result.direct_leakage_detected is False
-
-
-class _ResolutionAgent:
-    def __init__(self, resolution: ConflictResolution):
-        self.resolution = resolution
-
-    def reconcile(self, question, profile, agent_plan, deterministic):
-        return self.resolution
-
-
-def _agent_plan(target: str, task: str, method: str) -> AgentPlan:
-    return AgentPlan(
-        target_column=target,
-        task_type=task,
-        recommended_method=method,
-        preprocessing=["training_only_imputation"],
-        reasoning="The independent planner selected a compact, inspectable baseline for the supplied schema.",
-        confidence=0.7,
-    )
-
-
-def _recommendation(target: str, task: str, method: str) -> DeterministicRecommendation:
-    return DeterministicRecommendation(
-        target_column=target,
-        task_type=task,
-        recommended_method=method,
-        preprocessing=["training_only_imputation"],
-        reasoning="The deterministic policy selected a supported baseline from observed schema evidence.",
-        evidence=["rows=40"],
-    )
-
-
-def test_agreement_path_still_runs_deterministic_validation():
-    frame = _classification_frame()
-    frame["target"] = "only"
-    plan = _agent_plan("target", "classification", "linear")
-    recommendation = _recommendation("target", "classification", "linear")
-
-    with pytest.raises(InvariantViolation) as error:
-        _validate_before_training(
-            _ResolutionAgent(
-                ConflictResolution(
-                    selected_target_column="target",
-                    selected_task_type="classification",
-                    selected_method="linear",
-                    checks=["agreement"],
-                    justification="The selected proposal matches the deterministic recommendation and remains inspectable.",
-                    confidence=0.9,
-                )
-            ),
-            {"rows": len(frame)},
-            "classify target",
-            plan,
-            recommendation,
-            [],
-            {},
-            offline=False,
-            dataframe=frame,
-        )
-    assert "classification_target_has_two_classes" in str(error.value)
-
-
-def test_reconciliation_cannot_select_incoherent_pair_or_unproposed_method():
-    frame = _classification_frame()
-    frame["other_target"] = np.arange(len(frame), dtype=float)
-    agent = _agent_plan("target", "classification", "linear")
-    deterministic = _recommendation("other_target", "regression", "tree_ensemble")
-    incoherent = ConflictResolution(
-        selected_target_column="target",
-        selected_task_type="regression",
-        selected_method="tree_ensemble",
-        checks=["pair_checked"],
-        justification="The reconciliation agent selected fields from the two proposals for further review.",
-        confidence=0.9,
-    )
-    with pytest.raises(InvariantViolation) as error:
-        _validate_before_training(
-            _ResolutionAgent(incoherent),
-            {"rows": len(frame)},
-            "choose a target",
-            agent,
-            deterministic,
-            [],
-            {},
-            offline=False,
-            dataframe=frame,
-        )
-    assert "regression_target_is_numeric_or_coercible" in str(error.value)
-
-    unsupported = ConflictResolution(
-        selected_target_column="target",
-        selected_task_type="classification",
-        selected_method="boosted_tree",
-        checks=["method_checked"],
-        justification="The reconciliation agent returned a method that was not among the proposed choices.",
-        confidence=0.9,
-    )
-    with pytest.raises(InvariantViolation) as error:
-        _validate_before_training(
-            _ResolutionAgent(unsupported),
-            {"rows": len(frame)},
-            "choose a target",
-            agent,
-            deterministic,
-            [],
-            {},
-            offline=False,
-            dataframe=frame,
-        )
-    assert "reconciliation_method_is_proposed" in str(error.value)
 
 
 def test_offline_invalid_run_persists_failure_and_no_model(tmp_path: Path):

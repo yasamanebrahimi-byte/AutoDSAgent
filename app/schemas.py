@@ -35,12 +35,7 @@ class StrictModel(BaseModel):
 
 
 class PreprocessingContract(StrictModel):
-    """The complete, executable learned-preprocessing policy.
-
-    The small legacy alias migration is intentionally allow-listed.  It keeps
-    old serialized plans readable while ensuring every new artifact contains
-    this typed object rather than a decorative list of strings.
-    """
+    """The complete, executable learned-preprocessing policy."""
 
     numeric_imputation: NumericImputation = "median"
     categorical_imputation: CategoricalImputation = "most_frequent"
@@ -53,42 +48,6 @@ class PreprocessingContract(StrictModel):
     datetime_handling: FeatureHandling = "exclude"
     infinity_handling: InfinityHandling = "replace_with_missing"
     fit_inside_pipeline: StrictBool = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_allowlisted_legacy_aliases(cls, value: object) -> object:
-        if not isinstance(value, list):
-            return value
-        aliases = {
-            "training_only_imputation": {
-                "numeric_imputation": "median",
-                "categorical_imputation": "most_frequent",
-            },
-            "scale_numeric_features": {"numeric_scaling": "standard"},
-            "one_hot_encode_categories": {
-                "categorical_encoding": "one_hot",
-                "categorical_unknown_handling": "ignore",
-            },
-            "schema_aware_encoding": {
-                "categorical_encoding": "one_hot",
-                "categorical_unknown_handling": "ignore",
-            },
-            "ordinal_encode_categories": {
-                "categorical_encoding": "ordinal",
-                "categorical_unknown_handling": "use_encoded_value",
-            },
-            "ignore_high_cardinality_identifiers": {
-                "identifier_handling": "exclude",
-                "high_cardinality_handling": "exclude",
-            },
-            "replace_infinity_with_missing": {"infinity_handling": "replace_with_missing"},
-        }
-        migrated: dict[str, object] = {}
-        for alias in value:
-            if not isinstance(alias, str) or alias not in aliases:
-                raise ValueError(f"Unsupported legacy preprocessing option: {alias!r}")
-            migrated.update(aliases[alias])
-        return migrated
 
     @model_validator(mode="after")
     def validate_executable_encoding(self) -> "PreprocessingContract":
@@ -157,9 +116,8 @@ class ModelingResolution(StrictModel):
     checks: list[str] = Field(min_length=1, max_length=12)
     justification: str = Field(min_length=20, max_length=1600)
     confidence: float = Field(ge=0, le=1)
-    # The label is intentionally optional for backward-compatible mocks and
-    # legacy artifacts.  Live blinded reconciliation is instructed to return
-    # it, and the pipeline infers it from the selected contract when absent.
+    # The label is optional for lightweight test doubles; the pipeline infers it
+    # from the selected contract when a reconciler omits it.
     selected_proposal: Optional[ProposalLabel] = None
     proposal_a_strengths: list[str] = Field(default_factory=list, max_length=8)
     proposal_a_weaknesses: list[str] = Field(default_factory=list, max_length=8)
@@ -207,9 +165,7 @@ class SoftChallengeArtifact(StrictModel):
     proposal_b_source: Optional[Literal["agent", "deterministic"]] = None
     selected_proposal: Optional[ProposalLabel] = None
     selected_proposal_source: Optional[Literal["agent", "deterministic"]] = None
-    # ``status`` retains the legacy disagreement/agreement projection.  The
-    # explicit decision fields below are authoritative for selective policy
-    # behavior and distinguish an abstention from an agreement.
+    # The explicit decision fields distinguish an abstention from agreement.
     decision: Literal["agree", "challenge", "abstain"] = "agree"
     status_detail: Literal["agreement", "challenged", "abstained", "invalid", "unavailable"] = "agreement"
     decision_reason: Optional[str] = None
@@ -243,20 +199,6 @@ class ModelingGateArtifact(StrictModel):
     hard_validation: HardValidationArtifact
     soft_challenge: SoftChallengeArtifact
     final: dict[str, Any] = Field(default_factory=dict)
-
-
-class AgentPlan(StrictModel):
-    """Legacy combined plan retained for evaluation and API compatibility.
-
-    Runtime production orchestration uses FormulationPlan plus ModelingPlan.
-    """
-
-    target_column: str = Field(description="The outcome column to predict.")
-    task_type: TaskType
-    recommended_method: Method
-    preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
-    reasoning: str = Field(min_length=20, max_length=1200)
-    confidence: float = Field(ge=0, le=1)
 
 
 class ClassificationTargetDiagnostics(StrictModel):
@@ -343,8 +285,7 @@ class DeterministicDiagnostics(StrictModel):
     """Compact, training-only facts used by the deterministic policy."""
 
     rows: int = Field(ge=0)
-    # Explicit alias for runtime/calibration consumers.  ``rows`` remains for
-    # compatibility with existing artifacts and tests.
+    # Explicit alias for runtime and calibration consumers.
     training_row_count: Optional[int] = Field(default=None, ge=0)
     usable_features: int = Field(ge=0)
     excluded_features: int = Field(ge=0)
@@ -424,23 +365,6 @@ class DeterministicRecommendation(StrictModel):
     runner_up_score: Optional[float] = Field(default=None, ge=0, le=100)
     score_margin: Optional[float] = Field(default=None, ge=0, le=100)
     confidence: ConfidenceLevel = "low"
-
-
-class ConflictResolution(StrictModel):
-    selected_target_column: str
-    selected_task_type: TaskType
-    selected_method: Method
-    selected_preprocessing: PreprocessingContract = Field(default_factory=PreprocessingContract)
-    checks: list[str] = Field(min_length=1, max_length=8)
-    justification: str = Field(min_length=20, max_length=1600)
-    confidence: float = Field(ge=0, le=1)
-    selected_proposal: Optional[ProposalLabel] = None
-    proposal_a_strengths: list[str] = Field(default_factory=list, max_length=8)
-    proposal_a_weaknesses: list[str] = Field(default_factory=list, max_length=8)
-    proposal_b_strengths: list[str] = Field(default_factory=list, max_length=8)
-    proposal_b_weaknesses: list[str] = Field(default_factory=list, max_length=8)
-    decisive_evidence: list[str] = Field(default_factory=list, max_length=8)
-    selection_confidence: Optional[ConfidenceLevel] = None
 
 
 class CleaningPlan(StrictModel):

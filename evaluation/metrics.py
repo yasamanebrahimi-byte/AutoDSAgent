@@ -345,11 +345,8 @@ def _final_hard_invalid(record: dict[str, Any]) -> bool:
 def _reconciliation_was_invoked(record: dict[str, Any]) -> bool:
     """Return whether the saved row records an actual reconciliation attempt.
 
-    Some legacy `llm_only` rows retain the disagreement-derived
-    `reconciliation_invoked` flag even though the gate records
-    `reconciliation_status` as `not_invoked`. The status disambiguates that
-    stale flag without changing invocation accounting for succeeded or failed
-    reconciliation attempts.
+    The explicit status disambiguates the invocation flag for decision modes
+    that intentionally preserve an initial proposal without reconciling it.
     """
 
     return bool(record.get("reconciliation_invoked")) and record.get(
@@ -584,7 +581,7 @@ def _gate_health(
         "improved": improved,
         "worsened": worsened,
         "neutral": neutral,
-        # Legacy aliases remain in the serialized summary for historical data.
+        # Keep the compact tie count alongside the explicit neutral count.
         "tie": neutral,
         "not_comparable": len(challenges) - comparable_challenges,
     }

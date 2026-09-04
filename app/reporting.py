@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from app.schemas import (
-    AgentPlan,
     CleaningPlan,
     DeterministicRecommendation,
+    ModelingPlan,
     ReportDraft,
 )
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -197,7 +199,7 @@ print(result)
 def render_report(
     question: str,
     profile: dict[str, Any],
-    agent_plan: AgentPlan,
+    modeling_plan: ModelingPlan,
     deterministic: DeterministicRecommendation,
     validation: dict[str, Any],
     cleaning_plan: CleaningPlan,
@@ -301,7 +303,7 @@ Hard deterministic validation is authoritative for correctness, safety, leakage,
 
 | Source | Approved formulation | Method |
 | --- | --- | --- |
-| Modeling agent | <code>{validation.get('selected_target_column')}</code> / <code>{validation.get('selected_task_type')}</code> | <code>{agent_plan.recommended_method}</code> |
+| Modeling agent | <code>{validation.get('selected_target_column')}</code> / <code>{validation.get('selected_task_type')}</code> | <code>{modeling_plan.recommended_method}</code> |
 | Deterministic recommender | <code>{deterministic.target_column}</code> / <code>{deterministic.task_type}</code> | <code>{deterministic.recommended_method}</code> |
 | Final approved plan | <code>{validation['selected_target_column']}</code> / <code>{validation['selected_task_type']}</code> | <code>{chosen}</code> |
 
@@ -327,7 +329,7 @@ Selected-family score contributions:
 
 Hard validation: <code>{hard_validation.get('status', 'not recorded')}</code>; intervention required: <code>{hard_validation.get('intervention_required', False)}</code>; initial proposal hard-invalid: <code>{hard_validation.get('initial_hard_invalid', False)}</code>.
 
-Decision path: <code>{validation.get('decision_path', 'not recorded')}</code>; soft artifact status: <code>{soft_challenge.get('status', 'not recorded')}</code>; decision: <code>{soft_challenge.get('decision', 'not recorded')}</code>; decision reason: <code>{soft_challenge.get('decision_reason', 'not recorded')}</code>; method disagreement: <code>{soft_challenge.get('method_disagreement', False)}</code>; preprocessing disagreement: <code>{soft_challenge.get('preprocessing_disagreement', False)}</code>; deterministic confidence: <code>{soft_challenge.get('deterministic_confidence', deterministic.confidence)}</code>; score margin: <code>{soft_challenge.get('score_margin', deterministic.score_margin)}</code>; historical calibration metadata is non-authoritative in production; reconciliation invoked: <code>{soft_challenge.get('reconciliation_invoked', False)}</code>.
+Decision path: <code>{validation.get('decision_path', 'not recorded')}</code>; soft artifact status: <code>{soft_challenge.get('status', 'not recorded')}</code>; decision: <code>{soft_challenge.get('decision', 'not recorded')}</code>; decision reason: <code>{soft_challenge.get('decision_reason', 'not recorded')}</code>; method disagreement: <code>{soft_challenge.get('method_disagreement', False)}</code>; preprocessing disagreement: <code>{soft_challenge.get('preprocessing_disagreement', False)}</code>; deterministic confidence: <code>{soft_challenge.get('deterministic_confidence', deterministic.confidence)}</code>; score margin: <code>{soft_challenge.get('score_margin', deterministic.score_margin)}</code>; calibration metadata is non-authoritative in production; reconciliation invoked: <code>{soft_challenge.get('reconciliation_invoked', False)}</code>.
 
 ### Limited training-only empirical comparison
 

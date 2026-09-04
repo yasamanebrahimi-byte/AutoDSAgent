@@ -44,7 +44,7 @@ class OpenMLBenchmarkSpec:
     # The frozen AMLB dimensions were recorded from the complete supervised
     # table, while OpenML's X/y APIs return X without the target.  Keep this
     # compatibility detail out of the serialized manifest and default direct
-    # test/custom specs to the historical raw-feature interpretation.
+    # test/custom specs to the raw-feature interpretation.
     feature_count_includes_target: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:

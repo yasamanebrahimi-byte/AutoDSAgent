@@ -18,13 +18,13 @@ from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
 from app.llm import LLMUnavailable, PROMPT_SCHEMA_VERSION, OpenAIAgents
 from app.pipeline import (
-    _fallback_agent_plan,
-    _fallback_resolution,
-    _validate_before_training,
+    _fallback_modeling_plan,
+    _fallback_modeling_resolution,
+    _validate_modeling_gate,
 )
 from app.soft_challenge import SOFT_CHALLENGE_POLICY_VERSION, load_calibration_artifact
 from app.preprocessing import compare_preprocessing_plans
-from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation, PreprocessingContract
+from app.schemas import ModelingPlan, ModelingResolution, DeterministicRecommendation, PreprocessingContract
 from app.validation import (
     FrozenSplit,
     InvariantViolation,
@@ -53,9 +53,9 @@ from evaluation.metrics import (
 from evaluation.perturbations import Perturbation, default_perturbations
 
 
-AgentPlanFactory = Callable[[dict[str, Any]], AgentPlan]
-ReconciliationFactory = Callable[
-    [dict[str, Any], AgentPlan, DeterministicRecommendation], ConflictResolution
+ModelingPlanFactory = Callable[[dict[str, Any]], ModelingPlan]
+ModelingReconciliationFactory = Callable[
+    [dict[str, Any], ModelingPlan, DeterministicRecommendation], ModelingResolution
 ]
 
 
@@ -73,7 +73,6 @@ class EvaluationConfig:
     prompt_schema_version: str = PROMPT_SCHEMA_VERSION
     repository_commit: str | None = None
     gate_mode: str = "selective"
-    reconciliation_mode: str = "blinded"
     order_swap: bool = False
     empirical_probe_enabled: bool = True
     split_seeds: tuple[int, ...] = (42,)
@@ -101,8 +100,6 @@ class EvaluationConfig:
             raise ValueError("test_size must be between 0.10 and 0.50")
         if self.gate_mode not in {"llm_only", "deterministic_only", "always_reconcile", "selective", "probe_first"}:
             raise ValueError("Unsupported gate_mode.")
-        if self.reconciliation_mode not in {"blinded", "legacy"}:
-            raise ValueError("reconciliation_mode must be 'blinded' or 'legacy'.")
         if not self.split_seeds:
             raise ValueError("split_seeds must contain at least one seed.")
         if self.soft_challenge_strategy not in {"calibrated", "high_confidence_only"}:
@@ -114,37 +111,20 @@ class _EvaluationGateAgent:
         self,
         *,
         live_agents: OpenAIAgents | None,
-        reconciliation_factory: ReconciliationFactory | None,
+        reconciliation_factory: ModelingReconciliationFactory | None,
         context: dict[str, Any],
     ) -> None:
         self.live_agents = live_agents
         self.reconciliation_factory = reconciliation_factory
         self.context = context
 
-    def reconcile(
+    def reconcile_modeling(
         self,
         question: str,
         profile: dict[str, Any],
-        agent_plan: AgentPlan,
+        modeling_plan: ModelingPlan,
         deterministic: dict[str, Any],
-    ) -> ConflictResolution:
-        if self.reconciliation_factory is not None:
-            recommendation = DeterministicRecommendation.model_validate(
-                {
-                    key: deterministic[key]
-                    for key in (
-                        "target_column",
-                        "task_type",
-                        "recommended_method",
-                        "preprocessing",
-                        "reasoning",
-                        "evidence",
-                    )
-                }
-            )
-            return self.reconciliation_factory(self.context, agent_plan, recommendation)
-        if self.live_agents is not None:
-            return self.live_agents.reconcile(question, profile, agent_plan, deterministic)
+    ) -> ModelingResolution:
         recommendation = DeterministicRecommendation.model_validate(
             {
                 key: deterministic[key]
@@ -158,7 +138,11 @@ class _EvaluationGateAgent:
                 )
             }
         )
-        return _fallback_resolution(agent_plan, recommendation)
+        if self.reconciliation_factory is not None:
+            return self.reconciliation_factory(self.context, modeling_plan, recommendation)
+        if self.live_agents is not None:
+            return self.live_agents.reconcile_modeling(question, profile, modeling_plan, deterministic)
+        return _fallback_modeling_resolution(modeling_plan, recommendation)
 
 
 def _jsonable(value: Any) -> Any:
@@ -226,7 +210,12 @@ def _blocking_failed_check_codes(payload: dict[str, Any] | None) -> list[str]:
     ]
 
 
-def _plan_fields(plan: AgentPlan | None) -> dict[str, Any]:
+def _plan_fields(
+    plan: ModelingPlan | None,
+    *,
+    target_column: str | None = None,
+    task_type: str | None = None,
+) -> dict[str, Any]:
     if plan is None:
         return {
             "target": None,
@@ -235,8 +224,8 @@ def _plan_fields(plan: AgentPlan | None) -> dict[str, Any]:
             "preprocessing": None,
         }
     return {
-        "target": plan.target_column,
-        "task": plan.task_type,
+        "target": target_column,
+        "task": task_type,
         "method": plan.recommended_method,
         "preprocessing": plan.preprocessing.model_dump(mode="json"),
     }
@@ -247,9 +236,12 @@ def _plan_matches(
     task: str | None,
     method: str | None,
     preprocessing: dict[str, Any] | None,
-    plan: AgentPlan | None,
+    plan: ModelingPlan | None,
+    *,
+    expected_target: str,
+    expected_task: str,
 ) -> bool:
-    fields = _plan_fields(plan)
+    fields = _plan_fields(plan, target_column=expected_target, task_type=expected_task)
     return (
         target == fields["target"]
         and task == fields["task"]
@@ -261,7 +253,7 @@ def _plan_matches(
 def _validate_initial_plan(
     dataframe: pd.DataFrame,
     split: FrozenSplit,
-    plan: AgentPlan,
+    plan: ModelingPlan,
     *,
     expected_target: str,
     expected_task: str,
@@ -270,8 +262,8 @@ def _validate_initial_plan(
 ) -> Any:
     result = validate_training_plan(
         dataframe,
-        plan.target_column,
-        plan.task_type,
+        expected_target,
+        expected_task,
         plan.recommended_method,
         test_size=test_size,
         random_state=random_state,
@@ -279,17 +271,6 @@ def _validate_initial_plan(
         split=split,
         row_positions=list(range(len(dataframe))),
     )
-    if plan.target_column != expected_target or plan.task_type != expected_task:
-        result.add_failure(
-            "established_target_task_is_immutable",
-            "The modeling agent changed the established target/task after the supervised holdout was frozen.",
-            {
-                "established_target": expected_target,
-                "established_task": expected_task,
-                "agent_target": plan.target_column,
-                "agent_task": plan.task_type,
-            },
-        )
     return result
 
 
@@ -297,13 +278,13 @@ def _choose_source(
     *,
     config: EvaluationConfig,
     agents: OpenAIAgents,
-    plan_factory: AgentPlanFactory | None,
+    plan_factory: ModelingPlanFactory | None,
     context: dict[str, Any],
     training_profile: dict[str, Any],
     case: BenchmarkCase,
     warnings: list[str],
     require_live: bool = False,
-) -> tuple[AgentPlan, str, str, str, str | None]:
+) -> tuple[ModelingPlan, str, str, str, str | None]:
     if plan_factory is not None:
         return plan_factory(context), "mock", "mock", "mock", None
     if config.offline or not agents.available:
@@ -312,7 +293,7 @@ def _choose_source(
         if not config.offline:
             warnings.append("OPENAI_API_KEY is unavailable; this trial used the offline fallback.")
         return (
-            _fallback_agent_plan(
+            _fallback_modeling_plan(
                 training_profile,
                 case.question,
                 case.target_column,
@@ -331,9 +312,7 @@ def _choose_source(
             case.expected_task_type,
         )
         return (
-            AgentPlan(
-                target_column=case.target_column,
-                task_type=case.expected_task_type,
+            ModelingPlan(
                 recommended_method=modeling_plan.recommended_method,
                 preprocessing=modeling_plan.preprocessing,
                 reasoning=modeling_plan.reasoning,
@@ -349,7 +328,7 @@ def _choose_source(
             raise
         warnings.append(f"modeling agent fallback used: {_redact_error(exc)}")
         return (
-            _fallback_agent_plan(
+            _fallback_modeling_plan(
                 training_profile,
                 case.question,
                 case.target_column,
@@ -398,12 +377,12 @@ def _proposal_cache_key(
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _plan_from_cache_payload(payload: dict[str, Any]) -> AgentPlan | None:
-    values = payload.get("agent_plan") if isinstance(payload, dict) else None
+def _plan_from_cache_payload(payload: dict[str, Any]) -> ModelingPlan | None:
+    values = payload.get("modeling_plan") if isinstance(payload, dict) else None
     if not isinstance(values, dict):
         return None
     try:
-        return AgentPlan.model_validate(values)
+        return ModelingPlan.model_validate(values)
     except Exception:
         return None
 
@@ -433,15 +412,15 @@ def _run_trial(
     trial_number: int,
     config: EvaluationConfig,
     *,
-    plan_factory: AgentPlanFactory | None,
-    reconciliation_factory: ReconciliationFactory | None,
+    plan_factory: ModelingPlanFactory | None,
+    reconciliation_factory: ModelingReconciliationFactory | None,
     agents: OpenAIAgents,
     reconciler_agents: OpenAIAgents,
     empirical_reference_cache: dict[str, dict[str, Any]],
     variant: str = "standard",
     proposal_order: tuple[str, str] | None = None,
     order_swap_pair_id: str | None = None,
-    initial_plan_override: AgentPlan | None = None,
+    initial_plan_override: ModelingPlan | None = None,
     initial_source_override: str | None = None,
     initial_model_override: str | None = None,
     initial_request_status_override: str | None = None,
@@ -552,7 +531,7 @@ def _run_trial(
         agent_request_status = "cached"
         agent_request_error = None
     elif config.gate_mode == "deterministic_only":
-        plan = _fallback_agent_plan(
+        plan = _fallback_modeling_plan(
             training_profile,
             case.question,
             case.target_column,
@@ -588,7 +567,11 @@ def _run_trial(
         test_size=config.test_size,
         random_state=split_seed,
     )
-    initial_fields = _plan_fields(plan)
+    initial_fields = _plan_fields(
+        plan,
+        target_column=case.target_column,
+        task_type=case.expected_task_type,
+    )
     deterministic: DeterministicRecommendation | None = None
     deterministic_failure: str | None = None
     try:
@@ -608,9 +591,7 @@ def _run_trial(
         warnings.append(f"Deterministic recommendation failed closed: {_redact_error(exc)}")
 
     if config.gate_mode == "deterministic_only" and deterministic is not None:
-        plan = AgentPlan(
-            target_column=deterministic.target_column,
-            task_type=deterministic.task_type,
+        plan = ModelingPlan(
             recommended_method=deterministic.recommended_method,
             preprocessing=deterministic.preprocessing,
             reasoning=deterministic.reasoning,
@@ -633,7 +614,7 @@ def _run_trial(
         and agent_request_status not in {"failed", "failed_fallback"}
     ):
         proposal_cache[proposal_key] = {
-            "agent_plan": plan.model_dump(mode="json"),
+            "modeling_plan": plan.model_dump(mode="json"),
             "source": agent_source,
             "model": agent_model,
             "request_status": agent_request_status,
@@ -647,7 +628,9 @@ def _run_trial(
         }
 
     comparison: dict[str, Any] | None = None
-    target_disagreement = task_disagreement = method_disagreement = False
+    target_disagreement = False
+    task_disagreement = False
+    method_disagreement = False
     preprocessing_disagreement = False
     agreement_status = "unavailable"
     reconciliation_invoked = False
@@ -674,30 +657,23 @@ def _run_trial(
             deterministic.preprocessing,
             requirements,
         )
-        target_disagreement = plan.target_column != deterministic.target_column
-        task_disagreement = plan.task_type != deterministic.task_type
         method_disagreement = plan.recommended_method != deterministic.recommended_method
         preprocessing_disagreement = bool(comparison["material_differences"])
         agreement_status = (
             "agreement"
-            if not (target_disagreement or task_disagreement or method_disagreement or preprocessing_disagreement)
+            if not (method_disagreement or preprocessing_disagreement)
             else "disagreement"
-        )
-        reconciliation_invoked = agreement_status == "disagreement" and not (
-            target_disagreement or task_disagreement
         )
         if config.gate_mode in {"llm_only", "deterministic_only"}:
             agreement_status = config.gate_mode
-            final_fields = _plan_fields(plan)
+            final_fields = _plan_fields(
+                plan,
+                target_column=case.target_column,
+                task_type=case.expected_task_type,
+            )
             final_validation = initial_validation.as_dict()
             final_valid = initial_validation.status == "passed"
             training_allowed = final_valid
-        elif target_disagreement or task_disagreement:
-            gate_error = (
-                "[established_target_task_is_immutable] The modeling agent changed the established "
-                "target/task after the supervised holdout was frozen."
-            )
-            reconciliation_status = "not_invoked"
         else:
             gate_agent = _EvaluationGateAgent(
                 live_agents=None if plan_factory is not None or config.offline else reconciler_agents,
@@ -709,7 +685,7 @@ def _run_trial(
             )
             try:
                 gate_sources: dict[str, str] = {}
-                gate_result = _validate_before_training(
+                gate_result = _validate_modeling_gate(
                     gate_agent,
                     training_profile,
                     case.question,
@@ -724,10 +700,9 @@ def _run_trial(
                     reconciliation_profile=training_profile,
                     split=split,
                     row_positions=list(range(len(frame))),
-                    established_target=case.target_column,
-                    established_task=case.expected_task_type,
+                    approved_target=case.target_column,
+                    approved_task=case.expected_task_type,
                     soft_challenge_mode=config.gate_mode,
-                    reconciliation_mode=config.reconciliation_mode,
                     proposal_order_override=proposal_order,
                     soft_challenge_strategy=config.soft_challenge_strategy,
                     strict_live=config.require_live,
@@ -736,15 +711,12 @@ def _run_trial(
                         random_state=split_seed,
                     ),
                 )
-                # The gate may also reconcile a hard-invalid initial proposal
-                # whose method-family comparison looks like agreement.  The
-                # artifact is the source of truth for invocation metadata.
                 reconciliation_invoked = gate_result.get("reconciliation") is not None
                 reconciliation_status = (
                     "succeeded" if reconciliation_invoked else "not_invoked"
                 )
                 if reconciliation_invoked:
-                    reconciliation_agent_source = gate_sources.get("reconciliation")
+                    reconciliation_agent_source = gate_sources.get("modeling_reconciliation")
                     if plan_factory is not None or reconciliation_factory is not None:
                         reconciliation_agent_source = "mock"
                     elif config.offline:
@@ -788,6 +760,8 @@ def _run_trial(
         final_fields["method"],
         final_fields["preprocessing"],
         plan,
+        expected_target=case.target_column,
+        expected_task=case.expected_task_type,
     )
     unsafe_plan_intercepted = initial_validation.status == "failed" and not proceeded_unchanged
 
@@ -834,8 +808,8 @@ def _run_trial(
     agent_plan_cv = (
         evaluate_plan_cv(
             training_frame,
-            plan.target_column,
-            plan.task_type,
+            case.target_column,
+            case.expected_task_type,
             plan.recommended_method,
             plan.preprocessing,
             random_state=split_seed,
@@ -859,8 +833,8 @@ def _run_trial(
         evaluate_holdout_plan(
             frame,
             split,
-            plan.target_column,
-            plan.task_type,
+            case.target_column,
+            case.expected_task_type,
             plan.recommended_method,
             plan.preprocessing,
             random_state=split_seed,
@@ -1349,16 +1323,14 @@ def _failed_trial_record(
     }
 
 
-def _cached_plan_from_trial(record: dict[str, Any]) -> AgentPlan | None:
+def _cached_plan_from_trial(record: dict[str, Any]) -> ModelingPlan | None:
     """Recover the first pair member's proposal for an order-swap rerun."""
 
     values = record.get("agent_initial")
     if not isinstance(values, dict):
         return None
     try:
-        return AgentPlan(
-            target_column=str(values["target"]),
-            task_type=values["task"],
+        return ModelingPlan(
             recommended_method=values["method"],
             preprocessing=values["preprocessing"],
             reasoning=str(values.get("reasoning", "The cached order-swap proposal was retained.")),
@@ -1382,13 +1354,11 @@ def run_evaluation(
     include_perturbations: bool = False,
     thresholds: dict[str, float] | None = None,
     case_names: Sequence[str] | None = None,
-    agent_plan_factory: AgentPlanFactory | None = None,
-    reconciliation_factory: ReconciliationFactory | None = None,
-    # Preserve the historical public-harness default. Research runs should
-    # pass gate_mode="selective" explicitly; the production pipeline defaults
-    # to selective intervention.
+    modeling_plan_factory: ModelingPlanFactory | None = None,
+    reconciliation_factory: ModelingReconciliationFactory | None = None,
+    # The harness default exercises the always-reconcile comparison; research
+    # ablations pass their explicit current-method gate mode.
     gate_mode: str = "always_reconcile",
-    reconciliation_mode: str = "blinded",
     order_swap: bool = False,
     empirical_probe_enabled: bool = True,
     resume: bool = False,
@@ -1412,7 +1382,6 @@ def run_evaluation(
         spec_values = ablation_spec.as_dict() if hasattr(ablation_spec, "as_dict") else dict(ablation_spec)
         gate_mode = spec_values.get("decision_mode", gate_mode)
         soft_challenge_strategy = spec_values.get("soft_challenge_strategy", soft_challenge_strategy)
-        reconciliation_mode = spec_values.get("reconciliation_mode", reconciliation_mode)
         empirical_probe_enabled = bool(spec_values.get("empirical_probe", empirical_probe_enabled))
         enable_regression_interaction_diagnostics = bool(
             spec_values.get(
@@ -1445,7 +1414,6 @@ def run_evaluation(
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
         repository_commit=_repository_commit(),
         gate_mode=gate_mode,
-        reconciliation_mode=reconciliation_mode,
         order_swap=order_swap,
         empirical_probe_enabled=empirical_probe_enabled,
         prompt_schema_version=PROMPT_SCHEMA_VERSION,
@@ -1499,7 +1467,6 @@ def run_evaluation(
         "reconciler_model_effective": reconciler_agents.model,
         "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
         "gate_mode": config.gate_mode,
-        "reconciliation_mode": config.reconciliation_mode,
         "order_swap": config.order_swap,
         "empirical_probe_enabled": config.empirical_probe_enabled,
         "require_live": config.require_live,
@@ -1512,10 +1479,6 @@ def run_evaluation(
         "ablation_schema_version": config.ablation_schema_version,
         "ablation_spec": spec_values,
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
-        "reconciliation_mode_definitions": {
-            "legacy": "source-labeled reconciliation prompt retained as an evaluation baseline",
-            "blinded": "source-neutral Proposal A/Proposal B evidence-comparison prompt",
-        },
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
             "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
@@ -1563,25 +1526,10 @@ def run_evaluation(
             raise ValueError("--resume requires an existing evaluation bundle with config.json and trials.jsonl.")
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
         compare_keys = [key for key in stable_config if key != "repository_commit"]
-        legacy_model = existing_config.get(
-            "agent_model_requested",
-            existing_config.get("model", "gpt-4.1-mini"),
-        )
-        legacy_defaults = {
-            "suite": "local",
-            "tier": None,
-            "model": legacy_model,
-            "planner_model": legacy_model,
-            "reconciler_model": legacy_model,
-            "planner_model_requested": legacy_model,
-            "reconciler_model_requested": legacy_model,
-            "planner_model_effective": legacy_model,
-            "reconciler_model_effective": legacy_model,
-        }
         mismatches = [
             key
             for key in compare_keys
-            if existing_config.get(key, legacy_defaults.get(key)) != stable_config.get(key)
+            if existing_config.get(key) != stable_config.get(key)
         ]
         if mismatches:
             raise ValueError(
@@ -1681,7 +1629,7 @@ def run_evaluation(
                                 perturbation,
                                 trial_number,
                                 config,
-                                plan_factory=agent_plan_factory,
+                                plan_factory=modeling_plan_factory,
                                 reconciliation_factory=reconciliation_factory,
                                 agents=agents,
                                 reconciler_agents=reconciler_agents,

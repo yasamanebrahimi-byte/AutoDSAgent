@@ -9,7 +9,7 @@ from evaluation.benchmarks import BenchmarkCase
 from evaluation.empirical_reference import evaluate_holdout_plan
 from evaluation.metrics import normalized_regret, summarize_trials
 from evaluation.runner import run_evaluation
-from app.schemas import AgentPlan, PreprocessingContract
+from app.schemas import ModelingPlan, PreprocessingContract
 from app.validation import freeze_supervised_split
 
 
@@ -70,16 +70,14 @@ def test_initial_agent_factory_context_excludes_downstream_decisions(tmp_path: P
 
     def plan_factory(context):
         captured.append(context)
-        return AgentPlan(
-            target_column="target",
-            task_type="classification",
+        return ModelingPlan(
             recommended_method="linear",
             preprocessing=PreprocessingContract(numeric_scaling="standard"),
             reasoning="The initial agent selects a simple baseline from the training-only schema evidence.",
             confidence=0.7,
         )
 
-    run_evaluation(tmp_path / "evaluation", cases=[_case()], repetitions=2, agent_plan_factory=plan_factory)
+    run_evaluation(tmp_path / "evaluation", cases=[_case()], repetitions=2, modeling_plan_factory=plan_factory)
 
     assert len(captured) == 2
     for context in captured:
@@ -215,7 +213,7 @@ def test_empirical_reference_is_called_after_the_runtime_gate(monkeypatch, tmp_p
     import evaluation.runner as runner
 
     events: list[str] = []
-    original_gate = runner._validate_before_training
+    original_gate = runner._validate_modeling_gate
     original_reference = runner.evaluate_empirical_reference
 
     def gate(*args, **kwargs):
@@ -226,7 +224,7 @@ def test_empirical_reference_is_called_after_the_runtime_gate(monkeypatch, tmp_p
         events.append("reference")
         return original_reference(*args, **kwargs)
 
-    monkeypatch.setattr(runner, "_validate_before_training", gate)
+    monkeypatch.setattr(runner, "_validate_modeling_gate", gate)
     monkeypatch.setattr(runner, "evaluate_empirical_reference", reference)
     run_evaluation(tmp_path / "evaluation", cases=[_case()], offline=True)
 

@@ -97,7 +97,6 @@ def test_deterministic_recommender_failure_fails_closed_before_training(
 
     monkeypatch.setattr(pipeline, "deterministic_recommendation", fail_deterministic)
     monkeypatch.setattr(pipeline, "fit_selected_model", record_fit)
-    monkeypatch.setattr(pipeline.OpenAIAgents, "reconcile", record_reconciliation)
 
     with pytest.raises(DeterministicRecommendationUnavailable):
         run_analysis(
@@ -114,7 +113,7 @@ def test_deterministic_recommender_failure_fails_closed_before_training(
     decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
 
-    assert decision["agent_plan"] is not None
+    assert decision["modeling_plan"] is not None
     assert decision["deterministic_recommendation"] is None
     assert decision["validation"] is None
     assert decision["validation_gate_status"] == "not_completed"

@@ -716,54 +716,27 @@ def _aggregate_utility(aggregate: dict[str, Any]) -> float | None:
 
 
 def policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, ...]:
-    """Rank by intervention quality; retain a legacy fallback for old artifacts/tests."""
+    """Rank policy candidates by the current intervention-quality objective."""
 
     utility = _aggregate_utility(aggregate)
-    if utility is not None:
-        def numeric(key: str, default: float) -> float:
-            value = aggregate.get(key)
-            return float(value) if value is not None else default
+    if utility is None:
+        raise ValueError("Policy aggregates must include intervention-quality utility metrics.")
 
-        return (
-            numeric("catastrophic_introduced_count", math.inf),
-            numeric("harmful_intervention_rate", math.inf),
-            -numeric("catastrophic_prevented_count", 0.0),
-            -numeric("intervention_precision", -math.inf),
-            -numeric("challenge_recall", -math.inf),
-            -utility,
-            -numeric("median_regret_reduction", -math.inf),
-            numeric("unnecessary_intervention_rate", math.inf),
-            int(aggregate.get("policy_complexity", 0)),
-            -numeric("exact_reference_match_rate", 0.0),
-        )
-    return (
-        float(aggregate["mean_normalized_regret"])
-        if aggregate.get("mean_normalized_regret") is not None
-        else math.inf,
-        float(aggregate["catastrophic_regret_rate"])
-        if aggregate.get("catastrophic_regret_rate") is not None
-        else math.inf,
-        -float(aggregate["top2_compatibility_rate"])
-        if aggregate.get("top2_compatibility_rate") is not None
-        else math.inf,
-        int(aggregate.get("policy_complexity", 0)),
-    )
-
-
-def legacy_policy_rank_key(aggregate: dict[str, Any]) -> tuple[float, ...]:
-    """Reproduce the pre-intervention-quality ranking for audit comparison only."""
+    def numeric(key: str, default: float) -> float:
+        value = aggregate.get(key)
+        return float(value) if value is not None else default
 
     return (
-        float(aggregate["mean_normalized_regret"])
-        if aggregate.get("mean_normalized_regret") is not None
-        else math.inf,
-        float(aggregate["catastrophic_regret_rate"])
-        if aggregate.get("catastrophic_regret_rate") is not None
-        else math.inf,
-        -float(aggregate["top2_compatibility_rate"])
-        if aggregate.get("top2_compatibility_rate") is not None
-        else math.inf,
+        numeric("catastrophic_introduced_count", math.inf),
+        numeric("harmful_intervention_rate", math.inf),
+        -numeric("catastrophic_prevented_count", 0.0),
+        -numeric("intervention_precision", -math.inf),
+        -numeric("challenge_recall", -math.inf),
+        -utility,
+        -numeric("median_regret_reduction", -math.inf),
+        numeric("unnecessary_intervention_rate", math.inf),
         int(aggregate.get("policy_complexity", 0)),
+        -numeric("exact_reference_match_rate", 0.0),
     )
 
 
@@ -1053,8 +1026,6 @@ def build_calibration_artifact(
         candidate.name: aggregate_candidate_records(records, candidate) for candidate in candidates
     }
     selection = select_policy_candidate(aggregates, candidates)
-    legacy_ordered = sorted(aggregates.values(), key=legacy_policy_rank_key)
-    legacy_selected = legacy_ordered[0]["policy_candidate"] if legacy_ordered else None
     selected_name = str(selection["selected_candidate"])
     current_records = [record for record in records if record["policy_candidate"] == "current"]
     selected_records = [record for record in records if record["policy_candidate"] == selected_name]
@@ -1090,13 +1061,6 @@ def build_calibration_artifact(
         "candidate_policies": [candidate.as_dict() for candidate in candidates],
         "selection_rule": POLICY_SELECTION_RULE,
         "selection": selection,
-        "historical_objective_comparison": {
-            "legacy_objective": "lowest mean normalized regret, then catastrophic rate, then top-2 compatibility, then complexity",
-            "legacy_ranked_candidates": [item["policy_candidate"] for item in legacy_ordered],
-            "legacy_selected_candidate": legacy_selected,
-            "intervention_quality_selected_candidate": selected_name,
-            "selection_changed": legacy_selected != selected_name,
-        },
         "selected_candidate": selected_name,
         "recommendation": selection["recommendation"],
         "aggregate_metrics": aggregates,
@@ -1156,7 +1120,6 @@ def render_calibration_report(artifact: dict[str, Any]) -> str:
             f"Utility weights: `{json.dumps(artifact.get('gate_utility_weights', {}), sort_keys=True)}`.",
             f"Selected candidate: **{artifact['selected_candidate']}**; utility contribution breakdown: `{json.dumps(aggregates[artifact['selected_candidate']].get('gate_utility', {}), sort_keys=True)}`.",
             f"Selection rationale: {'; '.join(artifact.get('selection', {}).get('selection_rationale', [])) or 'no additional rationale recorded'}.",
-            f"Historical-objective comparison: legacy would select **{artifact.get('historical_objective_comparison', {}).get('legacy_selected_candidate', 'n/a')}**; intervention-quality selection changed: **{artifact.get('historical_objective_comparison', {}).get('selection_changed', 'n/a')}**.",
         ]
     )
     lines.extend(

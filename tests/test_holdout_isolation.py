@@ -13,8 +13,7 @@ from app.deterministic import (
     profile_dataframe,
     transform_cleaning,
 )
-from app.pipeline import _validate_before_training, run_analysis
-from app.schemas import AgentPlan, ConflictResolution, DeterministicRecommendation
+from app.pipeline import run_analysis
 from app.validation import (
     freeze_supervised_split,
     training_partition_frame,
@@ -58,7 +57,7 @@ def test_explicit_target_uses_the_frozen_training_rows_for_planning_and_fit(tmp_
     decision, planning, modeling = _read_run(result["run_dir"])
     contract = decision["split_contract"]
 
-    assert decision["target_establishment"]["target_source"] == "user_supplied"
+    assert decision["formulation"]["final"]["target_source"] == "user_supplied"
     assert planning["rows"] == contract["train_rows"]
     assert modeling["train_rows"] == contract["train_rows"]
     assert modeling["test_rows"] == contract["holdout_rows"]
@@ -82,8 +81,8 @@ def test_inferred_target_is_established_before_the_training_only_profile(tmp_pat
     )
     decision, planning, modeling = _read_run(result["run_dir"])
 
-    assert decision["target_establishment"]["target_column"] == "target"
-    assert decision["target_establishment"]["completed_before_holdout_freeze"] is True
+    assert decision["formulation"]["final"]["target_column"] == "target"
+    assert decision["formulation"]["validation"]["status"] == "passed"
     assert planning["rows"] == decision["split_contract"]["train_rows"]
     assert modeling["split_evidence"]["contract"] == decision["split_contract"]
 
@@ -125,70 +124,6 @@ def test_classification_and_regression_reuse_the_same_frozen_membership():
     regression_validation.raise_if_failed()
     assert regression_validation.split["contract"] == regression_split.as_dict()
     assert regression_validation.split["strategy"] == "seeded_random"
-
-
-def test_reconciliation_receives_training_only_evidence():
-    frame = _frame()
-    split = freeze_supervised_split(frame, "target", "classification")
-    planning_frame = training_profile_frame(
-        frame,
-        "target",
-        "classification",
-        test_size=0.2,
-        random_state=42,
-        split=split,
-    )
-    planning_profile = profile_dataframe(planning_frame)
-    agent_plan = AgentPlan(
-        target_column="target",
-        task_type="classification",
-        recommended_method="linear",
-        reasoning="The independent planner selected an interpretable baseline from the training schema.",
-        confidence=0.7,
-    )
-    deterministic = DeterministicRecommendation(
-        target_column="target",
-        task_type="classification",
-        recommended_method="tree_ensemble",
-        reasoning="The deterministic policy selected a robust family from the training schema evidence.",
-        evidence=["training_rows=64"],
-    )
-
-    captured: dict[str, object] = {}
-
-    class Reconciler:
-        def reconcile(self, question, profile, agent_plan, deterministic):
-            captured["profile"] = profile
-            return ConflictResolution(
-                selected_target_column="target",
-                selected_task_type="classification",
-                selected_method="tree_ensemble",
-                selected_preprocessing=deterministic["preprocessing"],
-                checks=["training_profile_checked"],
-                justification="The tree recommendation is better aligned with the categorical training features and safe preprocessing contract.",
-                confidence=0.8,
-            )
-
-    result = _validate_before_training(
-        Reconciler(),
-        planning_profile,
-        "classify target",
-        agent_plan,
-        deterministic,
-        [],
-        {},
-        offline=False,
-        dataframe=frame,
-        split=split,
-        row_positions=list(range(len(frame))),
-        reconciliation_profile=planning_profile,
-        established_target="target",
-        established_task="classification",
-    )
-
-    assert result["status"] == "disagreement_resolved"
-    assert captured["profile"]["rows"] == split.as_dict()["train_rows"]
-    assert captured["profile"] == planning_profile
 
 
 def test_holdout_only_perturbation_does_not_change_planning_evidence_or_recommendation():
@@ -260,76 +195,6 @@ def test_holdout_only_perturbation_does_not_change_training_only_eda_input():
         original.loc[expected_training_positions, "signal"].to_numpy(),
     )
     assert not set(expected_training_positions).intersection(set(split.holdout_row_positions))
-
-
-def test_reconciliation_receives_structured_deterministic_evidence():
-    frame = _frame()
-    split = freeze_supervised_split(frame, "target", "classification")
-    planning_frame = training_profile_frame(
-        frame,
-        "target",
-        "classification",
-        test_size=0.2,
-        random_state=42,
-        split=split,
-    )
-    planning_profile = profile_dataframe(planning_frame)
-    deterministic = deterministic_recommendation(
-        planning_frame,
-        "classify target",
-        "target",
-        task_type="classification",
-    )
-    agent_plan = AgentPlan(
-        target_column="target",
-        task_type="classification",
-        recommended_method="linear",
-        reasoning="The independent planner selected a linear baseline from the training schema.",
-        confidence=0.7,
-    )
-    captured: dict[str, object] = {}
-
-    class Reconciler:
-        def reconcile(self, question, profile, agent_plan, deterministic):
-            captured["deterministic"] = deterministic
-            return ConflictResolution(
-                selected_target_column="target",
-                selected_task_type="classification",
-                selected_method=deterministic["recommended_method"],
-                selected_preprocessing=deterministic["preprocessing"],
-                checks=["structured_evidence_checked"],
-                justification="The deterministic score evidence is more compatible with the observed training feature structure and preprocessing contract.",
-                confidence=0.7,
-            )
-
-    result = _validate_before_training(
-        Reconciler(),
-        planning_profile,
-        "classify target",
-        agent_plan,
-        deterministic,
-        [],
-        {},
-        offline=False,
-        dataframe=frame,
-        split=split,
-        row_positions=list(range(len(frame))),
-        reconciliation_profile=planning_profile,
-        established_target="target",
-        established_task="classification",
-    )
-
-    evidence = captured["deterministic"]
-    assert result["status"] == "disagreement_resolved"
-    assert evidence["policy_version"] == "4"
-    assert set(evidence["method_scores"]) == {
-        "linear",
-        "regularized_linear",
-        "tree_ensemble",
-        "boosted_tree",
-    }
-    assert evidence["diagnostics"]["rows"] == split.as_dict()["train_rows"]
-    assert "holdout" not in str(evidence).lower()
 
 
 def _partition_cleaning(frame: pd.DataFrame, split, actions: list[str]):

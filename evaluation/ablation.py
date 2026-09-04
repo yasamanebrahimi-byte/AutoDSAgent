@@ -34,7 +34,6 @@ class AblationSpec:
     name: str
     decision_mode: str
     soft_challenge_strategy: str
-    reconciliation_mode: str
     interaction_diagnostics: bool = True
     classification_boundary_diagnostics: bool = True
     empirical_probe: bool = False
@@ -48,7 +47,6 @@ class AblationSpec:
             "name": self.name,
             "decision_mode": self.decision_mode,
             "soft_challenge_strategy": self.soft_challenge_strategy,
-            "reconciliation_mode": self.reconciliation_mode,
             "interaction_diagnostics": self.interaction_diagnostics,
             "classification_boundary_diagnostics": self.classification_boundary_diagnostics,
             "empirical_probe": self.empirical_probe,
@@ -68,39 +66,36 @@ def ablation_presets() -> dict[str, AblationSpec]:
     }
     return {
         "llm_only": AblationSpec(
-            "llm_only", "llm_only", "calibrated", "blinded", empirical_probe=False, **common
+            "llm_only", "llm_only", "calibrated", empirical_probe=False, **common
         ),
         "deterministic_only": AblationSpec(
-            "deterministic_only", "deterministic_only", "calibrated", "blinded", empirical_probe=False, **common
-        ),
-        "legacy_gate": AblationSpec(
-            "legacy_gate", "always_reconcile", "calibrated", "legacy", empirical_probe=False, **common
+            "deterministic_only", "deterministic_only", "calibrated", empirical_probe=False, **common
         ),
         "blinded_always_reconcile": AblationSpec(
-            "blinded_always_reconcile", "always_reconcile", "calibrated", "blinded", empirical_probe=False, **common
+            "blinded_always_reconcile", "always_reconcile", "calibrated", empirical_probe=False, **common
         ),
         "high_confidence_only": AblationSpec(
-            "high_confidence_only", "selective", "high_confidence_only", "blinded", empirical_probe=False, **common
+            "high_confidence_only", "selective", "high_confidence_only", empirical_probe=False, **common
         ),
         # The calibrated baseline disables the newer evidence sources so the
         # interaction/boundary stage has a clean paired comparison.
         "selective_calibrated": AblationSpec(
-            "selective_calibrated", "selective", "calibrated", "blinded",
+            "selective_calibrated", "selective", "calibrated",
             interaction_diagnostics=False,
             classification_boundary_diagnostics=False,
             empirical_probe=False,
         ),
         "interaction_boundary_aware": AblationSpec(
-            "interaction_boundary_aware", "selective", "calibrated", "blinded", empirical_probe=False, **common
+            "interaction_boundary_aware", "selective", "calibrated", empirical_probe=False, **common
         ),
         "empirical_probe": AblationSpec(
-            "empirical_probe", "selective", "calibrated", "blinded", empirical_probe=True, **common
+            "empirical_probe", "selective", "calibrated", empirical_probe=True, **common
         ),
         "probe_first": AblationSpec(
-            "probe_first", "probe_first", "calibrated", "blinded", empirical_probe=True, **common
+            "probe_first", "probe_first", "calibrated", empirical_probe=True, **common
         ),
         "full": AblationSpec(
-            "full", "probe_first", "calibrated", "blinded", empirical_probe=True, **common
+            "full", "probe_first", "calibrated", empirical_probe=True, **common
         ),
     }
 
@@ -259,7 +254,7 @@ def run_ablation_study(
     ablations: Sequence[str] | None = None,
     thresholds: dict[str, float] | None = None,
     case_names: Sequence[str] | None = None,
-    agent_plan_factory: Any | None = None,
+    modeling_plan_factory: Any | None = None,
     reconciliation_factory: Any | None = None,
     resume: bool = False,
     suite: str = "local",
@@ -324,14 +319,6 @@ def run_ablation_study(
         )
     if resume and config_path.is_file():
         existing = json.loads(config_path.read_text(encoding="utf-8"))
-        legacy_planner_model = existing.get("planner_model", existing.get("model", "gpt-4.1-mini"))
-        legacy_reconciler_model = existing.get("reconciler_model", existing.get("model", "gpt-4.1-mini"))
-        legacy_defaults = {
-            "suite": "local",
-            "tier": None,
-            "planner_model": legacy_planner_model,
-            "reconciler_model": legacy_reconciler_model,
-        }
         for key in (
             "ablation_schema_version",
             "split_seeds",
@@ -343,20 +330,16 @@ def run_ablation_study(
             "planner_model",
             "reconciler_model",
         ):
-            if existing.get(key, legacy_defaults.get(key)) != root_config.get(key):
+            if existing.get(key) != root_config.get(key):
                 raise ValueError(f"Existing ablation configuration is incompatible for {key!r}.")
         root_config = {
             **existing,
             "suite": existing.get("suite", "local"),
             "tier": existing.get("tier"),
-            "planner_model": legacy_planner_model,
-            "reconciler_model": legacy_reconciler_model,
-            "planner_model_requested": existing.get(
-                "planner_model_requested", legacy_planner_model
-            ),
-            "reconciler_model_requested": existing.get(
-                "reconciler_model_requested", legacy_reconciler_model
-            ),
+            "planner_model": existing["planner_model"],
+            "reconciler_model": existing["reconciler_model"],
+            "planner_model_requested": existing["planner_model_requested"],
+            "reconciler_model_requested": existing["reconciler_model_requested"],
         }
     elif config_path.exists():
         raise ValueError("Output directory already contains an ablation study; use --resume or choose a new directory.")
@@ -382,7 +365,7 @@ def run_ablation_study(
             include_perturbations=include_perturbations,
             thresholds=thresholds,
             case_names=case_names,
-            agent_plan_factory=agent_plan_factory,
+            modeling_plan_factory=modeling_plan_factory,
             reconciliation_factory=reconciliation_factory,
             ablation_spec=spec,
             proposal_cache_path=proposal_cache_path,
@@ -399,7 +382,6 @@ def run_ablation_study(
     rows_by_name = {name: trial_rows[name] for name in selected_names}
     pairs = [
         ("full", "llm_only"),
-        ("blinded_always_reconcile", "legacy_gate"),
         ("interaction_boundary_aware", "selective_calibrated"),
         ("empirical_probe", "interaction_boundary_aware"),
         ("probe_first", "selective_calibrated"),

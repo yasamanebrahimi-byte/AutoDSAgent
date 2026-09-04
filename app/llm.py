@@ -15,9 +15,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from app.schemas import (
-    AgentPlan,
     CleaningPlan,
-    ConflictResolution,
     FormulationPlan,
     FormulationResolution,
     ModelingPlan,
@@ -155,25 +153,6 @@ categorical_unknown_handling='ignore'. Do not return any other pairing.""",
             },
         )
 
-    def planning(
-        self,
-        profile: dict[str, Any],
-        question: str,
-        target_hint: str | None,
-        task_type: str | None = None,
-    ) -> AgentPlan:
-        """Backward-compatible alias for the modeling agent."""
-
-        plan = self.modeling_plan(profile, question, target_hint, task_type)
-        return AgentPlan(
-            target_column=target_hint or "",
-            task_type=task_type or "classification",
-            recommended_method=plan.recommended_method,
-            preprocessing=plan.preprocessing,
-            reasoning=plan.reasoning,
-            confidence=plan.confidence,
-        )
-
     def reconcile_formulation(
         self,
         question: str,
@@ -208,25 +187,6 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
         modeling_plan: ModelingPlan,
         deterministic: dict[str, Any],
     ) -> ModelingResolution:
-        if profile.get("reconciliation_mode") == "legacy":
-            return self._structured(
-                "modeling_resolution",
-                ModelingResolution,
-                """You are the modeling-gate reconciliation agent. An independent
-                modeling proposal and an independent deterministic recommendation disagree.
-                Inspect both recommendations and the training-only evidence, then choose
-                exactly one of the two proposed methods. The deterministic recommendation is
-                advisory; its compatibility scores are heuristic evidence, not probabilities,
-                cross-validation results, or empirical performance. Do not use holdout values,
-                empirical-reference rankings, or candidate-model CV results. Return a complete
-                supported preprocessing contract and do not invent a third method.""",
-                {
-                    "question": question,
-                    "training_only_profile": profile.get("legacy_profile", {}),
-                    "modeling_plan": modeling_plan.model_dump(mode="json"),
-                    "deterministic_recommendation": deterministic,
-                },
-            )
         if isinstance(deterministic.get("_blinded_reconciliation_payload"), dict):
             blinded_payload = deterministic["_blinded_reconciliation_payload"]
         elif profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
@@ -286,7 +246,7 @@ family or preprocessing. Explain the disagreement and the evidence used.""",
             matters, and preprocessing was fitted inside each fold. Weigh a strong, consistent
             comparison more heavily than heuristic point scores, but do not treat its winner as
             an automatic final decision. Do not use holdout values, empirical-reference
-            rankings, or historical challenge reliability. Hard validation outcomes describe
+            rankings, or calibration reliability. Hard validation outcomes describe
             safety constraints, not comparative predictive quality. Re-check preprocessing,
             leakage, immutable context, supported methods, and the complete contract before
             returning the selected plan.""",
@@ -307,98 +267,6 @@ nothing is warranted. Allowed actions: trim_strings, drop_exact_duplicates,
 drop_all_null_columns, drop_constant_features, drop_rows_missing_target,
 coerce_numeric_strings.""",
             {"target_column": target_column, "profile": profile},
-        )
-
-    def reconcile(
-        self,
-        question: str,
-        profile: dict[str, Any],
-        agent_plan: AgentPlan,
-        deterministic: dict[str, Any],
-    ) -> ConflictResolution:
-        if profile.get("reconciliation_mode") == "legacy":
-            return self._structured(
-                "conflict_resolution",
-                ConflictResolution,
-                """You are the validation agent. An independent planning proposal and an
-                independent deterministic recommender disagree. Inspect both recommendations
-                and the dataset evidence, then choose exactly one of the two proposed methods.
-                The deterministic compatibility scores are heuristic evidence, not probabilities,
-                cross-validation results, or empirical performance estimates. Do not use holdout
-                values, empirical-reference rankings, or candidate-model CV results. Return a
-                complete supported preprocessing contract and do not invent a third method.""",
-                {
-                    "question": question,
-                    "profile": profile.get("legacy_profile", {}),
-                    "agent_plan": agent_plan.model_dump(mode="json"),
-                    "deterministic_recommendation": deterministic,
-                },
-            )
-        if isinstance(deterministic.get("_blinded_reconciliation_payload"), dict):
-            blinded_payload = deterministic["_blinded_reconciliation_payload"]
-        elif profile.get("reconciliation_mode") == BLINDED_RECONCILIATION_MODE:
-            blinded_payload = profile
-        else:
-            blinded_payload = build_blinded_reconciliation(
-                profile,
-                agent_plan,
-                deterministic,
-                target_column=agent_plan.target_column,
-                task_type=agent_plan.task_type,
-                preprocessing_comparison=deterministic.get("preprocessing_comparison"),
-                preprocessing_requirements=deterministic.get("preprocessing_requirements"),
-                hard_validation={
-                    "agent": (
-                        (deterministic.get("hard_validation") or {}).get("agent")
-                        or (deterministic.get("hard_validation") or {}).get("agent_proposal")
-                        or {}
-                    ),
-                    "deterministic": (
-                        (deterministic.get("hard_validation") or {}).get("deterministic")
-                        or (deterministic.get("hard_validation") or {}).get("deterministic_challenger")
-                        or {}
-                    ),
-                },
-                order_seed=int(deterministic.get("_reconciliation_order_seed") or 0),
-                proposal_order=(
-                    tuple(deterministic["_reconciliation_proposal_order"])
-                    if deterministic.get("_reconciliation_proposal_order")
-                    else None
-                ),
-            ).payload
-        return self._structured(
-            "conflict_resolution",
-            ConflictResolution,
-            """You are comparing two independently generated modeling proposals.
-            They are deliberately presented as Proposal A and Proposal B; do not infer,
-            mention, or favor their origins. Choose exactly one proposal and one complete
-            supported preprocessing contract. Never invent Proposal C.
-
-            Before selecting, give a concise two-sided critique: strengths and weaknesses for
-            A and B, including the strongest case against each. Then identify the decisive
-            observed evidence and select A or B. Distinguish shared dataset facts from each
-            proposal's interpretation. Near ties still require one selection based on the
-            proposal with less fragile assumptions and complexity proportional to the evidence;
-            do not use a universal simplicity or complexity rule.
-
-            Compatibility diagnostics are heuristic structural evidence only. They are not
-            probabilities, cross-validation results, empirical performance, expected
-            accuracy/RMSE, or proof that either proposal is better. When present, LIMITED
-            TRAINING-ONLY EMPIRICAL COMPARISON is a small directional training-fold comparison
-            of only Proposal A and Proposal B. It is not final holdout performance or a
-            guarantee of future generalization; consider fold variability and the fact that
-            preprocessing was fitted inside each fold. A weak or tied result should not
-            dominate structural reasoning, and the empirical winner is evidence rather than
-            an automatic final selection. Do not use holdout values, empirical-reference
-            rankings, or historical challenge reliability. Re-check target/task immutability,
-            leakage, supported methods, all observed missing/infinite values, safe
-            unknown-category handling, and that learned transformations remain inside the
-            training pipeline. Explicitly discuss material preprocessing differences. Return
-            only a proposal represented in the input.""",
-            {
-                "question": question,
-                **blinded_payload,
-            },
         )
 
     def eda(self, question: str, summary: dict[str, Any]) -> list[str]:

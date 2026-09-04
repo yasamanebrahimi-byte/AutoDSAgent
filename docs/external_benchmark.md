@@ -97,7 +97,7 @@ python -m pip install -e ".[benchmark]"
 ```
 
 Prefetch and validate every task, producing the non-performance reproducibility
-manifest at `evaluation_results/external_dataset_manifest.json`:
+manifest at `runs/external_dataset_manifest.json`:
 
 ```bash
 python scripts/prefetch_external_benchmarks.py
@@ -134,8 +134,5 @@ suite live with strict failure reporting:
 ```bash
 python -m evaluation.ablation --suite external --live --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation blinded_always_reconcile --ablation selective_calibrated --ablation full
 ```
-
-The historical `legacy_gate` preset remains available as a secondary ablation
-by passing `--ablation legacy_gate` explicitly.
 
 The default `python -m evaluation.run` command remains the local suite.

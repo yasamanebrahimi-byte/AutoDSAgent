@@ -20,7 +20,6 @@ from pydantic import BaseModel
 
 BLINDED_RECONCILIATION_MODE = "blinded_evidence_comparison"
 BLINDED_RECONCILIATION_PROMPT_VERSION = "2026-08-24.blinded-evidence-comparison.v2-empirical-probe"
-LEGACY_RECONCILIATION_PROMPT_VERSION = "legacy.reconciliation.v1"
 ProposalSource = Literal["agent", "deterministic"]
 ProposalLabel = Literal["A", "B"]
 
@@ -298,7 +297,7 @@ def _stable_order_seed(
 
 def build_blinded_reconciliation(
     profile: dict[str, Any],
-    agent_plan: Any,
+    modeling_plan: Any,
     deterministic: Any,
     *,
     target_column: str | None = None,
@@ -310,7 +309,7 @@ def build_blinded_reconciliation(
     proposal_order: tuple[ProposalSource, ProposalSource] | None = None,
     empirical_probe: dict[str, Any] | None = None,
 ) -> BlindedReconciliation:
-    agent_values = _dump(agent_plan)
+    agent_values = _dump(modeling_plan)
     deterministic_values = _dump(deterministic)
     target_column = target_column or agent_values.get("target_column") or deterministic_values.get("target_column")
     task_type = task_type or agent_values.get("task_type") or deterministic_values.get("task_type")
@@ -328,14 +327,13 @@ def build_blinded_reconciliation(
         random.Random(resolved_seed).shuffle(sources)
     proposal_a_source, proposal_b_source = sources
     proposals = {
-        "agent": _proposal("agent", agent_plan, dataset_evidence),
+        "agent": _proposal("agent", modeling_plan, dataset_evidence),
         "deterministic": _proposal("deterministic", deterministic, dataset_evidence),
     }
     payload = {
         "reconciliation_mode": BLINDED_RECONCILIATION_MODE,
-        # Stable aggregate aliases preserve the legacy helper contract for
-        # callers/tests that inspect the profile envelope; no raw columns or
-        # row values are copied into the prompt.
+        # Stable aggregate fields keep the prompt envelope inspectable; no raw
+        # columns or row values are copied into the prompt.
         "rows": dataset_evidence.get("training_rows"),
         "columns": dataset_evidence.get("feature_count"),
         "approved_context": {
@@ -371,7 +369,7 @@ def infer_selected_proposal(
     resolution: Any,
     blinded: BlindedReconciliation,
 ) -> tuple[ProposalLabel | None, ProposalSource | None]:
-    """Map an A/B result to its source, retaining compatibility with old mocks."""
+    """Map an A/B result to its underlying proposal source."""
 
     values = _dump(resolution)
     explicit = values.get("selected_proposal")

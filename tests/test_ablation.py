@@ -10,7 +10,7 @@ from sklearn.datasets import make_moons
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.deterministic_policy import DeterministicPolicy
-from app.schemas import AgentPlan, PreprocessingContract
+from app.schemas import ModelingPlan, PreprocessingContract
 from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
 from evaluation.benchmarks import BenchmarkCase
@@ -35,10 +35,8 @@ def _case() -> BenchmarkCase:
     )
 
 
-def _plan(context: dict) -> AgentPlan:
-    return AgentPlan(
-        target_column=context["target_column"],
-        task_type=context["task_type"],
+def _plan(context: dict) -> ModelingPlan:
+    return ModelingPlan(
         recommended_method="linear",
         preprocessing=PreprocessingContract(numeric_scaling="standard"),
         reasoning="The paired test proposal is a complete training-only linear baseline.",
@@ -48,10 +46,9 @@ def _plan(context: dict) -> AgentPlan:
 
 def test_named_presets_are_explicit_and_versioned():
     presets = ablation_presets()
-    assert {
+    assert set(presets) == {
         "llm_only",
         "deterministic_only",
-        "legacy_gate",
         "blinded_always_reconcile",
         "high_confidence_only",
         "selective_calibrated",
@@ -68,12 +65,10 @@ def test_named_presets_are_explicit_and_versioned():
     assert presets["full"].schema_version == "modeling-gate-ablation-v1"
 
 
-def test_default_ablation_set_is_the_primary_four_and_legacy_remains_available(tmp_path: Path):
+def test_default_ablation_set_is_the_primary_four(tmp_path: Path):
     result = run_ablation_study(tmp_path / "default", cases=[_case()])
 
     assert tuple(result["summary"]["selected_ablations"]) == PRIMARY_ABLATION_NAMES
-    assert "legacy_gate" not in result["summary"]["selected_ablations"]
-    assert "legacy_gate" in ablation_presets()
 
 
 def test_high_confidence_only_ignores_calibration_reliability():
@@ -198,7 +193,7 @@ def test_same_initial_proposal_is_reused_across_ablation_presets(tmp_path: Path,
         split_seeds=[42, 123],
         repetitions=2,
         ablations=["llm_only", "selective_calibrated"],
-        agent_plan_factory=factory,
+        modeling_plan_factory=factory,
     )
     assert len(calls) == 4  # two split seeds x two LLM repetitions, not x ablations
     rows = result["summary"]["summaries"]
@@ -220,7 +215,7 @@ def test_deterministic_only_does_not_call_initial_factory(tmp_path: Path):
         tmp_path / "deterministic",
         cases=[_case()],
         gate_mode="deterministic_only",
-        agent_plan_factory=forbidden,
+        modeling_plan_factory=forbidden,
         offline=False,
     )
     assert result["trials"][0]["agent_source"] == "deterministic_only"

@@ -28,7 +28,7 @@ def _freeze_points(
     )
 
 
-# A point slot is the named branch plus its historical default point.  The
+# A point slot is the named branch plus its default point.  The
 # slot value is only a stable identifier for the branch; the value actually
 # used at runtime comes from this versioned table.  Keeping this table beside
 # the thresholds makes every compatibility contribution inspectable and
@@ -199,7 +199,7 @@ class DeterministicPolicy:
     # and regression correlation evidence are bounded but not interchangeable.
     regression_weak_association_threshold: float = 0.20
     classification_weak_association_threshold: float = 0.20
-    # The legacy structural-complexity terms sum to one.  Interaction evidence
+    # The structural-complexity terms sum to one.  Interaction evidence
     # is a separate bounded, modest term so the revised formula remains easy
     # to audit without pretending the factors are independent probabilities.
     structural_complexity_moderate_threshold: float = 0.30
@@ -233,11 +233,11 @@ class DeterministicPolicy:
     target_outlier_high_fraction: float = 0.10
     compatibility_points: tuple[tuple[str, tuple[tuple[Method, int], ...]], ...] = DEFAULT_COMPATIBILITY_POINTS
 
-    def compatibility_point(self, factor: str, legacy_point_slot: int, method: Method) -> int:
+    def compatibility_point(self, factor: str, point_slot: int, method: Method) -> int:
         """Resolve a named compatibility contribution from the frozen table."""
 
         point_table = dict(self.compatibility_points)
-        method_points = dict(point_table.get(f"{factor}:{legacy_point_slot}", ()))
+        method_points = dict(point_table.get(f"{factor}:{point_slot}", ()))
         return int(method_points.get(method, 0))
 
 

@@ -181,15 +181,15 @@ def _estimator(task_type: TaskType, method: Method, random_state: int) -> Any:
     if task_type == "classification":
         return {
             # ``linear`` is intentionally unregularized.  sklearn's default
-            # LogisticRegression penalty is L2, so the old C=1 vs C=0.5
+            # LogisticRegression penalty is L2, so the C=1 vs C=0.5
             # distinction did not accurately represent two model families.
             "linear": LogisticRegression(
                 penalty=None, solver="lbfgs", max_iter=1000, random_state=random_state
             ),
             "regularized_linear": LogisticRegression(
                 # l1_ratio=0 expresses the L2 branch in sklearn's newer API
-                # while remaining an accepted no-op compatibility parameter
-                # on the project's older supported sklearn versions.
+                # while remaining accepted on the project's supported sklearn
+                # versions.
                 C=0.5, l1_ratio=0.0, max_iter=1000, random_state=random_state
             ),
             "tree_ensemble": RandomForestClassifier(
