@@ -29,7 +29,12 @@ from evaluation.confirmatory import (
     load_confirmatory_manifest,
     runtime_manifest_values,
     validate_confirmatory_manifest,
+    deterministic_policy_config,
+    empirical_probe_config,
+    config_sha256,
+    repository_commit as current_repository_commit,
 )
+from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from app.deterministic_policy import DeterministicPolicy
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.llm import PROMPT_SCHEMA_VERSION
@@ -497,11 +502,18 @@ def run_ablation_study(
             holdout_fraction=0.2,
             selected_ablations=selected_names,
             deterministic_policy_version=DeterministicPolicy().version,
+            deterministic_policy_sha256=config_sha256(deterministic_policy_config()),
             empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
+            empirical_probe_policy_sha256=config_sha256(empirical_probe_config()),
             planner_prompt_schema_version=PROMPT_SCHEMA_VERSION,
             reconciler_prompt_schema_version=BLINDED_RECONCILIATION_PROMPT_VERSION,
             candidate_model_families=[
                 "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
+            ],
+            preprocessing_option_space=[
+                "one_hot/categorical_unknown_handling=ignore",
+                "ordinal/categorical_unknown_handling=use_encoded_value",
+                "none/categorical_unknown_handling=ignore",
             ],
             classification_neutral_tolerance=holdout_neutral_tolerance(
                 "classification", configured_thresholds
@@ -514,6 +526,13 @@ def run_ablation_study(
                 if selected_cases[0].benchmark_suite_version
                 else "local-2"
             ),
+            benchmark_manifest_sha256=external_benchmark_manifest_sha256(),
+            benchmark_task_ids=[case.openml_task_id for case in selected_cases if case.openml_task_id is not None],
+            benchmark_tranches={
+                "core": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "core"],
+                "stress": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "stress"],
+            },
+            benchmark_tier=tier,
             strict_live_required=require_live,
             bootstrap_settings={
                 "method": "dataset_cluster_bootstrap_percentile",
@@ -522,6 +541,7 @@ def run_ablation_study(
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+            expected_code_commit=current_repository_commit(),
         )
         if suite != "external":
             raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
@@ -718,7 +738,9 @@ def run_ablation_study(
         )
         root_config.update({
             "fallback_rows": fallback_rows,
-            "external_benchmark_manifest_matches": True,
+            "external_benchmark_manifest_matches": bool(
+                all(result["summary"].get("external_benchmark_manifest_matches") is True for result in results.values())
+            ),
             "confirmatory_valid": bool(
                 all(result["summary"].get("confirmatory_valid") is True for result in results.values())
             ),

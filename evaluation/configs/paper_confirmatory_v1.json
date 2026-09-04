@@ -4,12 +4,15 @@
   "strict_live_required": true,
   "experiment_name": "selective-intervention-reliability",
   "experiment_config_version": "paper-confirmatory-v1",
+  "expected_code_commit": "232d5412b3c7764b74e02c1d1fbecc4d4e7956c0",
+  "code_commit_convention": "This points to the previously tested experiment-code commit. Freeze the manifest after testing, then run only with that recorded commit; the manifest edit itself must not be made self-referential.",
   "freeze_rule": "Freeze this file and the git commit before inspecting external live outcomes.",
   "research_scope": "LLM-based model-family and preprocessing planning for supervised tabular classification/regression under selective deterministic validation",
   "result_schema_version": "holdout-metrics-v2",
   "gate_objective_version": "intervention-quality-v1",
   "deterministic_policy": {
     "version": "4",
+    "configuration_sha256": "9a450828f27dcce86b005f0c21d0271ca08a0b19e6dd8a802e047ec39effcc90",
     "enable_regression_interaction_diagnostics": true,
     "enable_classification_boundary_diagnostics": true,
     "high_correlation_threshold": 0.8,
@@ -49,6 +52,7 @@
   },
   "empirical_probe_policy": {
     "policy_version": "v1",
+    "configuration_sha256": "b57563d3b58b1b5c5cfe94f0ad259f79533bc38ff10815efe768358aa4c0fed9",
     "enabled": true,
     "cv_folds": 3,
     "minimum_rows": 12,
@@ -107,6 +111,12 @@
     "task_count": 40,
     "classification_count": 22,
     "regression_count": 18,
+    "manifest_sha256": "41fdd46568d26bc8f6c6d18ff08687736c573bf44d0a3e9f4c65ccbec288c04e",
+    "task_ids": [359983, 359979, 168868, 146818, 359982, 359967, 359955, 359960, 359968, 359992, 168757, 359964, 359954, 359970, 359966, 359962, 190137, 359971, 168350, 359956, 168784, 359974, 359944, 359938, 359942, 233211, 359936, 359952, 359951, 359949, 233215, 360945, 167210, 359941, 359930, 359931, 359932, 359933, 359934, 359935],
+    "tranches": {
+      "core": [359983, 359979, 146818, 359982, 359955, 359968, 359992, 168757, 359964, 359954, 359970, 359962, 190137, 359971, 168350, 359956, 168784, 359944, 359938, 359942, 359936, 359952, 359949, 360945, 167210, 359930, 359931, 359932, 359933, 359935],
+      "stress": [168868, 359967, 359960, 359966, 359974, 233211, 359951, 233215, 359941, 359934]
+    },
     "selection_record": "docs/external_benchmark_selection.md"
   },
   "ablations": {

@@ -61,7 +61,12 @@ from evaluation.confirmatory import (
     load_confirmatory_manifest,
     runtime_manifest_values,
     validate_confirmatory_manifest,
+    deterministic_policy_config,
+    empirical_probe_config,
+    config_sha256,
+    repository_commit,
 )
+from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
     DEFAULT_BOOTSTRAP_REPLICATES,
@@ -1673,11 +1678,18 @@ def run_evaluation(
                 else ([config.ablation_name] if config.ablation_name else None)
             ),
             deterministic_policy_version=DeterministicPolicy().version,
+            deterministic_policy_sha256=config_sha256(deterministic_policy_config()),
             empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
+            empirical_probe_policy_sha256=config_sha256(empirical_probe_config()),
             planner_prompt_schema_version=config.prompt_schema_version,
             reconciler_prompt_schema_version=BLINDED_RECONCILIATION_PROMPT_VERSION,
             candidate_model_families=[
                 "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
+            ],
+            preprocessing_option_space=[
+                "one_hot/categorical_unknown_handling=ignore",
+                "ordinal/categorical_unknown_handling=use_encoded_value",
+                "none/categorical_unknown_handling=ignore",
             ],
             classification_neutral_tolerance=configured_holdout_tolerances["classification"],
             regression_neutral_tolerance=configured_holdout_tolerances["regression"],
@@ -1686,6 +1698,13 @@ def run_evaluation(
                 if selected_cases[0].benchmark_suite_version
                 else "local-2"
             ),
+            benchmark_manifest_sha256=external_benchmark_manifest_sha256(),
+            benchmark_task_ids=[case.openml_task_id for case in selected_cases if case.openml_task_id is not None],
+            benchmark_tranches={
+                "core": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "core"],
+                "stress": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "stress"],
+            },
+            benchmark_tier=config.tier,
             strict_live_required=config.require_live,
             bootstrap_settings={
                 "method": "dataset_cluster_bootstrap_percentile",
@@ -1694,6 +1713,7 @@ def run_evaluation(
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+            expected_code_commit=repository_commit(),
         )
         confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
     stable_config = {
@@ -2001,7 +2021,8 @@ def run_evaluation(
         "fallback_rows": summary.get("fallback_rows", 0),
         "config_mismatch_detected": False,
         "external_benchmark_manifest_matches": (
-            True if confirmatory_metadata is not None else None
+            bool(confirmatory_metadata.get("benchmark_manifest_matches"))
+            if confirmatory_metadata is not None else None
         ),
         "confirmatory_valid": confirmatory_valid,
     }

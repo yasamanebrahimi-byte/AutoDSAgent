@@ -8,6 +8,8 @@ network request occurs until a case is loaded explicitly.
 from __future__ import annotations
 
 import inspect
+import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -207,6 +209,22 @@ EXTERNAL_BENCHMARK_MANIFEST: tuple[OpenMLBenchmarkSpec, ...] = (
 # creating a second mutable representation of the task list.
 EXTERNAL_BENCHMARK_SPECS = EXTERNAL_BENCHMARK_MANIFEST
 EXTERNAL_TASK_MANIFEST = EXTERNAL_BENCHMARK_MANIFEST
+
+
+def external_benchmark_manifest_payload() -> list[dict[str, object]]:
+    """Return the canonical serialized external task definitions."""
+
+    return [spec.as_dict() for spec in EXTERNAL_BENCHMARK_MANIFEST]
+
+
+def external_benchmark_manifest_sha256() -> str:
+    """Hash the complete checked-in external benchmark identity."""
+
+    payload = json.dumps(
+        external_benchmark_manifest_payload(),
+        ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def external_benchmark_specs() -> tuple[OpenMLBenchmarkSpec, ...]:

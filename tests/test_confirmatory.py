@@ -14,7 +14,12 @@ from evaluation.confirmatory import (
     manifest_sha256,
     runtime_manifest_values,
     validate_confirmatory_manifest,
+    config_sha256,
+    deterministic_policy_config,
+    empirical_probe_config,
+    repository_commit,
 )
+from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.runner import EXPERIMENT_CONFIG_VERSION
 from evaluation.runner import run_evaluation
 
@@ -44,13 +49,23 @@ def _runtime(manifest: dict, **overrides):
         "holdout_fraction": holdout["fraction"],
         "selected_ablations": manifest["ablations"]["primary"],
         "deterministic_policy_version": manifest["deterministic_policy"]["version"],
+        "deterministic_policy_sha256": config_sha256(deterministic_policy_config()),
         "empirical_probe_policy_version": manifest["empirical_probe_policy"]["policy_version"],
+        "empirical_probe_policy_sha256": config_sha256(empirical_probe_config()),
         "planner_prompt_schema_version": prompts["planner_schema_version"],
         "reconciler_prompt_schema_version": prompts["reconciliation_prompt_version"],
         "candidate_model_families": modeling["candidate_model_families"],
+        "preprocessing_option_space": modeling["preprocessing_option_space"],
         "classification_neutral_tolerance": holdout["classification_neutral_tolerance"],
         "regression_neutral_tolerance": holdout["regression_neutral_tolerance"],
         "benchmark_manifest_version": external["manifest_version"],
+        "benchmark_manifest_sha256": external_benchmark_manifest_sha256(),
+        "benchmark_task_ids": [spec.task_id for spec in external_benchmark_specs()],
+        "benchmark_tranches": {
+            "core": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "core"],
+            "stress": [spec.task_id for spec in external_benchmark_specs() if spec.tier == "stress"],
+        },
+        "benchmark_tier": None,
         "strict_live_required": manifest["strict_live_required"],
         "bootstrap_settings": {
             "method": statistics["bootstrap_method"],
@@ -59,6 +74,7 @@ def _runtime(manifest: dict, **overrides):
             "seed": statistics["bootstrap_seed"],
         },
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "expected_code_commit": repository_commit(),
     }
     values.update(overrides)
     return runtime_manifest_values(**values)
@@ -86,6 +102,41 @@ def test_frozen_manifest_rejects_runtime_mismatch(field, value, message):
     manifest = _manifest()
     with pytest.raises(ValueError, match=message):
         validate_confirmatory_manifest(manifest, _runtime(manifest, **{field: value}))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("expected_code_commit", "0" * 40, "expected_code_commit"),
+        ("deterministic_policy_sha256", "changed", "deterministic_policy_sha256"),
+        ("empirical_probe_policy_sha256", "changed", "empirical_probe_policy_sha256"),
+        ("benchmark_task_ids", [359983], "benchmark membership"),
+        ("benchmark_tier", "core", "benchmark membership"),
+        ("preprocessing_option_space", ["changed"], "preprocessing_option_space"),
+    ],
+)
+def test_confirmatory_freeze_rejects_exact_identity_changes(field, value, message):
+    manifest = _manifest()
+    with pytest.raises(ValueError, match=message):
+        validate_confirmatory_manifest(manifest, _runtime(manifest, **{field: value}))
+
+
+def test_changed_policy_parameters_change_the_frozen_hash():
+    manifest = _manifest()
+    deterministic = deterministic_policy_config()
+    deterministic["high_correlation_threshold"] = 0.81
+    with pytest.raises(ValueError, match="deterministic_policy_sha256"):
+        validate_confirmatory_manifest(
+            manifest,
+            _runtime(manifest, deterministic_policy_sha256=config_sha256(deterministic)),
+        )
+    empirical = empirical_probe_config()
+    empirical["strong_relative_threshold"] = 0.21
+    with pytest.raises(ValueError, match="empirical_probe_policy_sha256"):
+        validate_confirmatory_manifest(
+            manifest,
+            _runtime(manifest, empirical_probe_policy_sha256=config_sha256(empirical)),
+        )
 
 
 def test_manifest_hash_is_canonical_and_changes_when_a_value_changes():
