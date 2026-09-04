@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import hashlib
 import subprocess
 from dataclasses import dataclass, field
@@ -1729,6 +1730,11 @@ def run_evaluation(
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None
         ),
+        "expected_code_commit": (
+            confirmatory_metadata.get("expected_code_commit")
+            if confirmatory_metadata else None
+        ),
+        "frozen_manifest_path": None,
         "strict_live_required": config.require_live,
         "fallback_rows": None,
         "config_mismatch_detected": False,
@@ -2017,6 +2023,18 @@ def run_evaluation(
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None
         ),
+        "expected_code_commit": (
+            confirmatory_metadata.get("expected_code_commit")
+            if confirmatory_metadata else None
+        ),
+        "repository_commit": (
+            confirmatory_metadata.get("repository_commit")
+            if confirmatory_metadata else config.repository_commit
+        ),
+        "frozen_manifest_path": (
+            str(output_path / "frozen_confirmatory_manifest.json")
+            if confirmatory_metadata is not None else None
+        ),
         "strict_live_required": config.require_live,
         "fallback_rows": summary.get("fallback_rows", 0),
         "config_mismatch_detected": False,
@@ -2028,6 +2046,9 @@ def run_evaluation(
     }
     summary.update(confirmatory_result_metadata)
     config_payload.update(confirmatory_result_metadata)
+    if confirmatory_metadata is not None:
+        frozen_manifest_path = output_path / "frozen_confirmatory_manifest.json"
+        shutil.copyfile(Path(confirmatory_config_path), frozen_manifest_path)
     paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
     if proposal_cache_file is not None:
         _write_proposal_cache(proposal_cache_file, proposal_cache)

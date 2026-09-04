@@ -104,12 +104,16 @@ and other experiment settings. Then pass it explicitly with
 [`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
 before launching a strict-live external run.
 
-The final reproducibility chain is: frozen manifest -> canonical manifest
-SHA-256 -> expected code commit -> exact deterministic-policy and empirical-
-probe configuration -> exact external benchmark manifest and tranche membership
--> results. `expected_code_commit` deliberately names the previously tested
-experiment-code commit, so freezing the manifest does not create a
-self-referential commit requirement.
+The final reproducibility chain is: exact final tested code commit -> frozen
+manifest -> canonical manifest SHA-256 -> exact deterministic-policy and
+empirical-probe configuration -> exact external benchmark manifest and tranche
+membership -> results. The frozen manifest references the exact final tested
+code commit from which the confirmatory experiment is executed. The manifest
+itself is treated as an immutable experiment input and may be finalized after
+that code commit is established.
+
+The freeze sequence is: `final code -> green CI -> record HEAD -> finalize
+frozen manifest -> run from recorded HEAD`.
 
 ## License
 

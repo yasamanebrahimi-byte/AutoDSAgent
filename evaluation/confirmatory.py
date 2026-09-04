@@ -228,6 +228,15 @@ def validate_confirmatory_manifest(
         )
     expected = _manifest_values(loaded)
     mismatches: list[str] = []
+    expected_code_commit = loaded.get("expected_code_commit")
+    runtime_commit = repository_commit()
+    if not isinstance(expected_code_commit, str) or not expected_code_commit.strip():
+        mismatches.append("expected_code_commit missing from frozen manifest")
+    elif runtime_commit != expected_code_commit:
+        mismatches.append(
+            "expected_code_commit: expected "
+            f"{expected_code_commit!r}, got runtime HEAD {runtime_commit!r}"
+        )
     for key, expected_value in expected.items():
         if expected_value is None:
             mismatches.append(f"{key} missing from frozen manifest")
@@ -257,6 +266,8 @@ def validate_confirmatory_manifest(
         "experiment_config_version": loaded["experiment_config_version"],
         "experiment_config_sha256": manifest_sha256(loaded),
         "manifest_schema_version": loaded["manifest_schema_version"],
+        "expected_code_commit": expected_code_commit,
+        "repository_commit": runtime_commit,
         "benchmark_manifest_matches": not any(item.startswith(("benchmark_manifest_sha256", "benchmark_manifest_version", "benchmark_tranches", "benchmark membership", "external benchmark membership")) for item in mismatches),
     }
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -620,6 +621,11 @@ def run_ablation_study(
         ),
         "experiment_config_path": str(Path(confirmatory_config_path).resolve()) if confirmatory_config_path else None,
         "experiment_config_sha256": confirmatory_metadata.get("experiment_config_sha256") if confirmatory_metadata else None,
+        "expected_code_commit": confirmatory_metadata.get("expected_code_commit") if confirmatory_metadata else None,
+        "frozen_manifest_path": (
+            str(root / "frozen_confirmatory_manifest.json")
+            if confirmatory_metadata else None
+        ),
         "strict_live_required": require_live,
         "fallback_rows": None,
         "config_mismatch_detected": False,
@@ -661,6 +667,12 @@ def run_ablation_study(
         raise ValueError("Output directory already contains an ablation study; use --resume or choose a new directory.")
     else:
         config_path.write_text(json.dumps(root_config, indent=2, sort_keys=True), encoding="utf-8")
+
+    if confirmatory_metadata is not None:
+        shutil.copyfile(
+            Path(confirmatory_config_path),
+            root / "frozen_confirmatory_manifest.json",
+        )
 
     proposal_cache_path = root / "proposal_cache.jsonl"
     results: dict[str, dict[str, Any]] = {}

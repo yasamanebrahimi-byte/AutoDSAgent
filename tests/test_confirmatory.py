@@ -30,6 +30,7 @@ MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_co
 def _manifest() -> dict:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     manifest["status"] = "frozen"
+    manifest["expected_code_commit"] = repository_commit()
     return manifest
 
 
@@ -85,6 +86,21 @@ def test_frozen_manifest_accepts_matching_runtime_and_records_hash():
     metadata = validate_confirmatory_manifest(manifest, _runtime(manifest))
     assert metadata["status"] == "frozen"
     assert metadata["experiment_config_sha256"] == manifest_sha256(manifest)
+    assert metadata["expected_code_commit"] == repository_commit()
+
+
+def test_frozen_manifest_rejects_wrong_commit():
+    manifest = _manifest()
+    manifest["expected_code_commit"] = "0" * 40
+    with pytest.raises(ValueError, match="expected_code_commit"):
+        validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
+def test_frozen_manifest_rejects_missing_commit():
+    manifest = _manifest()
+    manifest["expected_code_commit"] = None
+    with pytest.raises(ValueError, match="expected_code_commit"):
+        validate_confirmatory_manifest(manifest, _runtime(manifest))
 
 
 @pytest.mark.parametrize(
@@ -152,8 +168,59 @@ def test_manifest_hash_is_canonical_and_changes_when_a_value_changes():
 def test_draft_manifest_is_not_accepted_as_confirmatory():
     manifest = _manifest()
     manifest["status"] = "draft"
+    manifest["expected_code_commit"] = None
     with pytest.raises(ValueError, match="not frozen"):
         validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
+def test_confirmatory_run_copies_exact_frozen_manifest_and_records_metadata(tmp_path: Path):
+    manifest_path = tmp_path / "frozen.json"
+    manifest_bytes = MANIFEST_PATH.read_bytes().replace(
+        b'"status": "draft"', b'"status": "frozen"'
+    ).replace(
+        b'"expected_code_commit": null',
+        (b'"expected_code_commit": ' + json.dumps(repository_commit()).encode("ascii")),
+    )
+    manifest_path.write_bytes(manifest_bytes)
+    # The fixture is intentionally written from the checked-in bytes so the
+    # result assertion covers byte-for-byte preservation, not just semantics.
+    result_dir = tmp_path / "result"
+    frame = pd.DataFrame({"x": list(range(24)), "target": ["yes" if i % 2 else "no" for i in range(24)]})
+    case = BenchmarkCase(
+        name="manifest_copy_fixture",
+        dataframe=frame,
+        target_column="target",
+        question="Classify target from x.",
+        expected_task_type="classification",
+        dataset_source="in-memory test fixture",
+        openml_task_id=359983,
+        benchmark_suite_version="1.0.0",
+    )
+    metadata = {
+        "status": "frozen",
+        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_sha256": manifest_sha256(manifest_path),
+        "benchmark_manifest_matches": True,
+        "expected_code_commit": repository_commit(),
+        "repository_commit": repository_commit(),
+    }
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("evaluation.runner.validate_confirmatory_manifest", lambda *_args: metadata)
+    try:
+        run_evaluation(
+            result_dir,
+            cases=[case],
+            offline=True,
+            suite="external",
+            confirmatory_config_path=manifest_path,
+        )
+    finally:
+        monkeypatch.undo()
+    copied = result_dir / "frozen_confirmatory_manifest.json"
+    assert copied.read_bytes() == manifest_bytes
+    config = json.loads((result_dir / "config.json").read_text(encoding="utf-8"))
+    assert config["experiment_config_sha256"] == manifest_sha256(manifest_path)
+    assert config["frozen_manifest_path"] == str(copied)
 
 
 def test_manifest_schema_version_is_explicit():
