@@ -17,6 +17,13 @@ from typing import Any, Mapping
 
 CONFIRMATORY_MANIFEST_SCHEMA_VERSION = "confirmatory-manifest-v1"
 CONFIRMATORY_EXPERIMENT_NAME = "selective-intervention-reliability"
+EXPERIMENT_CODE_PATHS = ("app", "evaluation", "pyproject.toml")
+CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.json"
+_EXCLUDED_DIRECTORY_NAMES = {
+    ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".cache", "cache", "caches", "evaluation_results", "results", "tmp", "temp",
+}
+_EXCLUDED_FILE_SUFFIXES = {".pyc", ".pyo", ".tmp", ".temp"}
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -36,6 +43,44 @@ def manifest_sha256(manifest: Mapping[str, Any] | str | Path) -> str:
     if isinstance(manifest, (str, Path)):
         manifest = json.loads(Path(manifest).read_text(encoding="utf-8"))
     return hashlib.sha256(canonical_json_bytes(manifest)).hexdigest()
+
+
+def experiment_code_sha256(repository_root: str | Path | None = None) -> str:
+    """Hash the canonical result-affecting source/configuration tree.
+
+    Paths and file bytes are framed separately, and paths are visited in
+    lexical POSIX order.  The confirmatory manifest is deliberately excluded:
+    its expected digest must not hash itself.
+    """
+
+    root = Path(repository_root) if repository_root is not None else Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    files: list[Path] = []
+    for relative_root in EXPERIMENT_CODE_PATHS:
+        candidate = root / relative_root
+        if candidate.is_file():
+            files.append(candidate)
+        elif candidate.is_dir():
+            files.extend(path for path in candidate.rglob("*") if path.is_file())
+    included: list[tuple[str, Path]] = []
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        parts = set(Path(relative).parts)
+        if parts & _EXCLUDED_DIRECTORY_NAMES:
+            continue
+        if path.suffix.lower() in _EXCLUDED_FILE_SUFFIXES:
+            continue
+        if relative == CONFIRMATORY_MANIFEST_RELATIVE_PATH:
+            continue
+        included.append((relative, path))
+    for relative, path in sorted(included, key=lambda item: item[0]):
+        path_bytes = relative.encode("utf-8")
+        file_bytes = path.read_bytes()
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(len(file_bytes).to_bytes(8, "big"))
+        digest.update(file_bytes)
+    return digest.hexdigest()
 
 
 def load_confirmatory_manifest(path: str | Path) -> dict[str, Any]:
@@ -112,7 +157,7 @@ def _manifest_values(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "manifest_schema_version": manifest.get("manifest_schema_version"),
         "experiment_name": manifest.get("experiment_name"),
         "experiment_config_version": manifest.get("experiment_config_version"),
-        "expected_code_commit": manifest.get("expected_code_commit"),
+        "expected_experiment_code_sha256": manifest.get("expected_experiment_code_sha256"),
         "planner_model": modeling.get("planner_model"),
         "reconciler_model": modeling.get("reconciler_model"),
         "split_seeds": repetitions.get("split_seeds"),
@@ -162,7 +207,8 @@ def runtime_manifest_values(
     strict_live_required: bool,
     bootstrap_settings: Mapping[str, Any],
     experiment_config_version: str,
-    expected_code_commit: str | None = None,
+    expected_experiment_code_sha256: str | None = None,
+    source_git_commit: str | None = None,
     deterministic_policy_sha256: str | None = None,
     empirical_probe_policy_sha256: str | None = None,
     benchmark_manifest_sha256: str | None = None,
@@ -177,7 +223,8 @@ def runtime_manifest_values(
         "manifest_schema_version": CONFIRMATORY_MANIFEST_SCHEMA_VERSION,
         "experiment_name": experiment_name,
         "experiment_config_version": experiment_config_version,
-        "expected_code_commit": expected_code_commit,
+        "expected_experiment_code_sha256": expected_experiment_code_sha256,
+        "source_git_commit": source_git_commit,
         "planner_model": planner_model,
         "reconciler_model": reconciler_model,
         "split_seeds": list(split_seeds),
@@ -228,14 +275,15 @@ def validate_confirmatory_manifest(
         )
     expected = _manifest_values(loaded)
     mismatches: list[str] = []
-    expected_code_commit = loaded.get("expected_code_commit")
-    runtime_commit = repository_commit()
-    if not isinstance(expected_code_commit, str) or not expected_code_commit.strip():
-        mismatches.append("expected_code_commit missing from frozen manifest")
-    elif runtime_commit != expected_code_commit:
+    expected_code_sha256 = loaded.get("expected_experiment_code_sha256")
+    observed_code_sha256 = experiment_code_sha256()
+    if not isinstance(expected_code_sha256, str) or not expected_code_sha256.strip():
+        mismatches.append("expected_experiment_code_sha256 missing from frozen manifest")
+    elif observed_code_sha256 != expected_code_sha256:
         mismatches.append(
-            "expected_code_commit: expected "
-            f"{expected_code_commit!r}, got runtime HEAD {runtime_commit!r}"
+            "experiment code SHA-256 mismatch: expected "
+            f"{expected_code_sha256!r}, observed {observed_code_sha256!r}; "
+            "result-affecting experiment code/configuration differs from the frozen manifest"
         )
     for key, expected_value in expected.items():
         if expected_value is None:
@@ -245,7 +293,14 @@ def validate_confirmatory_manifest(
         if key == "selected_ablations" and actual_value is None:
             continue
         if not _same(expected_value, actual_value):
-            mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
+            if key == "expected_experiment_code_sha256":
+                mismatches.append(
+                    "experiment code SHA-256 mismatch: expected "
+                    f"{expected_value!r}, observed {actual_value!r}; "
+                    "result-affecting experiment code/configuration differs from the frozen manifest"
+                )
+            else:
+                mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
     frozen_ids = loaded.get("external_benchmark", {}).get("task_ids")
     frozen_tranches = loaded.get("external_benchmark", {}).get("tranches")
     selected_ids = runtime_values.get("benchmark_task_ids")
@@ -266,8 +321,9 @@ def validate_confirmatory_manifest(
         "experiment_config_version": loaded["experiment_config_version"],
         "experiment_config_sha256": manifest_sha256(loaded),
         "manifest_schema_version": loaded["manifest_schema_version"],
-        "expected_code_commit": expected_code_commit,
-        "repository_commit": runtime_commit,
+        "expected_experiment_code_sha256": expected_code_sha256,
+        "observed_experiment_code_sha256": observed_code_sha256,
+        "source_git_commit": repository_commit(),
         "benchmark_manifest_matches": not any(item.startswith(("benchmark_manifest_sha256", "benchmark_manifest_version", "benchmark_tranches", "benchmark membership", "external benchmark membership")) for item in mismatches),
     }
 

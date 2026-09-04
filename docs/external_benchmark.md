@@ -20,6 +20,20 @@ tasks from AMLB regression suite `269`. OpenML task ID, rather than dataset
 name, is the canonical source identifier. The suite should remain frozen before
 the first live research evaluation.
 
+## Confirmatory code freeze
+
+Confirmatory validation uses `expected_experiment_code_sha256`, not Git HEAD.
+The canonical SHA-256 includes sorted relative paths and bytes from `app/`,
+`evaluation/` except `evaluation/configs/paper_confirmatory_v1.json`, and
+`pyproject.toml`. It excludes the manifest to avoid self-reference, as well as
+`.git`, generated results, caches, Python bytecode, and temporary files. The
+optional `source_git_commit` field is provenance metadata only.
+
+To freeze a run, finalize result-affecting code and configuration, compute the
+hash, insert it in the manifest, set `status` to `frozen`, commit the manifest,
+and then validate the run. The commit does not alter the experiment hash;
+changes to included result-affecting files do.
+
 The original AMLB citation is:
 
 > Pieter Gijsbers et al., “AMLB: an AutoML Benchmark,” *Journal of Machine

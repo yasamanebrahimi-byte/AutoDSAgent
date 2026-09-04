@@ -34,6 +34,7 @@ from evaluation.confirmatory import (
     empirical_probe_config,
     config_sha256,
     repository_commit as current_repository_commit,
+    experiment_code_sha256,
 )
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from app.deterministic_policy import DeterministicPolicy
@@ -542,7 +543,8 @@ def run_ablation_study(
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
-            expected_code_commit=current_repository_commit(),
+            expected_experiment_code_sha256=experiment_code_sha256(),
+            source_git_commit=current_repository_commit(),
         )
         if suite != "external":
             raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
@@ -621,7 +623,8 @@ def run_ablation_study(
         ),
         "experiment_config_path": str(Path(confirmatory_config_path).resolve()) if confirmatory_config_path else None,
         "experiment_config_sha256": confirmatory_metadata.get("experiment_config_sha256") if confirmatory_metadata else None,
-        "expected_code_commit": confirmatory_metadata.get("expected_code_commit") if confirmatory_metadata else None,
+        "expected_experiment_code_sha256": confirmatory_metadata.get("expected_experiment_code_sha256") if confirmatory_metadata else None,
+        "source_git_commit": confirmatory_metadata.get("source_git_commit") if confirmatory_metadata else repository_commit(),
         "frozen_manifest_path": (
             str(root / "frozen_confirmatory_manifest.json")
             if confirmatory_metadata else None

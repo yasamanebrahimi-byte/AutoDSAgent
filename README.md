@@ -104,16 +104,19 @@ and other experiment settings. Then pass it explicitly with
 [`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
 before launching a strict-live external run.
 
-The final reproducibility chain is: exact final tested code commit -> frozen
-manifest -> canonical manifest SHA-256 -> exact deterministic-policy and
-empirical-probe configuration -> exact external benchmark manifest and tranche
-membership -> results. The frozen manifest references the exact final tested
-code commit from which the confirmatory experiment is executed. The manifest
-itself is treated as an immutable experiment input and may be finalized after
-that code commit is established.
+The confirmatory code identity is a canonical SHA-256 over sorted relative
+paths and bytes in `app/`, `evaluation/` (excluding the confirmatory manifest),
+and `pyproject.toml`. Git metadata, generated evaluation results, caches,
+`.git`, Python bytecode, and temporary files are excluded. The manifest is
+excluded because its expected hash would otherwise hash itself. A Git commit
+may be recorded as `source_git_commit` for provenance, but it is not used for
+confirmatory validity.
 
-The freeze sequence is: `final code -> green CI -> record HEAD -> finalize
-frozen manifest -> run from recorded HEAD`.
+The freeze sequence is: finalize result-affecting code/configuration -> compute
+the experiment code SHA-256 -> insert it as
+`expected_experiment_code_sha256` -> set the manifest to `frozen` -> commit the
+freeze -> validate. Committing the frozen manifest does not change the code
+hash; changing any included result-affecting file does.
 
 ## License
 

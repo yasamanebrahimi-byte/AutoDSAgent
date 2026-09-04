@@ -66,6 +66,7 @@ from evaluation.confirmatory import (
     empirical_probe_config,
     config_sha256,
     repository_commit,
+    experiment_code_sha256,
 )
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.statistics import (
@@ -1714,7 +1715,8 @@ def run_evaluation(
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
-            expected_code_commit=repository_commit(),
+            expected_experiment_code_sha256=experiment_code_sha256(),
+            source_git_commit=repository_commit(),
         )
         confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
     stable_config = {
@@ -1730,10 +1732,11 @@ def run_evaluation(
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None
         ),
-        "expected_code_commit": (
-            confirmatory_metadata.get("expected_code_commit")
+        "expected_experiment_code_sha256": (
+            confirmatory_metadata.get("expected_experiment_code_sha256")
             if confirmatory_metadata else None
         ),
+        "source_git_commit": confirmatory_metadata.get("source_git_commit") if confirmatory_metadata else repository_commit(),
         "frozen_manifest_path": None,
         "strict_live_required": config.require_live,
         "fallback_rows": None,
@@ -2023,12 +2026,12 @@ def run_evaluation(
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None
         ),
-        "expected_code_commit": (
-            confirmatory_metadata.get("expected_code_commit")
+        "expected_experiment_code_sha256": (
+            confirmatory_metadata.get("expected_experiment_code_sha256")
             if confirmatory_metadata else None
         ),
-        "repository_commit": (
-            confirmatory_metadata.get("repository_commit")
+        "source_git_commit": (
+            confirmatory_metadata.get("source_git_commit")
             if confirmatory_metadata else config.repository_commit
         ),
         "frozen_manifest_path": (

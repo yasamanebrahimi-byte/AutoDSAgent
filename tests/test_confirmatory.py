@@ -18,6 +18,7 @@ from evaluation.confirmatory import (
     deterministic_policy_config,
     empirical_probe_config,
     repository_commit,
+    experiment_code_sha256,
 )
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.runner import EXPERIMENT_CONFIG_VERSION
@@ -30,7 +31,7 @@ MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_co
 def _manifest() -> dict:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     manifest["status"] = "frozen"
-    manifest["expected_code_commit"] = repository_commit()
+    manifest["expected_experiment_code_sha256"] = experiment_code_sha256()
     return manifest
 
 
@@ -75,7 +76,7 @@ def _runtime(manifest: dict, **overrides):
             "seed": statistics["bootstrap_seed"],
         },
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
-        "expected_code_commit": repository_commit(),
+        "expected_experiment_code_sha256": experiment_code_sha256(),
     }
     values.update(overrides)
     return runtime_manifest_values(**values)
@@ -86,20 +87,20 @@ def test_frozen_manifest_accepts_matching_runtime_and_records_hash():
     metadata = validate_confirmatory_manifest(manifest, _runtime(manifest))
     assert metadata["status"] == "frozen"
     assert metadata["experiment_config_sha256"] == manifest_sha256(manifest)
-    assert metadata["expected_code_commit"] == repository_commit()
+    assert metadata["expected_experiment_code_sha256"] == experiment_code_sha256()
 
 
-def test_frozen_manifest_rejects_wrong_commit():
+def test_frozen_manifest_rejects_wrong_experiment_code_hash():
     manifest = _manifest()
-    manifest["expected_code_commit"] = "0" * 40
-    with pytest.raises(ValueError, match="expected_code_commit"):
+    manifest["expected_experiment_code_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="expected.*SHA-256|SHA-256 mismatch"):
         validate_confirmatory_manifest(manifest, _runtime(manifest))
 
 
-def test_frozen_manifest_rejects_missing_commit():
+def test_frozen_manifest_rejects_missing_experiment_code_hash():
     manifest = _manifest()
-    manifest["expected_code_commit"] = None
-    with pytest.raises(ValueError, match="expected_code_commit"):
+    manifest["expected_experiment_code_sha256"] = None
+    with pytest.raises(ValueError, match="expected_experiment_code_sha256"):
         validate_confirmatory_manifest(manifest, _runtime(manifest))
 
 
@@ -123,7 +124,7 @@ def test_frozen_manifest_rejects_runtime_mismatch(field, value, message):
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("expected_code_commit", "0" * 40, "expected_code_commit"),
+        ("expected_experiment_code_sha256", "0" * 64, "SHA-256"),
         ("deterministic_policy_sha256", "changed", "deterministic_policy_sha256"),
         ("empirical_probe_policy_sha256", "changed", "empirical_probe_policy_sha256"),
         ("benchmark_task_ids", [359983], "benchmark membership"),
@@ -168,7 +169,7 @@ def test_manifest_hash_is_canonical_and_changes_when_a_value_changes():
 def test_draft_manifest_is_not_accepted_as_confirmatory():
     manifest = _manifest()
     manifest["status"] = "draft"
-    manifest["expected_code_commit"] = None
+    manifest["expected_experiment_code_sha256"] = None
     with pytest.raises(ValueError, match="not frozen"):
         validate_confirmatory_manifest(manifest, _runtime(manifest))
 
@@ -178,8 +179,8 @@ def test_confirmatory_run_copies_exact_frozen_manifest_and_records_metadata(tmp_
     manifest_bytes = MANIFEST_PATH.read_bytes().replace(
         b'"status": "draft"', b'"status": "frozen"'
     ).replace(
-        b'"expected_code_commit": null',
-        (b'"expected_code_commit": ' + json.dumps(repository_commit()).encode("ascii")),
+        b'"expected_experiment_code_sha256": null',
+        (b'"expected_experiment_code_sha256": ' + json.dumps(experiment_code_sha256()).encode("ascii")),
     )
     manifest_path.write_bytes(manifest_bytes)
     # The fixture is intentionally written from the checked-in bytes so the
@@ -201,8 +202,8 @@ def test_confirmatory_run_copies_exact_frozen_manifest_and_records_metadata(tmp_
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
         "experiment_config_sha256": manifest_sha256(manifest_path),
         "benchmark_manifest_matches": True,
-        "expected_code_commit": repository_commit(),
-        "repository_commit": repository_commit(),
+        "expected_experiment_code_sha256": experiment_code_sha256(),
+        "source_git_commit": repository_commit(),
     }
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr("evaluation.runner.validate_confirmatory_manifest", lambda *_args: metadata)
@@ -247,3 +248,47 @@ def test_ordinary_development_run_is_unblocked_and_emits_current_prompt_metadata
     assert config["reconciler_prompt_schema_version"]
     assert config["prompt_schema_version"] == PROMPT_SCHEMA_VERSION
     assert config["prompt_schema_version"] != "modeling-gate-v1"
+
+
+def test_experiment_hash_manifest_freeze_is_self_reference_free(tmp_path: Path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "evaluation" / "configs").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_bytes(b"[project]\nname='fixture'\n")
+    (tmp_path / "app" / "pipeline.py").write_bytes(b"PIPELINE = 1\n")
+    manifest_path = tmp_path / "evaluation" / "configs" / "paper_confirmatory_v1.json"
+    manifest_path.write_text('{"status":"draft","expected_experiment_code_sha256":null}', encoding="utf-8")
+    before = experiment_code_sha256(tmp_path)
+    manifest_path.write_text(
+        json.dumps({"status": "frozen", "expected_experiment_code_sha256": before}, indent=2),
+        encoding="utf-8",
+    )
+    assert experiment_code_sha256(tmp_path) == before
+
+
+def test_experiment_hash_detects_included_source_and_ignores_generated_files(tmp_path: Path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "evaluation" / "evaluation_results").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_bytes(b"[project]\nname='fixture'\n")
+    source = tmp_path / "app" / "policy.py"
+    source.write_bytes(b"POLICY = 1\n")
+    baseline = experiment_code_sha256(tmp_path)
+    (tmp_path / "evaluation" / "evaluation_results" / "result.json").write_bytes(b"{}")
+    assert experiment_code_sha256(tmp_path) == baseline
+    source.write_bytes(b"POLICY = 2\n")
+    assert experiment_code_sha256(tmp_path) != baseline
+
+
+def test_validation_rejects_changed_experiment_code_with_clear_hash_error(monkeypatch):
+    manifest = _manifest()
+    monkeypatch.setattr("evaluation.confirmatory.experiment_code_sha256", lambda: "f" * 64)
+    with pytest.raises(ValueError, match="expected.*observed.*result-affecting"):
+        validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
+def test_experiment_hash_is_deterministic_independent_of_traversal_order(tmp_path: Path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "evaluation").mkdir()
+    (tmp_path / "pyproject.toml").write_bytes(b"[project]\nname='fixture'\n")
+    (tmp_path / "app" / "z.py").write_bytes(b"z\n")
+    (tmp_path / "app" / "a.py").write_bytes(b"a\n")
+    assert experiment_code_sha256(tmp_path) == experiment_code_sha256(tmp_path)
