@@ -24,7 +24,7 @@ from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_SEED,
     cluster_bootstrap_ci,
 )
-from evaluation.metrics import DEFAULT_THRESHOLDS, holdout_neutral_tolerance, paper_holdout_delta
+from evaluation.metrics import DEFAULT_THRESHOLDS, holdout_neutral_tolerance, paper_holdout_delta, summarize_trials
 from evaluation.confirmatory import (
     CONFIRMATORY_EXPERIMENT_NAME,
     load_confirmatory_manifest,
@@ -36,9 +36,12 @@ from evaluation.confirmatory import (
     repository_commit as current_repository_commit,
     experiment_code_sha256,
     model_conditions,
-    repetition_ids,
+    condition_repetition_ids,
+    expand_confirmatory_evaluation_units,
+    validate_confirmatory_completeness,
 )
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
+from evaluation.provenance import environment_provenance
 from app.deterministic_policy import DeterministicPolicy
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.llm import PROMPT_SCHEMA_VERSION
@@ -248,6 +251,8 @@ def _unit_key(row: dict[str, Any]) -> tuple[Any, ...]:
         row.get("split_seed"),
         row.get("trial"),
         row.get("evaluation_variant", "standard"),
+        row.get("model_condition_id", "default"),
+        row.get("llm_repetition_id"),
     )
 
 
@@ -426,6 +431,13 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"- `{item['first']}` vs `{item['second']}`: dataset-macro untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Trial-weighted diagnostic mean: `{item['trial_weighted_mean_paired_holdout_delta_difference_first_advantage']}`. Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
         )
+    lines.extend(["", "## Model-Condition Summaries", "", "Model conditions are reported separately; repetitions remain nested within dataset/task."])
+    lines.extend(["", "| Model condition | Ablation | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta |", "|---|---|---:|---:|---:|---:|---:|---:|"])
+    for condition_id, condition_payload in payload.get("by_model_condition", {}).items():
+        for ablation_name, summary in condition_payload.get("by_ablation", {}).items():
+            lines.append(
+                f"| {condition_id} | {ablation_name} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} |"
+            )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
         api = row["api_usage"]
@@ -495,14 +507,35 @@ def run_ablation_study(
         raise ValueError("At least one split seed is required.")
     configured_thresholds = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     confirmatory_metadata: dict[str, Any] | None = None
+    frozen_conditions: list[dict[str, Any]] | None = None
     if confirmatory_config_path is not None:
         manifest = load_confirmatory_manifest(confirmatory_config_path)
+        frozen_conditions = model_conditions(manifest)
+        # In strict mode the frozen manifest is the sole experiment design
+        # source.  Runtime flags cannot narrow, add, or replace its matrix.
+        selected_names = list((manifest.get("ablations") or {}).get("primary", []))
+        if not selected_names:
+            raise ValueError("Frozen confirmatory manifest declares no primary ablations.")
+        if include_perturbations:
+            raise ValueError(
+                "Strict confirmatory perturbations must be declared by the frozen manifest; "
+                "the current manifest declares none."
+            )
+        split_seeds = tuple(
+            int(value) for value in (manifest.get("splits_and_repetitions", {}) or {}).get("split_seeds", [])
+        )
+        if not split_seeds:
+            raise ValueError("Frozen confirmatory manifest declares no split seeds.")
+        # The initial validation uses one declared condition only to validate
+        # the manifest identity.  Each condition is executed below with its
+        # own models, repetitions, IDs, and settings.
+        first_condition = frozen_conditions[0]
         runtime_values = runtime_manifest_values(
             experiment_name=CONFIRMATORY_EXPERIMENT_NAME,
-            planner_model=resolved_planner_model,
-            reconciler_model=resolved_reconciler_model,
+            planner_model=first_condition["planner_model"],
+            reconciler_model=first_condition["reconciler_model"],
             split_seeds=split_seeds,
-            llm_repetitions=repetitions,
+            llm_repetitions=int((manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", first_condition["llm_repetitions"])),
             holdout_fraction=0.2,
             selected_ablations=selected_names,
             deterministic_policy_version=DeterministicPolicy().version,
@@ -547,13 +580,23 @@ def run_ablation_study(
             experiment_config_version=EXPERIMENT_CONFIG_VERSION,
             expected_experiment_code_sha256=experiment_code_sha256(),
             source_git_commit=current_repository_commit(),
-            model_conditions=model_conditions(manifest),
-            generation_settings={key: value for key, value in (manifest.get("generation_settings", {}) or {}).items() if value is not None},
-            llm_repetition_ids=repetition_ids(manifest),
+            model_conditions=frozen_conditions,
+            generation_settings={
+                key: value for key, value in (manifest.get("generation_settings", {}) or {}).items()
+                if value is not None
+            },
+            llm_repetition_ids=condition_repetition_ids(manifest, first_condition),
+            selected_model_condition_id=first_condition["condition_id"],
         )
         if suite != "external":
             raise ValueError("Confirmatory manifest enforcement requires suite='external'.")
         confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
+        unknown = sorted(set(selected_names) - set(all_specs))
+        if unknown:
+            raise ValueError(f"Frozen manifest contains unknown ablation preset(s): {', '.join(unknown)}")
+        selected_specs = [all_specs[name] for name in selected_names]
+    else:
+        selected_specs = [all_specs[name] for name in selected_names]
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / "config.json"
@@ -573,10 +616,25 @@ def run_ablation_study(
         "ablation_schema_version": ABLATION_SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seeds": list(split_seeds),
-        "llm_repetitions": repetitions,
+        "llm_repetitions": (
+            int((manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", repetitions))
+            if frozen_conditions is not None else repetitions
+        ),
+        "llm_repetitions_by_model_condition": {
+            str(condition["condition_id"]): int(condition["llm_repetitions"])
+            for condition in (frozen_conditions or [{"condition_id": "default", "llm_repetitions": repetitions}])
+        },
         "model": model,
         "planner_model": resolved_planner_model,
         "reconciler_model": resolved_reconciler_model,
+        "model_conditions": frozen_conditions or [{
+            "condition_id": "default",
+            "planner_model": resolved_planner_model,
+            "reconciler_model": resolved_reconciler_model,
+            "llm_repetitions": repetitions,
+            "llm_repetition_ids": [f"rep_{index + 1:03d}" for index in range(repetitions)],
+            "generation_settings": dict({}),
+        }],
         "planner_model_requested": resolved_planner_model,
         "reconciler_model_requested": resolved_reconciler_model,
         "suite": suite,
@@ -640,6 +698,17 @@ def run_ablation_study(
         "confirmatory_valid": None,
         "evaluation_objective": "intervention-quality-v1",
     }
+    if frozen_conditions is not None:
+        root_config.update({
+            "model": "multiple_frozen_conditions",
+            "planner_model": "multiple_frozen_conditions",
+            "reconciler_model": "multiple_frozen_conditions",
+            "generation_settings_by_model_condition": {
+                str(condition["condition_id"]): dict(condition.get("generation_settings", {}) or {})
+                for condition in frozen_conditions
+            },
+            "environment_provenance": environment_provenance(manifest=confirmatory_config_path),
+        })
     if suite == "external":
         root_config["benchmark_suite_version"] = (
             selected_cases[0].benchmark_suite_version or "unknown"
@@ -685,35 +754,62 @@ def run_ablation_study(
     proposal_cache_path = root / "proposal_cache.jsonl"
     results: dict[str, dict[str, Any]] = {}
     trial_rows: dict[str, list[dict[str, Any]]] = {}
+    execution_conditions = frozen_conditions or [{
+        "condition_id": "default",
+        "planner_model": resolved_planner_model,
+        "reconciler_model": resolved_reconciler_model,
+        "llm_repetitions": repetitions,
+        "llm_repetition_ids": [f"rep_{index + 1:03d}" for index in range(repetitions)],
+        "generation_settings": {},
+    }]
     for spec in selected_specs:
-        spec_dir = root / spec.name
-        result = run_evaluation(
-            spec_dir,
-            cases=selected_cases,
-            repetitions=repetitions,
-            seed=split_seeds[0],
-            split_seeds=split_seeds,
-            model=model,
-            planner_model=resolved_planner_model,
-            reconciler_model=resolved_reconciler_model,
-            offline=offline,
-            require_live=require_live,
-            include_perturbations=include_perturbations,
-            thresholds=thresholds,
-            case_names=case_names,
-            modeling_plan_factory=modeling_plan_factory,
-            reconciliation_factory=reconciliation_factory,
-            ablation_spec=spec,
-            proposal_cache_path=proposal_cache_path,
-            empirical_reference_cache_path=root / "empirical_reference_cache.json",
-            resume=resume and (spec_dir / "config.json").is_file(),
-            suite=suite,
-            tier=tier,
-            confirmatory_config_path=confirmatory_config_path,
-            confirmatory_selected_ablations=selected_names if confirmatory_metadata else None,
-        )
-        results[spec.name] = result
-        trial_rows[spec.name] = result["trials"]
+        combined_rows: list[dict[str, Any]] = []
+        condition_results: dict[str, dict[str, Any]] = {}
+        for condition in execution_conditions:
+            condition_id = str(condition["condition_id"])
+            spec_dir = root / spec.name
+            if len(execution_conditions) > 1:
+                spec_dir = spec_dir / condition_id
+            condition_reps = int(condition["llm_repetitions"])
+            condition_ids = condition_repetition_ids(
+                manifest, condition
+            ) if frozen_conditions is not None else list(condition["llm_repetition_ids"])
+            result = run_evaluation(
+                spec_dir,
+                cases=selected_cases,
+                repetitions=condition_reps,
+                seed=split_seeds[0],
+                split_seeds=split_seeds,
+                model=condition["planner_model"],
+                planner_model=condition["planner_model"],
+                reconciler_model=condition["reconciler_model"],
+                offline=offline,
+                require_live=require_live,
+                include_perturbations=include_perturbations,
+                thresholds=thresholds,
+                case_names=case_names,
+                modeling_plan_factory=modeling_plan_factory,
+                reconciliation_factory=reconciliation_factory,
+                ablation_spec=spec,
+                proposal_cache_path=proposal_cache_path,
+                empirical_reference_cache_path=root / "empirical_reference_cache.json",
+                resume=resume and (spec_dir / "config.json").is_file(),
+                suite=suite,
+                tier=tier,
+                confirmatory_config_path=confirmatory_config_path,
+                confirmatory_selected_ablations=selected_names if confirmatory_metadata else None,
+                model_condition_id=condition_id,
+                llm_repetition_ids=condition_ids,
+                generation_settings=dict(condition.get("generation_settings", {}) or {}),
+            )
+            condition_results[condition_id] = result
+            combined_rows.extend(result["trials"])
+        results[spec.name] = {
+            "summary": summarize_trials(combined_rows, thresholds=thresholds),
+            "trials": combined_rows,
+            "condition_results": condition_results,
+        }
+        trial_rows[spec.name] = combined_rows
 
     central = [_health_row(name, results[name], all_specs[name]) for name in selected_names]
     summaries = {name: results[name]["summary"] for name in selected_names}
@@ -742,6 +838,18 @@ def run_ablation_study(
         for first, second in pairs
         if first in rows_by_name and second in rows_by_name
     ]
+    completeness: dict[str, Any] | None = None
+    if confirmatory_metadata is not None:
+        expected_units = expand_confirmatory_evaluation_units(
+            manifest,
+            dataset_ids=[case.name for case in selected_cases],
+            split_seeds=split_seeds,
+            ablations=selected_names,
+        )
+        completeness = validate_confirmatory_completeness(
+            expected_units,
+            [row for rows in trial_rows.values() for row in rows],
+        )
     combined = {
         **root_config,
         "central_table": central,
@@ -751,6 +859,18 @@ def run_ablation_study(
         "live_integrity": {
             row["ablation"]: row["api_usage"] for row in central
         },
+        "by_model_condition": {
+            str(condition["condition_id"]): {
+                "by_ablation": {
+                    name: results[name]["condition_results"][str(condition["condition_id"])]
+                    ["summary"]
+                    for name in selected_names
+                },
+                "aggregation_rule": "reported separately by model condition; no cross-condition pooling",
+            }
+            for condition in execution_conditions
+        },
+        "confirmatory_matrix": completeness,
     }
     if confirmatory_metadata is not None:
         fallback_rows = sum(
@@ -762,7 +882,13 @@ def run_ablation_study(
                 all(result["summary"].get("external_benchmark_manifest_matches") is True for result in results.values())
             ),
             "confirmatory_valid": bool(
-                all(result["summary"].get("confirmatory_valid") is True for result in results.values())
+                completeness is not None and completeness.get("complete", False)
+                and
+                all(
+                    condition_result["summary"].get("confirmatory_valid") is True
+                    for result in results.values()
+                    for condition_result in result.get("condition_results", {}).values()
+                )
             ),
         })
         combined.update(root_config)

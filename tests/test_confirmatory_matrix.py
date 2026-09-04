@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from evaluation.confirmatory import (
     expand_confirmatory_matrix,
+    expand_confirmatory_evaluation_units,
     model_conditions,
     repetition_ids,
     runtime_manifest_values,
-    validate_confirmatory_manifest,
+    validate_confirmatory_completeness,
 )
 from evaluation.runner import _proposal_cache_key
 from evaluation.benchmarks import BenchmarkCase
@@ -26,6 +29,11 @@ def test_confirmatory_matrix_expands_conditions_repetitions_and_ablations():
     rows = expand_confirmatory_matrix(_manifest(), dataset_ids=["task-1"])
     assert len(rows) == 8
     assert {(row["condition_id"], row["llm_repetition_id"], row["ablation"]) for row in rows}.__len__() == 8
+    units = expand_confirmatory_evaluation_units(
+        _manifest(), dataset_ids=["task-1"], split_seeds=[42, 123]
+    )
+    assert len(units) == 16
+    assert {row["model_condition_id"] for row in units} == {"a", "b"}
 
 
 def test_repetition_ids_are_explicit_and_conditions_are_normalized():
@@ -38,6 +46,7 @@ def test_proposal_cache_identity_separates_models_and_repetitions():
     common = dict(case=case, perturbation_id="clean", split_seed=42, model="same", prompt_schema_version="p", training_profile={})
     assert _proposal_cache_key(**common, llm_repetition=1, model_condition_id="a") != _proposal_cache_key(**common, llm_repetition=1, model_condition_id="b")
     assert _proposal_cache_key(**common, llm_repetition=1, llm_repetition_id="r1") != _proposal_cache_key(**common, llm_repetition=2, llm_repetition_id="r2")
+    assert _proposal_cache_key(**common, llm_repetition=1, generation_settings={"temperature": 0.1}) != _proposal_cache_key(**common, llm_repetition=1, generation_settings={"temperature": 0.2})
 
 
 def test_runtime_matrix_projection_can_detect_condition_set_drift():
@@ -52,3 +61,20 @@ def test_runtime_matrix_projection_can_detect_condition_set_drift():
         model_conditions=model_conditions(_manifest()), llm_repetition_ids=["r1", "r2"],
     )
     assert len(values["model_conditions"]) == 2
+
+
+def test_confirmatory_completeness_rejects_missing_duplicate_and_extra_units():
+    expected = [
+        {"model_condition_id": "a", "llm_repetition_id": "r1", "benchmark_case": "task-1", "ablation_name": "full", "perturbation_id": "clean", "split_seed": 42, "evaluation_variant": "standard"},
+        {"model_condition_id": "b", "llm_repetition_id": "r1", "benchmark_case": "task-1", "ablation_name": "full", "perturbation_id": "clean", "split_seed": 42, "evaluation_variant": "standard"},
+    ]
+    complete = [dict(row, trial_status="completed", perturbation_id="clean", split_seed=42) for row in expected]
+    audit = validate_confirmatory_completeness(expected, complete)
+    assert audit["complete"] is True
+    with pytest.raises(ValueError, match="incomplete"):
+        validate_confirmatory_completeness(expected, complete[:1])
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_confirmatory_completeness(expected, complete + [complete[0]])
+    extra = complete + [{**complete[0], "model_condition_id": "c"}]
+    with pytest.raises(ValueError, match="unexpected"):
+        validate_confirmatory_completeness(expected, extra)

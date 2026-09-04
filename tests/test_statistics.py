@@ -71,3 +71,18 @@ def test_dataset_macro_health_equalizes_unequal_trial_counts():
         weights=DEFAULT_GATE_UTILITY_WEIGHTS,
     )
     assert health["mean_regret_reduction"] == 0.5
+
+
+def test_more_llm_repetitions_do_not_increase_independent_dataset_count():
+    records = [
+        {"benchmark_case": "A", "trial_status": "completed", "agent_normalized_regret": 0.1, "gated_normalized_regret": 0.0},
+        {"benchmark_case": "B", "trial_status": "completed", "agent_normalized_regret": 0.1, "gated_normalized_regret": 0.0},
+    ]
+    repeated = records + [
+        {**row, "llm_repetition_id": "rep_002"} for row in records
+    ]
+    health = _dataset_macro_health(
+        repeated, tolerance=0.02, catastrophic_threshold=0.9,
+        weights=DEFAULT_GATE_UTILITY_WEIGHTS,
+    )
+    assert health["dataset_count"] == 2

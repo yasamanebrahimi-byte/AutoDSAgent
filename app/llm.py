@@ -42,17 +42,62 @@ class LLMUnavailable(RuntimeError):
     """Raised when an OpenAI-backed agent cannot be used."""
 
 
+class GenerationSettingsError(ValueError):
+    """Raised when a frozen generation setting cannot be sent to a model."""
+
+
+def validate_generation_settings(model: str, settings: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate and normalize settings for the Responses API.
+
+    ``None`` values intentionally mean provider default and are omitted from
+    the request.  The Responses API has no portable ``seed`` parameter, so a
+    frozen seed is rejected instead of being recorded and silently ignored.
+    """
+
+    normalized = dict(settings or {})
+    supported = {"temperature", "top_p"}
+    model_name = str(model)
+    lower_model = model_name.lower()
+    reasoning_model = lower_model.startswith(("o1", "o3", "o4", "gpt-5"))
+    if reasoning_model:
+        supported = {"reasoning_effort"}
+    unknown = sorted(set(normalized) - {"temperature", "top_p", "seed", "reasoning_effort"})
+    if unknown:
+        raise GenerationSettingsError(
+            f"Generation setting {unknown[0]!r} is not recognized for frozen model {model_name!r}."
+        )
+    for key, value in normalized.items():
+        if value is None:
+            continue
+        if key not in supported:
+            raise GenerationSettingsError(
+                f"Generation setting {key!r} is not supported for frozen model {model_name!r}."
+            )
+        if key == "temperature" and (not isinstance(value, (int, float)) or not 0 <= float(value) <= 2):
+            raise GenerationSettingsError("Generation setting 'temperature' must be between 0 and 2.")
+        if key == "top_p" and (not isinstance(value, (int, float)) or not 0 <= float(value) <= 1):
+            raise GenerationSettingsError("Generation setting 'top_p' must be between 0 and 1.")
+        if key == "reasoning_effort" and (not isinstance(value, str) or not value.strip()):
+            raise GenerationSettingsError("Generation setting 'reasoning_effort' must be a non-empty string.")
+    return normalized
+
+
 @dataclass
 class OpenAIAgents:
     """Focused modeling, cleaning, validation, EDA, and report agent roles."""
 
     api_key: str | None = None
     model: str = "gpt-4.1-mini"
+    generation_settings: dict[str, Any] | None = None
+    respect_environment_model: bool = True
 
     def __post_init__(self) -> None:
         self.api_key = self.api_key or os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_MODEL", self.model)
+        if self.respect_environment_model:
+            self.model = os.getenv("OPENAI_MODEL", self.model)
+        self.generation_settings = validate_generation_settings(self.model, self.generation_settings)
         self._client: Any | None = None
+        self.last_request_provenance: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -80,12 +125,48 @@ class OpenAIAgents:
     ) -> T:
         client = self._client_or_raise()
         prompt = f"{instructions}\n\nINPUT JSON:\n{json.dumps(payload, default=str)}"
-        response = client.responses.parse(
-            model=self.model,
-            input=prompt,
-            store=False,
-            text_format=schema,
-        )
+        request: dict[str, Any] = {
+            "model": self.model,
+            "input": prompt,
+            "store": False,
+            "text_format": schema,
+        }
+        supplied_settings = {
+            key: value for key, value in (self.generation_settings or {}).items() if value is not None
+        }
+        if "temperature" in supplied_settings:
+            request["temperature"] = supplied_settings["temperature"]
+        if "top_p" in supplied_settings:
+            request["top_p"] = supplied_settings["top_p"]
+        if "reasoning_effort" in supplied_settings:
+            request["reasoning"] = {"effort": supplied_settings["reasoning_effort"]}
+        self.last_request_provenance = {
+            "provider": "openai",
+            "endpoint": "responses.parse",
+            "model_requested": self.model,
+            "generation_settings_requested": dict(self.generation_settings or {}),
+            "generation_settings_sent": {
+                **{
+                    key: value for key, value in supplied_settings.items()
+                    if key != "reasoning_effort"
+                },
+                **(
+                    {"reasoning": {"effort": supplied_settings["reasoning_effort"]}}
+                    if "reasoning_effort" in supplied_settings else {}
+                ),
+            },
+            "provider_default_settings": sorted(
+                key for key, value in (self.generation_settings or {}).items() if value is None
+            ),
+        }
+        response = client.responses.parse(**request)
+        response_metadata = {
+            key: getattr(response, key)
+            for key in ("id", "model", "created_at")
+            if getattr(response, key, None) is not None
+        }
+        if response_metadata:
+            self.last_request_provenance["response_metadata"] = response_metadata
         parsed = getattr(response, "output_parsed", None)
         if parsed is not None:
             return parsed

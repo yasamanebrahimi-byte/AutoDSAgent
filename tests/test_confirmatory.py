@@ -23,6 +23,7 @@ from evaluation.confirmatory import (
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.runner import EXPERIMENT_CONFIG_VERSION
 from evaluation.runner import run_evaluation
+from evaluation.provenance import environment_provenance
 
 
 MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_confirmatory_v1.json"
@@ -299,3 +300,19 @@ def test_experiment_hash_is_deterministic_independent_of_traversal_order(tmp_pat
     (tmp_path / "app" / "z.py").write_bytes(b"z\n")
     (tmp_path / "app" / "a.py").write_bytes(b"a\n")
     assert experiment_code_sha256(tmp_path) == experiment_code_sha256(tmp_path)
+
+
+def test_environment_provenance_is_structured_deterministic_and_secret_free(tmp_path: Path):
+    manifest = {"status": "frozen", "experiment": "fixture"}
+    first = environment_provenance(repository_root=tmp_path, manifest=manifest)
+    second = environment_provenance(repository_root=tmp_path, manifest=manifest)
+    assert first == second
+    assert first["python_version"]
+    assert first["platform"]
+    assert isinstance(first["packages"], dict)
+    for package in ("numpy", "pandas", "scikit-learn", "openai", "openml"):
+        assert package in first["packages"]
+    assert first["experiment_code_sha256"]
+    assert first["confirmatory_manifest_sha256"]
+    assert "OPENAI_API_KEY" not in json.dumps(first)
+    assert "api_key" not in json.dumps(first).lower()

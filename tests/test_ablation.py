@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.datasets import make_moons
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
@@ -15,6 +16,10 @@ from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
 from evaluation.benchmarks import BenchmarkCase
 from evaluation.runner import _proposal_cache_key, run_evaluation
+from evaluation.confirmatory import (
+    experiment_code_sha256,
+    validate_confirmatory_completeness,
+)
 
 
 def _case() -> BenchmarkCase:
@@ -251,3 +256,98 @@ def test_proposal_cache_contains_no_credentials(tmp_path: Path):
     assert "OPENAI_API_KEY" not in content
     assert "api_key" not in content.lower()
     assert "Authorization" not in content
+
+
+def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path: Path, monkeypatch):
+    """Exercise the paper-level loop with a no-API, two-condition fixture."""
+    import evaluation.ablation as ablation
+    import evaluation.metrics as metrics
+    import evaluation.runner as runner
+
+    original_cluster_bootstrap_ci = metrics.cluster_bootstrap_ci
+    monkeypatch.setattr(
+        metrics,
+        "cluster_bootstrap_ci",
+        lambda data, statistic, cluster_col, **kwargs: original_cluster_bootstrap_ci(
+            data, statistic, cluster_col, n_bootstrap=20, **kwargs
+        ),
+    )
+
+    for module in (runner,):
+        monkeypatch.setattr(
+            module,
+            "evaluate_empirical_reference",
+            lambda *args, **kwargs: {
+                "best_method": "linear",
+                "best_primary_mean": 0.8,
+                "candidate_metrics": {
+                    method: {"status": "evaluated", "primary_mean": 0.8}
+                    for method in ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
+                },
+            },
+        )
+        monkeypatch.setattr(module, "evaluate_plan_cv", lambda *args, **kwargs: {"primary_mean": 0.8})
+        monkeypatch.setattr(
+            module,
+            "evaluate_holdout_plan",
+            lambda *args, **kwargs: {"holdout_metrics": {}, "validation": {"split": {"contract": {}}}},
+        )
+    manifest = json.loads(
+        (Path(__file__).parents[1] / "evaluation/configs/paper_confirmatory_v1.json").read_text()
+    )
+    manifest.update({"status": "frozen", "expected_experiment_code_sha256": experiment_code_sha256()})
+    manifest["model_conditions"] = [
+        {"condition_id": "model_a", "planner_model": "planner-a", "reconciler_model": "reconciler-a", "llm_repetitions": 2, "generation_settings": {"temperature": None}},
+        {"condition_id": "model_b", "planner_model": "planner-b", "reconciler_model": "reconciler-b", "llm_repetitions": 2, "generation_settings": {"temperature": None}},
+    ]
+    manifest["splits_and_repetitions"] = {"split_seeds": [42], "llm_repetitions": 2, "llm_repetition_ids": ["r1", "r2"]}
+    manifest["ablations"]["primary"] = ["llm_only", "full"]
+    manifest_path = tmp_path / "frozen.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    metadata = {
+        "status": "frozen", "experiment_config_sha256": "fixture", "expected_experiment_code_sha256": experiment_code_sha256(),
+        "source_git_commit": None, "benchmark_manifest_matches": True,
+    }
+    monkeypatch.setattr(ablation, "validate_confirmatory_manifest", lambda *_args: metadata)
+    monkeypatch.setattr(runner, "validate_confirmatory_manifest", lambda *_args: metadata)
+    calls: list[dict] = []
+
+    def factory(context):
+        calls.append(context)
+        return _plan(context)
+
+    result = run_ablation_study(
+        tmp_path / "matrix",
+        cases=[_case(), replace(_case(), name="ablation_fixture_2")],
+        suite="external",
+        offline=True,
+        confirmatory_config_path=manifest_path,
+        ablations=["llm_only"],  # frozen manifest must win over this runtime flag
+        modeling_plan_factory=factory,
+    )
+    assert set(result["summary"]["by_model_condition"]) == {"model_a", "model_b"}
+    assert len(result["summary"]["summaries"]["llm_only"]["by_dataset"]) == 2
+    # The combined summary is condition-aware; inspect persisted trial rows from both ablations.
+    persisted = []
+    for name in ("llm_only", "full"):
+        path = tmp_path / "matrix" / name
+        for condition_dir in (path / "model_a", path / "model_b"):
+            persisted.extend(json.loads(line) for line in (condition_dir / "trials.jsonl").read_text().splitlines())
+    assert len(persisted) == 16
+    assert len({row["trial_id"] for row in persisted}) == 16
+    assert {row["model_condition_id"] for row in persisted} == {"model_a", "model_b"}
+    assert {row["llm_repetition_id"] for row in persisted} == {"r1", "r2"}
+    assert len(calls) == 8  # condition x repetition x dataset, never x ablation
+    assert len({row["initial_proposal_cache_key"] for row in persisted}) == 8
+    assert all(row["initial_proposal_cache_hit"] for row in persisted if row["ablation_name"] == "full")
+    assert result["summary"]["confirmatory_matrix"]["complete"] is True
+
+    expected = []
+    for condition_id in ("model_a", "model_b"):
+        for repetition_id in ("r1", "r2"):
+            for case_name in ("ablation_fixture", "ablation_fixture_2"):
+                for ablation_name in ("llm_only", "full"):
+                    expected.append({"model_condition_id": condition_id, "llm_repetition_id": repetition_id, "benchmark_case": case_name, "perturbation_id": "clean", "split_seed": 42, "ablation_name": ablation_name})
+    validate_confirmatory_completeness(expected, persisted)
+    with pytest.raises(ValueError, match="incomplete"):
+        validate_confirmatory_completeness(expected, persisted[:-1])

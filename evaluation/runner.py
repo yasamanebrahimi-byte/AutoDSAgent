@@ -69,7 +69,9 @@ from evaluation.confirmatory import (
     experiment_code_sha256,
     model_conditions,
     repetition_ids,
+    condition_repetition_ids,
 )
+from evaluation.provenance import environment_provenance
 from evaluation.external_benchmarks import external_benchmark_manifest_sha256, external_benchmark_specs
 from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
@@ -116,6 +118,7 @@ class EvaluationConfig:
     model_condition_id: str = "default"
     llm_repetition_id: str | None = None
     generation_settings: dict[str, Any] = field(default_factory=dict)
+    llm_repetition_ids: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.planner_model is None:
@@ -404,7 +407,7 @@ def _proposal_cache_key(
         "perturbation": perturbation_id,
         "split_seed": split_seed,
         "llm_repetition": llm_repetition,
-        "llm_repetition_id": llm_repetition_id or f"rep_{llm_repetition:03d}",
+        "llm_repetition_id": llm_repetition_id or f"rep_{llm_repetition + 1:03d}",
         "model_condition_id": model_condition_id,
         "model": model,
         "initial_modeling_prompt_schema_version": prompt_schema_version,
@@ -510,8 +513,10 @@ def _run_trial(
     )
     training_profile = profile_dataframe(training_frame)
     warnings: list[str] = []
+    repetition_id = config.llm_repetition_id or f"rep_{trial_number + 1:03d}"
     trial_id = (
-        f"{case.name}:{perturbation_id}:split{experimental_split_seed}:llm{trial_number}"
+        f"{config.model_condition_id}:{case.name}:{perturbation_id}:split{experimental_split_seed}:"
+        f"{repetition_id}:llm{trial_number}"
     )
     if config.ablation_name:
         trial_id = f"{trial_id}:{config.ablation_name}"
@@ -527,6 +532,11 @@ def _run_trial(
         "task_type": case.expected_task_type,
         "question": case.question,
         "training_profile": training_profile,
+        "model_condition_id": config.model_condition_id,
+        "llm_repetition_id": repetition_id,
+        "planner_model": config.planner_model,
+        "reconciler_model": config.reconciler_model,
+        "generation_settings": dict(config.generation_settings),
     }
     initial_input_artifact = {
         "evaluation_mode": "modeling_gate",
@@ -572,6 +582,7 @@ def _run_trial(
         training_profile=training_profile,
     )
     proposal_cache_hit = False
+    planner_api_provenance: dict[str, Any] | None = None
     cached_proposal = proposal_cache.get(proposal_key) if proposal_cache is not None else None
     cached_plan = _plan_from_cache_payload(cached_proposal or {})
     # A strict confirmatory run may reuse an exact live proposal, but never a
@@ -588,6 +599,7 @@ def _run_trial(
         agent_model = str((cached_proposal or {}).get("model") or config.planner_model)
         agent_request_status = "cached"
         agent_request_error = None
+        planner_api_provenance = (cached_proposal or {}).get("api_provenance")
     elif config.gate_mode == "deterministic_only":
         plan = _fallback_modeling_plan(
             training_profile,
@@ -610,6 +622,7 @@ def _run_trial(
             warnings=warnings,
             require_live=config.require_live,
         )
+        planner_api_provenance = getattr(agents, "last_request_provenance", None)
     else:
         if config.require_live and initial_source_override != "openai":
             raise LLMUnavailable(
@@ -693,6 +706,7 @@ def _run_trial(
             "approved_target": case.target_column,
             "approved_task": case.expected_task_type,
             "generation_settings": _jsonable(config.generation_settings),
+            "api_provenance": _jsonable(planner_api_provenance),
         }
 
     comparison: dict[str, Any] | None = None
@@ -706,6 +720,7 @@ def _run_trial(
     reconciliation_method_source = None
     reconciliation_preprocessing_source = None
     reconciliation_agent_source = None
+    reconciler_api_provenance: dict[str, Any] | None = None
     gate_sources: dict[str, str] = {}
     gate_result: dict[str, Any] | None = None
     gate_error: str | None = None
@@ -789,6 +804,10 @@ def _run_trial(
                         reconciliation_agent_source = "mock"
                     elif config.offline:
                         reconciliation_agent_source = "offline_fallback"
+                    reconciler_api_provenance = (
+                        getattr(reconciler_agents, "last_request_provenance", None)
+                        if reconciliation_agent_source == "openai" else None
+                    )
                 final_fields = {
                     "target": gate_result["selected_target_column"],
                     "task": gate_result["selected_task_type"],
@@ -1065,7 +1084,7 @@ def _run_trial(
         "gate_objective_version": GATE_OBJECTIVE_VERSION,
         "gate_mode": config.gate_mode,
         "trial": trial_number,
-        "llm_repetition_id": config.llm_repetition_id or f"rep_{trial_number:03d}",
+        "llm_repetition_id": repetition_id,
         "model_condition_id": config.model_condition_id,
         "trial_id": context["trial_id"],
         "evaluation_variant": variant,
@@ -1124,6 +1143,8 @@ def _run_trial(
             and initial_plan_override is None
         ),
         "generation_settings": dict(config.generation_settings),
+        "planner_api_provenance": planner_api_provenance,
+        "reconciler_api_provenance": reconciler_api_provenance,
         "planner_prompt_schema_version": config.prompt_schema_version,
         "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
@@ -1446,7 +1467,11 @@ def _failed_trial_record(
         test_size=config.test_size,
         random_state=split_seed,
     )
-    trial_id = f"{case.name}:{perturbation_id}:split{experimental_split_seed}:llm{trial_number}"
+    repetition_id = config.llm_repetition_id or f"rep_{trial_number + 1:03d}"
+    trial_id = (
+        f"{config.model_condition_id}:{case.name}:{perturbation_id}:split{experimental_split_seed}:"
+        f"{repetition_id}:llm{trial_number}"
+    )
     if config.ablation_name:
         trial_id = f"{trial_id}:{config.ablation_name}"
     if variant != "standard":
@@ -1457,6 +1482,8 @@ def _failed_trial_record(
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
         "trial": trial_number,
+        "llm_repetition_id": repetition_id,
+        "model_condition_id": config.model_condition_id,
         "trial_status": "failed",
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
@@ -1494,6 +1521,9 @@ def _failed_trial_record(
         "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
         "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
+        "generation_settings": dict(config.generation_settings),
+        "planner_api_provenance": None,
+        "reconciler_api_provenance": None,
         "agent_initial": None,
         "agent_initial_valid": None,
         "deterministic_recommendation": None,
@@ -1607,6 +1637,7 @@ def run_evaluation(
     model_condition_id: str = "default",
     llm_repetition_id: str | None = None,
     generation_settings: dict[str, Any] | None = None,
+    llm_repetition_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
@@ -1664,6 +1695,7 @@ def run_evaluation(
         model_condition_id=model_condition_id,
         llm_repetition_id=llm_repetition_id,
         generation_settings=dict(generation_settings or {}),
+        llm_repetition_ids=tuple(str(value) for value in llm_repetition_ids) if llm_repetition_ids is not None else None,
     )
     if cases is not None:
         selected_cases = list(cases)
@@ -1682,8 +1714,6 @@ def run_evaluation(
         raise ValueError("No benchmark cases selected.")
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
-    agents = OpenAIAgents(model=config.planner_model)
-    reconciler_agents = OpenAIAgents(model=config.reconciler_model)
     confirmatory_metadata: dict[str, Any] | None = None
     if confirmatory_config_path is not None:
         if config.suite != "external":
@@ -1716,14 +1746,31 @@ def run_evaluation(
             raise ValueError(
                 f"Confirmatory generation settings differ from frozen condition {config.model_condition_id!r}."
             )
+        expected_repetition_ids = condition_repetition_ids(manifest, selected_condition)
+        if config.llm_repetition_ids is None:
+            object.__setattr__(config, "llm_repetition_ids", tuple(expected_repetition_ids))
+        elif list(config.llm_repetition_ids) != expected_repetition_ids:
+            raise ValueError(
+                f"Confirmatory repetition IDs differ from frozen condition {config.model_condition_id!r}."
+            )
+        frozen_order_swap = bool(manifest.get("order_swap", False))
+        if config.order_swap != frozen_order_swap:
+            raise ValueError(
+                "Confirmatory order-swap setting differs from the frozen manifest."
+            )
+        frozen_perturbations = manifest.get("perturbations", []) or []
+        if config.include_perturbations != bool(frozen_perturbations):
+            raise ValueError(
+                "Confirmatory perturbation dimensions differ from the frozen manifest."
+            )
         configured_holdout_tolerances = {
             "classification": holdout_neutral_tolerance("classification", config.thresholds),
             "regression": holdout_neutral_tolerance("regression", config.thresholds),
         }
         runtime_values = runtime_manifest_values(
             experiment_name=CONFIRMATORY_EXPERIMENT_NAME,
-            planner_model=str(agents.model),
-            reconciler_model=str(reconciler_agents.model),
+            planner_model=str(config.planner_model),
+            reconciler_model=str(config.reconciler_model),
             split_seeds=list(config.split_seeds),
             llm_repetitions=config.repetitions,
             holdout_fraction=config.test_size,
@@ -1771,10 +1818,23 @@ def run_evaluation(
             expected_experiment_code_sha256=experiment_code_sha256(),
             source_git_commit=repository_commit(),
             model_conditions=declared_conditions,
-            generation_settings={key: value for key, value in (manifest.get("generation_settings", {}) or {}).items() if value is not None},
-            llm_repetition_ids=repetition_ids(manifest),
+            generation_settings=dict(manifest.get("generation_settings", {}) or {}),
+            llm_repetition_ids=list(config.llm_repetition_ids or repetition_ids(manifest)),
+            selected_model_condition_id=config.model_condition_id,
         )
         confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
+    # Validate settings before constructing or using a client.  In strict mode
+    # this is before any paid request can be attempted.
+    agents = OpenAIAgents(
+        model=config.planner_model,
+        generation_settings=config.generation_settings,
+        respect_environment_model=confirmatory_metadata is None,
+    )
+    reconciler_agents = OpenAIAgents(
+        model=config.reconciler_model,
+        generation_settings=config.generation_settings,
+        respect_environment_model=confirmatory_metadata is None,
+    )
     stable_config = {
         "config_version": "2026-09-04.evaluation.v5-paper-metrics",
         "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
@@ -1814,6 +1874,7 @@ def run_evaluation(
         "split_seeds": list(config.split_seeds),
         "llm_repetitions": config.repetitions,
         "llm_repetition_id": config.llm_repetition_id,
+        "llm_repetition_ids": list(config.llm_repetition_ids or []),
         "test_size": config.test_size,
         "agent_mode": "offline" if config.offline else "live_required" if config.require_live else "live_or_fallback",
         "model": config.model,
@@ -1863,7 +1924,6 @@ def run_evaluation(
         "soft_challenge_calibration_artifact_version": load_calibration_artifact().get(
             "calibration_artifact_version"
         ),
-        "generation_settings": dict(config.generation_settings),
         "evaluation_settings": {
             "primary_metrics": {"classification": "macro_f1", "regression": "rmse"},
             "candidate_methods": ["linear", "regularized_linear", "tree_ensemble", "boosted_tree"],
@@ -1895,6 +1955,10 @@ def run_evaluation(
             "Offline/mock rows are not evidence about live LLM behavior.",
         ],
         "repository_commit": config.repository_commit,
+        "environment_provenance": (
+            environment_provenance(manifest=confirmatory_config_path)
+            if confirmatory_metadata is not None else None
+        ),
     }
     if config.suite == "external":
         stable_config["benchmark_suite_version"] = (
@@ -1963,22 +2027,31 @@ def run_evaluation(
         for trial in trials
         if trial.get("trial_status") != "failed"
     }
+    persisted_ids = [trial.get("trial_id") for trial in trials]
+    duplicate_ids = sorted({trial_id for trial_id in persisted_ids if persisted_ids.count(trial_id) > 1}, key=str)
+    if duplicate_ids:
+        raise ValueError(f"Duplicate confirmatory result detected for trial_id={duplicate_ids[0]}")
     for case in selected_cases:
         scenario_list: list[Perturbation | None] = [None]
         scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
         for requested_split_seed in config.split_seeds:
             for perturbation in scenario_list:
+                repetition_values = config.llm_repetition_ids or tuple(
+                    f"rep_{index + 1:03d}" for index in range(repetitions)
+                )
+                if len(repetition_values) != repetitions:
+                    raise ValueError("llm_repetition_ids must contain exactly repetitions identifiers.")
                 for trial_number in range(repetitions):
                     # Stable repetition identity is part of proposal provenance;
                     # it must change with the nested stochastic repeat.
                     object.__setattr__(
                         config,
                         "llm_repetition_id",
-                        f"rep_{trial_number + 1:03d}",
+                        repetition_values[trial_number],
                     )
                     base_trial_id = (
-                        f"{case.name}:{perturbation.id if perturbation is not None else 'clean'}:"
-                        f"split{requested_split_seed}:llm{trial_number}"
+                        f"{config.model_condition_id}:{case.name}:{perturbation.id if perturbation is not None else 'clean'}:"
+                        f"split{requested_split_seed}:{repetition_values[trial_number]}:llm{trial_number}"
                     )
                     if config.ablation_name:
                         base_trial_id = f"{base_trial_id}:{config.ablation_name}"
@@ -2046,7 +2119,7 @@ def run_evaluation(
                             )
                         trial.update({
                             "model_condition_id": config.model_condition_id,
-                            "llm_repetition_id": config.llm_repetition_id or f"rep_{trial_number + 1:03d}",
+                            "llm_repetition_id": repetition_values[trial_number],
                             "generation_settings": dict(config.generation_settings),
                             "experiment_config_sha256": (
                                 confirmatory_metadata.get("experiment_config_sha256")
@@ -2121,6 +2194,10 @@ def run_evaluation(
             if confirmatory_metadata is not None else None
         ),
         "confirmatory_valid": confirmatory_valid,
+        "environment_provenance": (
+            environment_provenance(manifest=confirmatory_config_path)
+            if confirmatory_metadata is not None else None
+        ),
     }
     summary.update(confirmatory_result_metadata)
     config_payload.update(confirmatory_result_metadata)

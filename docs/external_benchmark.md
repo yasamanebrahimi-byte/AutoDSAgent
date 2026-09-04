@@ -142,7 +142,10 @@ presented as directly comparable to AMLB leaderboard numbers. The OpenML task
 IDs are retained so standardized folds can be added in a later, explicitly
 versioned suite.
 
-## Commands
+## Exploratory/development commands
+
+The commands in this section are development workflows. They may use offline
+or unfrozen runtime options and must not be presented as confirmatory results.
 
 Install the optional dependency:
 
@@ -164,13 +167,13 @@ dataset still needs to be cached or downloaded):
 python -m evaluation.run --suite external --case adult --offline --output evaluation_results/external_adult_smoke
 ```
 
-Run the complete external suite offline:
+Run the complete external suite offline for development:
 
 ```bash
 python -m evaluation.run --suite external --offline --output evaluation_results/external_offline
 ```
 
-Run the primary paired ablation set offline:
+Run the primary paired ablation set offline for development:
 
 ```bash
 python -m evaluation.ablation --suite external --offline --output evaluation_results/external_ablation_offline --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
@@ -182,12 +185,20 @@ Run only one tier:
 python -m evaluation.run --suite external --tier stress --offline --output evaluation_results/external_stress_offline
 ```
 
-After the suite is frozen and live research approval is in place, run the full
-suite live with strict failure reporting:
+## Confirmatory/publication commands
+
+After the suite and manifest are intentionally frozen and live research
+approval is in place, every publication or full-benchmark run must pass the
+frozen manifest and strict-live enforcement:
 
 ```bash
-python -m evaluation.ablation --suite external --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
+python -m evaluation.ablation --suite external --require-live --confirmatory-config evaluation/configs/paper_confirmatory_v1.json --output evaluation_results/external_ablation_live
 ```
+
+The confirmatory manifest supplies the complete model/repetition/generation
+matrix and ablation set. Runtime model, repetition, generation, task, and
+ablation flags are not an alternative source of truth. There is no fallback
+LLM behavior in strict-live mode.
 
 The default `python -m evaluation.run` command remains the local suite.
 
@@ -216,7 +227,7 @@ benchmark membership, split seeds, repetitions, and analysis are final.
 with `--confirmatory-config evaluation/configs/paper_confirmatory_v1.json`:
 
 ```bash
-python -m evaluation.ablation --suite external --tier core --require-live --confirmatory-config evaluation/configs/paper_confirmatory_v1.json --output evaluation_results/external_core_live --split-seed 42 --repetitions 1 --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
+python -m evaluation.ablation --suite external --tier core --require-live --confirmatory-config evaluation/configs/paper_confirmatory_v1.json --output evaluation_results/external_core_live
 ```
 
 Confirm that `proposal_cache.jsonl` gives compatible ablations the same initial

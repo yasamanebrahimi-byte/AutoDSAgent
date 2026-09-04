@@ -112,6 +112,27 @@ def _same(left: Any, right: Any) -> bool:
     return _normalise(left) == _normalise(right)
 
 
+def _comparable_model_conditions(value: Any) -> Any:
+    """Compare frozen condition declarations without treating null defaults as drift."""
+
+    if not isinstance(value, list):
+        return value
+    result = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            result.append(item)
+            continue
+        normalized = dict(item)
+        normalized["generation_settings"] = {
+            key: value for key, value in (item.get("generation_settings", {}) or {}).items()
+            if value is not None
+        }
+        if normalized.get("llm_repetition_ids") is None:
+            normalized.pop("llm_repetition_ids", None)
+        result.append(normalized)
+    return result
+
+
 def deterministic_policy_config(policy: Any | None = None) -> dict[str, Any]:
     """Return every runtime deterministic-policy parameter in canonical form."""
 
@@ -223,12 +244,27 @@ def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(repetitions, int) or repetitions < 1:
             raise ValueError(f"Model condition {condition_id!r} must declare positive llm_repetitions.")
         seen.add(condition_id)
+        condition_repetition_ids = condition.get("llm_repetition_ids")
+        if condition_repetition_ids is not None:
+            if not isinstance(condition_repetition_ids, list) or len(condition_repetition_ids) != repetitions:
+                raise ValueError(
+                    f"Model condition {condition_id!r} llm_repetition_ids must contain exactly "
+                    "llm_repetitions identifiers."
+                )
+            condition_repetition_ids = [str(item).strip() for item in condition_repetition_ids]
+            if not all(condition_repetition_ids) or len(set(condition_repetition_ids)) != len(condition_repetition_ids):
+                raise ValueError(
+                    f"Model condition {condition_id!r} llm_repetition_ids must be non-empty and unique."
+                )
         result.append({
             "condition_id": condition_id,
             "planner_model": planner,
             "reconciler_model": reconciler,
             "llm_repetitions": repetitions,
-            "generation_settings": {key: value for key, value in (condition.get("generation_settings", {}) or {}).items() if value is not None},
+            "llm_repetition_ids": condition_repetition_ids,
+            # Preserve nulls: null means provider default and is part of the
+            # frozen declaration even though it is omitted from the request.
+            "generation_settings": dict(condition.get("generation_settings", {}) or {}),
         })
     return result
 
@@ -247,6 +283,17 @@ def repetition_ids(manifest: Mapping[str, Any]) -> list[str]:
     return values
 
 
+def condition_repetition_ids(
+    manifest: Mapping[str, Any], condition: Mapping[str, Any]
+) -> list[str]:
+    """Return the stable repetition IDs for one frozen model condition."""
+
+    explicit = condition.get("llm_repetition_ids")
+    if explicit is not None:
+        return [str(item) for item in explicit]
+    return repetition_ids(manifest)[: int(condition["llm_repetitions"])]
+
+
 def expand_confirmatory_matrix(
     manifest: Mapping[str, Any],
     *,
@@ -255,14 +302,122 @@ def expand_confirmatory_matrix(
 ) -> list[dict[str, Any]]:
     """Expand the declared condition/repetition matrix without making calls."""
     names = list(ablations if ablations is not None else (manifest.get("ablations", {}) or {}).get("primary", []))
-    repetitions = repetition_ids(manifest)
     rows = []
     for dataset_id in dataset_ids or [None]:
         for condition in model_conditions(manifest):
-            for repetition_id in repetitions[:condition["llm_repetitions"]]:
+            for repetition_id in condition_repetition_ids(manifest, condition):
                 for ablation in names or [None]:
-                    rows.append({"dataset_id": dataset_id, **condition, "llm_repetition_id": repetition_id, "ablation": ablation})
+                    rows.append({
+                        "dataset_id": dataset_id,
+                        "model_condition_id": condition["condition_id"],
+                        **condition,
+                        "llm_repetition_id": repetition_id,
+                        "ablation": ablation,
+                    })
     return rows
+
+
+def expand_confirmatory_evaluation_units(
+    manifest: Mapping[str, Any],
+    *,
+    dataset_ids: list[str] | tuple[str, ...],
+    split_seeds: list[int] | tuple[int, ...],
+    ablations: list[str] | tuple[str, ...] | None = None,
+    perturbation_ids: list[str] | tuple[str, ...] = ("clean",),
+    evaluation_variants: list[str] | tuple[str, ...] = ("standard",),
+) -> list[dict[str, Any]]:
+    """Expand planned result units from the frozen manifest dimensions."""
+
+    base = expand_confirmatory_matrix(
+        manifest, dataset_ids=dataset_ids, ablations=ablations
+    )
+    units: list[dict[str, Any]] = []
+    for row in base:
+        for split_seed in split_seeds:
+            for perturbation_id in perturbation_ids:
+                for evaluation_variant in evaluation_variants:
+                    units.append({
+                        **row,
+                        "benchmark_case": row["dataset_id"],
+                        "split_seed": int(split_seed),
+                        "perturbation_id": perturbation_id,
+                        "ablation_name": row["ablation"],
+                        "evaluation_variant": evaluation_variant,
+                    })
+    return units
+
+
+def confirmatory_unit_key(row: Mapping[str, Any]) -> tuple[str, ...]:
+    """Canonical identity for a planned/evaluated confirmatory unit."""
+
+    return (
+        str(row.get("model_condition_id", "")),
+        str(row.get("llm_repetition_id", "")),
+        str(row.get("benchmark_case", row.get("dataset_id", ""))),
+        str(row.get("perturbation_id", "clean")),
+        str(row.get("split_seed", "")),
+        str(row.get("ablation_name", row.get("ablation", ""))),
+        str(row.get("evaluation_variant", "standard")),
+    )
+
+
+def validate_confirmatory_completeness(
+    expected_units: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+    observed_rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    """Audit the planned evaluation units against persisted result rows.
+
+    Failed rows are observed records but do not satisfy a required unit.  The
+    audit deliberately ignores conditional reconciliation calls: those are
+    internal events, not planned evaluation units.
+    """
+
+    expected_keys = [confirmatory_unit_key(row) for row in expected_units]
+    observed_keys = [confirmatory_unit_key(row) for row in observed_rows]
+    expected_set = set(expected_keys)
+    observed_set = set(observed_keys)
+    duplicates = sorted({key for key in observed_keys if observed_keys.count(key) > 1}, key=str)
+    failed = sorted(
+        {confirmatory_unit_key(row) for row in observed_rows if row.get("trial_status") == "failed"},
+        key=str,
+    )
+    missing = sorted(expected_set - observed_set | (set(failed) & expected_set), key=str)
+    unexpected = sorted(observed_set - expected_set, key=str)
+    if len(expected_keys) != len(expected_set):
+        raise ValueError("Confirmatory expected evaluation matrix contains duplicate planned units.")
+    complete = not missing and not duplicates and not unexpected
+    result = {
+        "complete": complete,
+        "expected_unit_count": len(expected_keys),
+        "observed_unit_count": len(observed_keys),
+        "unique_observed_unit_count": len(observed_set),
+        "missing_units": [list(key) for key in missing],
+        "failed_units": [list(key) for key in failed],
+        "duplicate_units": [list(key) for key in duplicates],
+        "unexpected_units": [list(key) for key in unexpected],
+        "unit_identity_fields": [
+            "model_condition_id", "llm_repetition_id", "benchmark_case",
+            "perturbation_id", "split_seed", "ablation_name", "evaluation_variant",
+        ],
+    }
+    def describe(key: tuple[str, ...]) -> str:
+        return ", ".join(
+            f"{field}={value}" for field, value in zip(result["unit_identity_fields"], key)
+        )
+    if not complete:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing {describe(missing[0])}")
+        if duplicates:
+            details.append(f"duplicate {describe(duplicates[0])}")
+        if unexpected:
+            details.append(f"unexpected {describe(unexpected[0])}")
+        raise ValueError("Confirmatory matrix incomplete: " + "; ".join(details))
+    return result
+
+
+# Compatibility-friendly descriptive alias.
+audit_confirmatory_matrix = validate_confirmatory_completeness
 
 
 def runtime_manifest_values(
@@ -297,6 +452,7 @@ def runtime_manifest_values(
     model_conditions: list[Mapping[str, Any]] | None = None,
     generation_settings: Mapping[str, Any] | None = None,
     llm_repetition_ids: list[str] | tuple[str, ...] | None = None,
+    selected_model_condition_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the runtime projection compared with the frozen manifest."""
 
@@ -311,6 +467,7 @@ def runtime_manifest_values(
         "model_conditions": [dict(item) for item in model_conditions] if model_conditions is not None else [{"condition_id": "default", "planner_model": planner_model, "reconciler_model": reconciler_model, "llm_repetitions": int(llm_repetitions), "generation_settings": {}}],
         "generation_settings": dict(generation_settings or {}),
         "llm_repetition_ids": list(llm_repetition_ids) if llm_repetition_ids is not None else [f"rep_{index:03d}" for index in range(1, int(llm_repetitions) + 1)],
+        "selected_model_condition_id": selected_model_condition_id,
         "split_seeds": list(split_seeds),
         "llm_repetitions": int(llm_repetitions),
         "holdout_fraction": float(holdout_fraction),
@@ -388,6 +545,36 @@ def validate_confirmatory_manifest(
             mismatches.append(f"{key} missing from frozen manifest")
             continue
         actual_value = runtime_values.get(key)
+        if key in {"llm_repetitions", "llm_repetition_ids"} and loaded.get("model_conditions") is not None:
+            selected_id = runtime_values.get("selected_model_condition_id")
+            selected_condition = next(
+                (item for item in model_conditions(loaded) if item["condition_id"] == selected_id), None
+            )
+            if selected_condition is not None:
+                expected_value = (
+                    selected_condition["llm_repetitions"]
+                    if key == "llm_repetitions"
+                    else condition_repetition_ids(loaded, selected_condition)
+                )
+            if not _same(expected_value, actual_value):
+                mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
+            continue
+        if key in {"planner_model", "reconciler_model"} and loaded.get("model_conditions") is not None:
+            declared_values = {
+                str(condition[key]) for condition in model_conditions(loaded)
+            }
+            if str(actual_value) not in declared_values:
+                mismatches.append(
+                    f"{key}: runtime model {actual_value!r} is not declared in frozen model_conditions"
+                )
+            continue
+        if key == "model_conditions":
+            if not _same(
+                _comparable_model_conditions(expected_value),
+                _comparable_model_conditions(actual_value),
+            ):
+                mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
+            continue
         if key == "selected_ablations" and actual_value is None:
             continue
         if not _same(expected_value, actual_value):

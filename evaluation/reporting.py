@@ -158,6 +158,21 @@ def render_summary_markdown(
             )
     else:
         rows.append("No successful OpenAI trials were recorded, so live decision stability is not estimable.")
+    model_summaries = summary.get("by_model_condition", {})
+    if model_summaries:
+        rows.extend([
+            "",
+            "## Model-Condition Summaries",
+            "",
+            "Each planner condition is reported separately. Repetitions are nested within dataset/task; no model conditions are silently pooled.",
+            "",
+            "| Model condition | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Precision | Holdout delta |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for condition_id, item in sorted(model_summaries.items()):
+            rows.append(
+                f"| {condition_id} | {_percent(item.get('intervention_rate'))} | {_percent(item.get('abstention_rate'))} | {_percent(item.get('beneficial_intervention_rate'))} | {_percent(item.get('harmful_intervention_rate'))} | {_percent(item.get('neutral_intervention_rate'))} | {_percent(item.get('intervention_precision'))} | {_number(item.get('dataset_macro_paper_holdout_delta_mean'))} |"
+            )
     rows.extend([
         "",
         "## Agent vs Deterministic Soft Challenge",
