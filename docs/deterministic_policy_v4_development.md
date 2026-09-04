@@ -71,7 +71,9 @@ The sensitivity grid multiplies continuous structural thresholds by approximatel
 | `global_thresholds_minus_20pct` | `0.3816` | `0.3333` | `4` | `-15.00` |
 | `global_thresholds_plus_20pct` | `0.0493` | `0.1667` | `1` | `-14.75` |
 
-The local panel’s diagnostic ranking favored `global_thresholds_plus_10pct`, with an observed mean-regret improvement of `0.2514` versus `current`. That result is recorded as sensitivity evidence only. It does not promote the candidate, rewrite the manifest, or change the production policy hash. The broader named candidates and their full metrics are in the JSON companion.
+The local panel’s diagnostic ranking favored `global_thresholds_plus_10pct`, with an observed mean-regret improvement of `0.2514` versus `current`. That result is recorded as sensitivity evidence only. The broader named candidates and their full metrics are in the JSON companion.
+
+Policy v4 was specified before this sensitivity analysis. The perturbation analysis is diagnostic rather than a policy-selection procedure; no prospective rule was specified for replacing v4 based on these development results. Policy v4 is therefore retained rather than retrospectively selecting the best-performing perturbation. The analysis does not rewrite the manifest, change the production policy hash, or change any policy thresholds.
 
 The metric set intentionally includes harmful intervention rate, catastrophic-regret introductions, intervention precision, challenge recall, transparent utility, regret, and exact reference match as a secondary diagnostic. A candidate cannot be justified by exact family match alone, and the local panel is too small to support a general performance claim.
 

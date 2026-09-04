@@ -5,7 +5,7 @@
   "production_policy_unchanged": true,
   "policy_version_under_test": "4",
   "production_policy_config_sha256": "9a450828f27dcce86b005f0c21d0271ca08a0b19e6dd8a802e047ec39effcc90",
-  "benchmark_suite_version": "external-benchmark-v1",
+  "development_suite_version": "local-synthetic-policy-development-v1",
   "development_cases": [
     "breast_cancer",
     "diabetes",
@@ -52,7 +52,7 @@
     ],
     "purpose": "stress-test nearby policy bands without selecting or rewriting production configuration"
   },
-  "selection_rule": "development diagnostic ranking by lower catastrophic-regret introduction, lower harmful-intervention rate, higher catastrophic prevention, higher intervention precision, higher challenge recall, higher transparent utility and median regret reduction, and lower unnecessary-intervention rate",
+  "diagnostic_ranking_rule": "development diagnostic ranking by lower catastrophic-regret introduction, lower harmful-intervention rate, higher catastrophic prevention, higher intervention precision, higher challenge recall, higher transparent utility and median regret reduction, and lower unnecessary-intervention rate",
   "observed_sensitivity": [
     {
       "candidate": "current",
