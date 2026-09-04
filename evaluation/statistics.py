@@ -41,7 +41,11 @@ def sample_clusters(
     """
 
     if hasattr(data, "loc") and hasattr(data, "columns"):
-        pieces = [data.loc[data[cluster_col] == cluster].copy() for cluster in sampled_clusters]
+        pieces = []
+        for instance, cluster in enumerate(sampled_clusters):
+            piece = data.loc[data[cluster_col] == cluster].copy()
+            piece["_bootstrap_cluster_instance"] = instance
+            pieces.append(piece)
         if not pieces:
             return data.iloc[0:0].copy()
         import pandas as pd
@@ -49,8 +53,12 @@ def sample_clusters(
 
     records = list(data)
     pieces: list[Any] = []
-    for cluster in sampled_clusters:
-        pieces.extend(row for row in records if row.get(cluster_col) == cluster)
+    for instance, cluster in enumerate(sampled_clusters):
+        for row in records:
+            if row.get(cluster_col) == cluster:
+                copied = dict(row)
+                copied["_bootstrap_cluster_instance"] = instance
+                pieces.append(copied)
     return pieces
 
 

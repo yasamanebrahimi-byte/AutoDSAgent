@@ -925,19 +925,25 @@ def _gate_health(
     }
 
 
-def _dataset_weighted_health(
+def _dataset_macro_health(
     records: list[dict[str, Any]],
     *,
     tolerance: float,
     catastrophic_threshold: float,
     weights: GateUtilityWeights,
 ) -> dict[str, Any]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[Any, list[dict[str, Any]]] = {}
     for record in records:
-        grouped.setdefault(str(record.get("benchmark_case", record.get("dataset_id", "unknown"))), []).append(record)
+        dataset = str(record.get("benchmark_case", record.get("dataset_id", "unknown")))
+        # The bootstrap helper annotates complete cluster draws. Keeping the
+        # draw instance in the grouping key preserves multiplicity when a
+        # dataset is sampled more than once.
+        instance = record.get("_bootstrap_cluster_instance")
+        key = (dataset, instance) if instance is not None else dataset
+        grouped.setdefault(key, []).append(record)
     per_dataset = {
-        dataset: _gate_health(group, tolerance=tolerance, holdout_tolerance=tolerance, catastrophic_threshold=catastrophic_threshold, weights=weights)
-        for dataset, group in sorted(grouped.items())
+        str(dataset): _gate_health(group, tolerance=tolerance, holdout_tolerance=tolerance, catastrophic_threshold=catastrophic_threshold, weights=weights)
+        for dataset, group in sorted(grouped.items(), key=lambda item: str(item[0]))
     }
     numeric = (
         "intervention_precision", "challenge_yield", "harmful_intervention_rate",
@@ -951,6 +957,24 @@ def _dataset_weighted_health(
             float(item[name]) for item in per_dataset.values() if item.get(name) is not None
         ) for name in numeric},
     }
+
+
+# Backward-compatible private name for callers that imported it indirectly.
+_dataset_weighted_health = _dataset_macro_health
+
+
+def _dataset_macro_ci(
+    records: list[dict[str, Any]], metric: str, *, tolerance: float,
+    catastrophic_threshold: float, weights: GateUtilityWeights,
+) -> dict[str, Any]:
+    def statistic(sample: list[dict[str, Any]]) -> float | None:
+        result = _dataset_macro_health(
+            sample, tolerance=tolerance, catastrophic_threshold=catastrophic_threshold,
+            weights=weights,
+        )
+        return result.get(metric)
+
+    return cluster_bootstrap_ci(records, statistic, "benchmark_case")
 
 
 def summarize_gate_health(
@@ -1410,12 +1434,36 @@ def summarize_trials(
     overall_selective = aggregate_for(completed)
     overall_gate_health = overall_selective["gate_health"]
     overall_holdout = overall_gate_health["holdout_intervention_metrics"]
-    dataset_gate_health = _dataset_weighted_health(
+    dataset_gate_health = _dataset_macro_health(
         completed,
         tolerance=neutral_tolerance,
         catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
         weights=weights,
     )
+    # Preserve the complete gate-health schema (including event-conditioned
+    # diagnostics) while replacing its headline scalar estimates with the
+    # dataset-macro values computed above.
+    dataset_gate_health = {**overall_gate_health, **dataset_gate_health}
+    # The paper-facing estimand is the equally weighted mean of eligible
+    # dataset/task summaries. Its intervals use the same dataset-cluster
+    # bootstrap, rather than an IID row bootstrap or a trial-weighted mean.
+    macro_ci_metrics = (
+        "intervention_precision", "challenge_yield", "harmful_intervention_rate",
+        "unnecessary_intervention_rate", "challenge_recall", "mean_regret_reduction",
+        "median_regret_reduction", "catastrophic_prevented_rate",
+        "catastrophic_introduced_rate",
+    )
+    dataset_macro_cis = {
+        metric: _dataset_macro_ci(
+            completed, metric, tolerance=neutral_tolerance,
+            catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+            weights=weights,
+        )
+        for metric in macro_ci_metrics
+    }
+    dataset_gate_health["confidence_intervals"] = dataset_macro_cis
+    dataset_gate_health["point_estimate_semantics"] = "equal-weighted mean across eligible benchmark_case datasets/tasks"
+    dataset_gate_health["uncertainty_method"] = "dataset_cluster_bootstrap_percentile"
     leave_one_dataset_out: dict[str, Any] = {}
     dataset_names = sorted({str(record.get("benchmark_case")) for record in completed})
     if len(dataset_names) >= 2:
@@ -1475,7 +1523,7 @@ def summarize_trials(
             "bootstrap_confidence_level": 0.95,
             "bootstrap_seed": DEFAULT_BOOTSTRAP_SEED,
             "independent_unit": "benchmark dataset/task; all split seeds and repetitions retained",
-            "point_estimate_semantics": "trial-weighted for gate_health; dataset-macro estimates are exposed separately",
+            "point_estimate_semantics": "dataset-macro is primary; trial-weighted is secondary diagnostic",
         },
         "trial_count": total,
         "completed_trial_count": len(completed),
@@ -1553,10 +1601,10 @@ def summarize_trials(
         "challenge_improved_count": overall_selective["challenge_improved_count"],
         "challenge_worsened_count": overall_selective["challenge_worsened_count"],
         "challenge_neutral_count": overall_selective["challenge_neutral_count"],
-        "intervention_precision": overall_selective["intervention_precision"],
-        "challenge_yield": overall_selective["challenge_yield"],
-        "harmful_intervention_rate": overall_selective["harmful_intervention_rate"],
-        "unnecessary_intervention_rate": overall_selective["unnecessary_intervention_rate"],
+        "intervention_precision": dataset_gate_health["intervention_precision"],
+        "challenge_yield": dataset_gate_health["challenge_yield"],
+        "harmful_intervention_rate": dataset_gate_health["harmful_intervention_rate"],
+        "unnecessary_intervention_rate": dataset_gate_health["unnecessary_intervention_rate"],
         "holdout_intervention_precision": overall_holdout["intervention_precision"],
         "holdout_harmful_intervention_rate": overall_holdout["harmful_intervention_rate"],
         "holdout_neutral_intervention_rate": overall_holdout["holdout_neutral_intervention_rate"],
@@ -1571,37 +1619,42 @@ def summarize_trials(
         "mean_holdout_intervention_delta": overall_holdout["mean_holdout_intervention_delta"],
         "median_holdout_intervention_delta": overall_holdout["median_holdout_intervention_delta"],
         "holdout_intervention_outcome_counts": overall_holdout["outcome_counts"],
-        "challenge_recall": overall_selective["challenge_recall"],
+        "challenge_recall": dataset_gate_health["challenge_recall"],
+        # These are event-conditioned quantities; retain their event-weighted
+        # counts at the top level while the macro rate remains primary.
         "missed_rescue_count": overall_selective["missed_rescue_count"],
         "good_abstention_count": overall_selective["good_abstention_count"],
         "neutral_abstention_count": overall_selective["neutral_abstention_count"],
-        "gate_health": overall_gate_health,
+        # Keep the legacy key, but make it resolve to the paper-facing
+        # dataset-macro estimate so it cannot silently remain trial-weighted.
+        "gate_health": dataset_gate_health,
         "trial_weighted_gate_health": overall_gate_health,
+        "dataset_macro_gate_health": dataset_gate_health,
         "dataset_weighted_gate_health": dataset_gate_health,
-        "total_challenges": overall_gate_health["total_challenges"],
-        "total_abstentions": overall_gate_health["total_abstentions"],
-        "improved_interventions": overall_gate_health["improved_interventions"],
-        "worsened_interventions": overall_gate_health["worsened_interventions"],
-        "neutral_interventions": overall_gate_health["neutral_interventions"],
-        "path_metrics": overall_gate_health["path_metrics"],
-        "confidence_metrics": overall_gate_health["confidence_metrics"],
-        "probe_strength_metrics": overall_gate_health["probe_strength_metrics"],
-        "regime_metrics": overall_gate_health["regime_metrics"],
-        "suppressed_regime_slices": overall_gate_health["suppressed_regime_slices"],
-        "gain_concentration": overall_gate_health["gain_concentration"],
-        "mean_regret_reduction": overall_gate_health["mean_regret_reduction"],
-        "median_regret_reduction": overall_gate_health["median_regret_reduction"],
-        "regret_reduction_ci": overall_gate_health["regret_reduction_ci"],
-        "initial_catastrophic_count": overall_gate_health["initial_catastrophic_count"],
-        "final_catastrophic_count": overall_gate_health["final_catastrophic_count"],
-        "catastrophic_prevented_count": overall_gate_health["catastrophic_prevented_count"],
-        "catastrophic_introduced_count": overall_gate_health["catastrophic_introduced_count"],
-        "initial_agent_catastrophic_count": overall_gate_health["initial_catastrophic_count"],
-        "final_gate_catastrophic_count": overall_gate_health["final_catastrophic_count"],
-        "catastrophic_regret_prevented_count": overall_gate_health["catastrophic_prevented_count"],
-        "catastrophic_regret_introduced_count": overall_gate_health["catastrophic_introduced_count"],
-        "net_catastrophic_prevention": overall_gate_health["net_catastrophic_prevention"],
-        "gate_utility": overall_gate_health["utility"],
+        "total_challenges": dataset_gate_health["total_challenges"],
+        "total_abstentions": dataset_gate_health["total_abstentions"],
+        "improved_interventions": dataset_gate_health["improved_interventions"],
+        "worsened_interventions": dataset_gate_health["worsened_interventions"],
+        "neutral_interventions": dataset_gate_health["neutral_interventions"],
+        "path_metrics": dataset_gate_health["path_metrics"],
+        "confidence_metrics": dataset_gate_health["confidence_metrics"],
+        "probe_strength_metrics": dataset_gate_health["probe_strength_metrics"],
+        "regime_metrics": dataset_gate_health["regime_metrics"],
+        "suppressed_regime_slices": dataset_gate_health["suppressed_regime_slices"],
+        "gain_concentration": dataset_gate_health["gain_concentration"],
+        "mean_regret_reduction": dataset_gate_health["mean_regret_reduction"],
+        "median_regret_reduction": dataset_gate_health["median_regret_reduction"],
+        "regret_reduction_ci": dataset_gate_health["confidence_intervals"]["mean_regret_reduction"],
+        "initial_catastrophic_count": dataset_gate_health["initial_catastrophic_count"],
+        "final_catastrophic_count": dataset_gate_health["final_catastrophic_count"],
+        "catastrophic_prevented_count": dataset_gate_health["catastrophic_prevented_count"],
+        "catastrophic_introduced_count": dataset_gate_health["catastrophic_introduced_count"],
+        "initial_agent_catastrophic_count": dataset_gate_health["initial_catastrophic_count"],
+        "final_gate_catastrophic_count": dataset_gate_health["final_catastrophic_count"],
+        "catastrophic_regret_prevented_count": dataset_gate_health["catastrophic_prevented_count"],
+        "catastrophic_regret_introduced_count": dataset_gate_health["catastrophic_introduced_count"],
+        "net_catastrophic_prevention": dataset_gate_health["net_catastrophic_prevention"],
+        "gate_utility": dataset_gate_health["utility"],
         "leave_one_dataset_out": leave_one_dataset_out,
         "mean_performance_delta_conditional_on_challenge": overall_selective[
             "mean_performance_delta_conditional_on_challenge"

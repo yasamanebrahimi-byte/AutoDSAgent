@@ -4,6 +4,10 @@ External Benchmark v1 is an independent, frozen evaluation suite for testing
 the AutoDS validation architecture on public tabular tasks. It is benchmark
 infrastructure only: the external results must not be used for policy
 calibration, threshold changes, prompt changes, or model-family changes.
+External Benchmark v1 is evaluation-only: its results must not be used to
+recalibrate challenge policy, reconciliation, probing, or benchmark membership.
+Future calibration requires a separate development set and a newly versioned
+protocol.
 
 The suite version is `1.0.0` and contains exactly 40 immutable OpenML task IDs:
 22 classification tasks from AMLB classification suite `271` and 18 regression
@@ -132,7 +136,37 @@ After the suite is frozen and live research approval is in place, run the full
 suite live with strict failure reporting:
 
 ```bash
-python -m evaluation.ablation --suite external --live --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
+python -m evaluation.ablation --suite external --require-live --output evaluation_results/external_ablation_live --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
 ```
 
 The default `python -m evaluation.run` command remains the local suite.
+
+## Publication-readiness smoke procedure
+
+1. Validate all 40 frozen tasks:
+
+```bash
+python -m pip install -e ".[benchmark]"
+python scripts/prefetch_external_benchmarks.py
+```
+
+2. Run one strict-live case and inspect `config.json`, `trials.jsonl`,
+`summary.json`, and `summary.md` for an OpenAI proposal, no fallback, requested
+and effective models, the final decision path, reconciliation status when
+invoked, the training-only empirical reference, holdout metrics, and preserved
+initial/final plans:
+
+```bash
+python -m evaluation.run --suite external --case adult --live --require-live --gate-mode full --repetitions 1 --split-seed 42 --output evaluation_results/external_adult_live_smoke
+```
+
+3. Run a small paired strict-live core-tier ablation. Live is implicit for
+`evaluation.ablation`; do not add `--live`:
+
+```bash
+python -m evaluation.ablation --suite external --tier core --require-live --output evaluation_results/external_core_live --split-seed 42 --repetitions 1 --ablation llm_only --ablation hard_validation_only --ablation deterministic_only --ablation always_reconcile --ablation probe_direct --ablation full
+```
+
+Confirm that `proposal_cache.jsonl` gives compatible ablations the same initial
+proposal. Only after these stages succeed should the complete frozen strict-live
+ablation be launched.

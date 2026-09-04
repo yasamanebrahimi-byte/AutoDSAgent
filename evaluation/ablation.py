@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from evaluation.statistics import cluster_bootstrap_ci
 
 
 ABLATION_SCHEMA_VERSION = "modeling-gate-ablation-v1"
+EXPERIMENT_FREEZE_METADATA_VERSION = "experiment-freeze-v1"
 PRIMARY_ABLATION_NAMES = (
     "llm_only",
     "hard_validation_only",
@@ -338,7 +340,18 @@ def run_ablation_study(
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / "config.json"
+    def repository_commit() -> str | None:
+        try:
+            return subprocess.run(
+                ["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                check=True, timeout=2,
+            ).stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
     root_config = {
+        "experiment_freeze_metadata_version": EXPERIMENT_FREEZE_METADATA_VERSION,
+        "repository_commit": repository_commit(),
         "ablation_schema_version": ABLATION_SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seeds": list(split_seeds),
@@ -356,6 +369,14 @@ def run_ablation_study(
         "selected_ablations": selected_names,
         "ablation_definitions": {name: spec.as_dict() for name, spec in all_specs.items()},
         "benchmark_cases": [case.as_dict() for case in selected_cases],
+        "benchmark_task_ids": [
+            case.openml_task_id for case in selected_cases
+            if case.openml_task_id is not None
+        ],
+        "prompt_schema_version": "modeling-gate-v1",
+        "deterministic_policy_version": "captured_in_each_child_evaluation_config",
+        "empirical_probe_policy_version": "captured_in_each_child_evaluation_config",
+        "thresholds": thresholds or "captured_in_each_child_evaluation_config",
         "evaluation_objective": "intervention-quality-v1",
     }
     if suite == "external":

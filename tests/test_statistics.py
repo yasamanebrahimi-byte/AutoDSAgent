@@ -1,4 +1,5 @@
 from evaluation.statistics import cluster_bootstrap_ci, sample_clusters
+from evaluation.metrics import DEFAULT_GATE_UTILITY_WEIGHTS, _dataset_macro_health
 
 
 def _rows():
@@ -55,3 +56,18 @@ def test_one_cluster_ci_is_explicitly_unavailable():
     )
     assert result["status"] == "unavailable"
     assert result["lower"] is None and result["upper"] is None
+
+
+def test_dataset_macro_health_equalizes_unequal_trial_counts():
+    records = [
+        {"benchmark_case": "small", "trial_status": "completed", "agent_normalized_regret": 0.0, "gated_normalized_regret": 0.0},
+        *[
+            {"benchmark_case": "large", "trial_status": "completed", "agent_normalized_regret": 1.0, "gated_normalized_regret": 0.0}
+            for _ in range(9)
+        ],
+    ]
+    health = _dataset_macro_health(
+        records, tolerance=0.02, catastrophic_threshold=0.9,
+        weights=DEFAULT_GATE_UTILITY_WEIGHTS,
+    )
+    assert health["mean_regret_reduction"] == 0.5

@@ -13,7 +13,11 @@ The default is 10,000 replicates with seed `20260824` and confidence level
 0.95. A CI is unavailable when fewer than two independent datasets are
 eligible. Statistics are recomputed inside every replicate. Existing
 trial-weighted point estimates are preserved; the separately exposed
-`dataset_weighted_gate_health` provides dataset-macro descriptive estimates.
+`dataset_macro_gate_health` is the paper-facing headline estimate: every eligible
+dataset/task contributes equally. `trial_weighted_gate_health` is retained as an
+explicitly secondary diagnostic estimate; `dataset_weighted_gate_health` remains
+as a compatibility alias. The headline confidence intervals recompute this same
+dataset-macro statistic inside each clustered bootstrap replicate.
 Conditional rates retain their event-count denominator semantics and missing
 holdout outcomes are excluded rather than converted to zero.
 

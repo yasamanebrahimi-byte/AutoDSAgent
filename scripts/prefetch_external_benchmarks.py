@@ -137,6 +137,15 @@ def prefetch(
             if fail_fast:
                 break
     failures = [entry for entry in entries if not entry["validation_success"]]
+    expected_task_ids = [spec.task_id for spec in specs]
+    recorded_task_ids = [entry["task_id"] for entry in entries]
+    integrity_errors: list[str] = []
+    if not wanted and tier is None and len(specs) != 40:
+        integrity_errors.append(f"expected 40 frozen tasks, found {len(specs)}")
+    if recorded_task_ids != expected_task_ids:
+        integrity_errors.append("recorded task IDs do not exactly match the frozen manifest order")
+    if len(set(recorded_task_ids)) != len(recorded_task_ids):
+        integrity_errors.append("duplicate task ID recorded")
     payload = {
         "external_suite_version": EXTERNAL_BENCHMARK_SUITE_VERSION,
         "source": {
@@ -151,16 +160,20 @@ def prefetch(
         "task_count_recorded": len(entries),
         "success_count": len(entries) - len(failures),
         "failure_count": len(failures),
+        "expected_task_ids": expected_task_ids,
+        "recorded_task_ids": recorded_task_ids,
+        "manifest_complete": not failures and not integrity_errors,
+        "integrity_errors": integrity_errors,
         "tasks": entries,
     }
     destination = Path(output_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    if failures:
-        print(f"{len(failures)} external task(s) failed; see {destination}")
+    if failures or integrity_errors:
+        print(f"External benchmark validation failed: {len(failures)} task failure(s); {integrity_errors or 'see task entries'}; see {destination}")
     else:
         print(f"Validated {len(entries)} external task(s); manifest written to {destination}")
-    return payload, len(failures)
+    return payload, len(failures) + len(integrity_errors)
 
 
 def main() -> int:

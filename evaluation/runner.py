@@ -1030,6 +1030,16 @@ def _run_trial(
         "agent_request_status": agent_request_status,
         "agent_request_error": agent_request_error,
         "live_request_failed": agent_request_status == "failed_fallback",
+        "api_status": (
+            "live_succeeded" if agent_source == "openai"
+            else "offline" if agent_source == "offline_fallback"
+            else "mock" if agent_source == "mock"
+            else "not_requested"
+        ),
+        "fallback_status": (
+            "none" if agent_source in {"openai", "mock"}
+            else agent_request_status or "offline"
+        ),
         "initial_proposal_cache_key": proposal_key,
         "initial_proposal_cache_hit": proposal_cache_hit,
         "initial_modeling_call_made": (
@@ -1366,10 +1376,14 @@ def _failed_trial_record(
         "agent_model": config.planner_model,
         "planner_model": config.planner_model,
         "reconciler_model": config.reconciler_model,
+        "planner_model_effective": config.planner_model,
+        "reconciler_model_effective": config.reconciler_model,
         "repository_commit": config.repository_commit,
         "agent_request_status": "failed",
         "agent_request_error": _redact_error(error),
         "live_request_failed": not config.offline,
+        "api_status": "failed_live_request" if not config.offline else "offline",
+        "fallback_status": "none",
         "prompt_schema_version": config.prompt_schema_version,
         "agent_initial": None,
         "agent_initial_valid": None,
