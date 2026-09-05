@@ -7,6 +7,8 @@ from evaluation.metrics import (
     normalized_performance_delta,
     regret_reduction,
     summarize_gate_health,
+    actionable_soft_disagreement,
+    preprocessing_only_disagreement,
 )
 from evaluation.policy_calibration import policy_candidates, select_policy_candidate
 
@@ -79,6 +81,48 @@ def test_gate_health_reports_precision_yield_harm_recall_and_utility():
     assert health["utility"]["total_utility"] == pytest.approx(
         1.0 - 2.0 - 0.25 + 3.0 - 5.0 - 1.0
     )
+
+
+def test_preprocessing_only_disagreement_is_diagnostic_not_actionable():
+    model_family = {
+        "trial_status": "completed",
+        "benchmark_case": "fixture",
+        "agent_initial_valid": True,
+        "deterministic_recommendation": {"recommended_method": "tree_ensemble"},
+        "challenger_enabled": True,
+        "method_disagreement": True,
+        "preprocessing_disagreement": False,
+        "hard_validation_status": "passed",
+        "soft_challenge": {"status": "disagreement", "decision": "abstain"},
+    }
+    preprocessing_only = {
+        **model_family,
+        "method_disagreement": False,
+        "preprocessing_disagreement": True,
+    }
+    agreement = {
+        **model_family,
+        "method_disagreement": False,
+        "preprocessing_disagreement": False,
+        "soft_challenge": {"status": "agreement", "decision": "agree"},
+    }
+    hard_invalid = {
+        **model_family,
+        "agent_initial_valid": False,
+        "hard_validation_status": "failed",
+    }
+
+    assert actionable_soft_disagreement(model_family)
+    assert not actionable_soft_disagreement(preprocessing_only)
+    assert preprocessing_only_disagreement(preprocessing_only)
+    assert not actionable_soft_disagreement(agreement)
+    assert not actionable_soft_disagreement(hard_invalid)
+
+    health = summarize_gate_health([model_family, preprocessing_only, agreement, hard_invalid])
+    assert health["actionable_soft_disagreement_count"] == 1
+    assert health["preprocessing_only_disagreement_count"] == 1
+    assert health["challenge_rate"] == 0.0
+    assert health["abstention_rate_conditional_on_disagreement"] == 1.0
 
 
 def test_new_calibration_objective_prefers_safer_intervention_over_exact_match():

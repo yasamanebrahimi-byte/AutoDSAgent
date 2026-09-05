@@ -19,8 +19,11 @@ The product workflow:
 ## Paper-facing evaluation
 
 The narrower research question is whether a deterministic/non-LLM safeguard can
-selectively catch harmful LLM model-family or preprocessing plans without
-unnecessarily overriding good plans. The confirmatory scope is supervised
+selectively catch harmful LLM model-family planning without unnecessarily
+overriding good plans. Typed preprocessing plans/contracts are carried with
+candidate plans and remain subject to universal hard validity checks, but a
+preprocessing-only difference is currently diagnostic rather than an
+independent soft-intervention trigger. The confirmatory scope is supervised
 tabular classification/regression planning; it does not validate every
 capability of the broader autonomous data-science product.
 
@@ -30,7 +33,7 @@ The paper-facing decision path is:
 independent LLM proposal
   -> hard validation
   -> deterministic structural challenge
-  -> agreement/preserve OR disagreement
+  -> model-family agreement/preserve OR actionable model-family disagreement
   -> bounded training-only empirical arbitration
   -> abstain or selectively intervene/reconcile
   -> freeze final plan
@@ -47,16 +50,21 @@ richer pre-specified structural diagnostics. The secondary
 `llm_with_diagnostics` ablation tests whether that information asymmetry alone
 explains any observed difference.
 
-The confirmatory matrix has three same-model planner/reconciler conditions,
-three LLM repetitions per condition (`rep_001`–`rep_003`), and split seed `42`:
+The confirmatory matrix is declared in the manifest and currently contains the
+existing GPT conditions plus GPT-5.6 Sol, Terra, and Luna. Each condition has
+three LLM repetitions (`rep_001`–`rep_003`) and split seed `42`:
 
 | Condition | Snapshot |
 |---|---|
 | `gpt5_mini_2025_08_07` | `gpt-5-mini-2025-08-07` |
 | `gpt54_mini_2026_03_17` | `gpt-5.4-mini-2026-03-17` |
 | `gpt54_2026_03_05` | `gpt-5.4-2026-03-05` |
+| `gpt56_sol` | `gpt-5.6-sol` |
+| `gpt56_terra` | `gpt-5.6-terra` |
+| `gpt56_luna` | `gpt-5.6-luna` |
 
-The six primary ablations are `llm_only`, `hard_validation_only`,
+The six primary ablations are `llm_only` (LLM + universal validity checks; no
+deterministic soft challenger), `hard_validation_only`,
 `deterministic_only`, `always_reconcile`, `probe_direct`, and `full`.
 `llm_with_diagnostics` is secondary and is reported separately. Dataset/task
 is the independent statistical unit; repetitions are nested observations and
@@ -144,13 +152,16 @@ The optional frozen AMLB/OpenML external evaluation suite is documented in [exte
 Development and confirmatory evaluation are separate. Live API smoke tests
 must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
-outcomes are not part of the normal publication-readiness workflow. The checked
-in configuration snapshot is a draft template (`status: "draft"`); intentionally
-set it to `"frozen"` only after reviewing the predeclared models, seeds, repetitions,
-and other experiment settings. Then pass it explicitly with
+outcomes are not part of the normal publication-readiness workflow. The checked-
+in configuration snapshot is intentionally draft/unfrozen (`status: "draft"`)
+after the current result-affecting changes. It must pass independent review
+before the explicit freeze step. Set it to `"frozen"` only after reviewing the
+manifest, models, seeds, repetitions, and other experiment settings. Then pass it explicitly with
 `--confirmatory-config` to enable runtime validation and manifest hashing:
 [`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
-before launching a strict-live external run.
+before launching a strict-live external run. Strict confirmatory execution
+refuses a draft manifest; the final freeze is intentionally not part of this
+pre-freeze engineering state.
 
 The confirmatory code identity is a canonical SHA-256 over sorted relative
 paths and bytes in `app/`, `evaluation/` (excluding the confirmatory manifest),

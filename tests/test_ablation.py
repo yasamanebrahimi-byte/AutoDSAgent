@@ -329,20 +329,20 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
         "descriptive audit total"
     )
-    assert result["summary"]["analysis_summaries"]["secondary"] == {}
+    assert set(result["summary"]["analysis_summaries"]["secondary"]) == {"llm_with_diagnostics"}
     assert len(result["summary"]["summaries"]["llm_only"]["by_dataset"]) == 2
     # The combined summary is condition-aware; inspect persisted trial rows from both ablations.
     persisted = []
-    for name in ("llm_only", "full"):
+    for name in ("llm_only", "full", "llm_with_diagnostics"):
         path = tmp_path / "matrix" / name
         for condition_dir in (path / "model_a", path / "model_b"):
             persisted.extend(json.loads(line) for line in (condition_dir / "trials.jsonl").read_text().splitlines())
-    assert len(persisted) == 16
-    assert len({row["trial_id"] for row in persisted}) == 16
+    assert len(persisted) == 24
+    assert len({row["trial_id"] for row in persisted}) == 24
     assert {row["model_condition_id"] for row in persisted} == {"model_a", "model_b"}
     assert {row["llm_repetition_id"] for row in persisted} == {"r1", "r2"}
-    assert len(calls) == 8  # condition x repetition x dataset, never x ablation
-    assert len({row["initial_proposal_cache_key"] for row in persisted}) == 8
+    assert len(calls) == 16  # ordinary and diagnostics evidence modes are separate
+    assert len({row["initial_proposal_cache_key"] for row in persisted}) == 16
     assert all(row["initial_proposal_cache_hit"] for row in persisted if row["ablation_name"] == "full")
     assert result["summary"]["confirmatory_matrix"]["complete"] is True
 
@@ -350,8 +350,14 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     for condition_id in ("model_a", "model_b"):
         for repetition_id in ("r1", "r2"):
             for case_name in ("ablation_fixture", "ablation_fixture_2"):
-                for ablation_name in ("llm_only", "full"):
+                for ablation_name in ("llm_only", "full", "llm_with_diagnostics"):
                     expected.append({"model_condition_id": condition_id, "llm_repetition_id": repetition_id, "benchmark_case": case_name, "perturbation_id": "clean", "split_seed": 42, "ablation_name": ablation_name})
     validate_confirmatory_completeness(expected, persisted)
+    assert {
+        row["analysis_stratum"] for row in persisted if row["ablation_name"] == "llm_with_diagnostics"
+    } == {"secondary"}
+    assert {
+        row["analysis_stratum"] for row in persisted if row["ablation_name"] in {"llm_only", "full"}
+    } == {"primary"}
     with pytest.raises(ValueError, match="incomplete"):
         validate_confirmatory_completeness(expected, persisted[:-1])

@@ -14,13 +14,16 @@ The initial LLM plan is generated from training-side information. An independent
 deterministic/non-LLM structural challenger also operates only on the frozen
 training partition, but the representations are intentionally asymmetric: the
 LLM receives a compact profile while the challenger computes richer
-pre-specified structural diagnostics from that same partition. Disagreements
-trigger a bounded empirical arbitration stage when configured. Weak or tied
-evidence leads to abstention and preservation of the LLM plan; sufficiently
-strong evidence can trigger blinded reconciliation before the final plan is
-frozen. The secondary `llm_with_diagnostics` ablation gives the initial LLM the
-canonical training-only diagnostics without enabling the intervention gate, to
-test whether the information advantage alone explains an effect.
+pre-specified structural diagnostics from that same partition. Model-family
+disagreements trigger a bounded empirical arbitration stage when configured.
+Weak or tied evidence leads to abstention and preservation of the LLM plan;
+sufficiently strong evidence can trigger blinded reconciliation before the
+final plan is frozen. A preprocessing-only disagreement is retained as a
+diagnostic and does not independently invoke the empirical probe or
+reconciliation path in this protocol. The secondary `llm_with_diagnostics`
+ablation gives the initial LLM the canonical training-only diagnostics without
+enabling the intervention gate, to test whether the information advantage
+alone explains an effect.
 
 These are pre-final-training validation stages: small training-only fits/CV
 probes are allowed inside the safeguard. They are not a claim of zero model
@@ -86,16 +89,14 @@ success or harm.
 
 ## Paper-facing intervention metrics
 
-- An eligible soft disagreement is a completed disagreement with a valid
-  initial proposal after hard-validation eligibility; the denominator is the
-  set of eligible soft disagreements, represented by challenge plus abstention
-  records.
-- `challenge_rate = challenged eligible initial plans / eligible soft
-  disagreements`.
+- An actionable soft disagreement is a completed, hard-valid comparison where
+  the LLM and deterministic model families differ. Preprocessing-only
+  disagreements are not in this primary denominator.
+- `challenge_rate = challenged actionable model-family disagreements /
+  actionable model-family disagreements`.
 - `intervention_rate = actual changed soft plans / eligible completed trials`.
-- `abstention_rate` and `abstention_preservation_rate` are conditional:
-  `challenged eligible initial plans preserved because evidence was insufficient
-  / eligible soft disagreements`.
+- `abstention_rate` and `abstention_preservation_rate` are conditional on the
+  same actionable model-family disagreement population.
 - `beneficial_intervention_rate = beneficial actual interventions / actual
   interventions with evaluable holdout outcome`; `harmful_intervention_rate`
   and `neutral_intervention_rate` use the same denominator and their respective
@@ -104,10 +105,13 @@ success or harm.
 - `intervention_precision = beneficial actual interventions / actual
   interventions with evaluable holdout outcome`.
 - `probe_invocation_rate_conditional_on_disagreement` is the fraction of
-  eligible LLM/challenger disagreements that receive the bounded training-only
+  actionable model-family disagreements that receive the bounded training-only
   probe.
-- `abstention_rate_conditional_on_disagreement` is the fraction of eligible
+- `abstention_rate_conditional_on_disagreement` is the fraction of actionable
   disagreements preserved because the evidence was insufficient.
+- `preprocessing_only_disagreement_count` and its rate are descriptive
+  diagnostics; their rows carry `preprocessing_disagreement_not_actionable` and
+  do not inflate primary selective-intervention denominators.
 - `mean_beneficial_holdout_magnitude` and
   `mean_harmful_holdout_magnitude` summarize the positive improvement and
   absolute harm among comparable actual interventions; they are null when

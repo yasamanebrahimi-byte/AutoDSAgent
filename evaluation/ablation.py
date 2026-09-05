@@ -544,9 +544,11 @@ def run_ablation_study(
         frozen_conditions = model_conditions(manifest)
         # In strict mode the frozen manifest is the sole experiment design
         # source.  Runtime flags cannot narrow, add, or replace its matrix.
-        selected_names = list((manifest.get("ablations") or {}).get("primary", []))
+        manifest_primary_names = list((manifest.get("ablations") or {}).get("primary", []))
+        manifest_secondary_names = list((manifest.get("ablations") or {}).get("secondary", []))
+        selected_names = manifest_primary_names + manifest_secondary_names
         if not selected_names:
-            raise ValueError("Frozen confirmatory manifest declares no primary ablations.")
+            raise ValueError("Confirmatory manifest declares no ablations.")
         if include_perturbations:
             raise ValueError(
                 "Strict confirmatory perturbations must be declared by the frozen manifest; "
@@ -568,7 +570,9 @@ def run_ablation_study(
             split_seeds=split_seeds,
             llm_repetitions=int((manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", first_condition["llm_repetitions"])),
             holdout_fraction=0.2,
-            selected_ablations=selected_names,
+            # Manifest validation compares the primary paper stratum. The
+            # complete execution matrix below includes secondary controls too.
+            selected_ablations=manifest_primary_names,
             deterministic_policy_version=DeterministicPolicy().version,
             deterministic_policy_sha256=config_sha256(deterministic_policy_config()),
             empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
@@ -832,6 +836,7 @@ def run_ablation_study(
                 model=condition["planner_model"],
                 planner_model=condition["planner_model"],
                 reconciler_model=condition["reconciler_model"],
+                provider=str(condition.get("provider", "openai")),
                 offline=offline,
                 require_live=require_live,
                 include_perturbations=include_perturbations,
@@ -846,7 +851,9 @@ def run_ablation_study(
                 suite=suite,
                 tier=tier,
                 confirmatory_config_path=confirmatory_config_path,
-                confirmatory_selected_ablations=selected_names if confirmatory_metadata else None,
+                confirmatory_selected_ablations=(
+                    manifest_primary_names if confirmatory_metadata else None
+                ),
                 model_condition_id=condition_id,
                 llm_repetition_ids=condition_ids,
                 generation_settings=dict(condition.get("generation_settings", {}) or {}),

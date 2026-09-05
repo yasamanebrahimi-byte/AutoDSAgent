@@ -37,23 +37,6 @@ CONFIRMATORY_GENERATION_SETTINGS = {
     "top_p": None,
     "seed": None,
 }
-CONFIRMATORY_MODEL_CONDITIONS = (
-    {
-        "condition_id": "gpt5_mini_2025_08_07",
-        "planner_model": "gpt-5-mini-2025-08-07",
-        "reconciler_model": "gpt-5-mini-2025-08-07",
-    },
-    {
-        "condition_id": "gpt54_mini_2026_03_17",
-        "planner_model": "gpt-5.4-mini-2026-03-17",
-        "reconciler_model": "gpt-5.4-mini-2026-03-17",
-    },
-    {
-        "condition_id": "gpt54_2026_03_05",
-        "planner_model": "gpt-5.4-2026-03-05",
-        "reconciler_model": "gpt-5.4-2026-03-05",
-    },
-)
 _EXCLUDED_DIRECTORY_NAMES = {
     ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".cache", "cache", "caches", "evaluation_results", "results", "tmp", "temp",
@@ -247,10 +230,12 @@ def _manifest_values(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Return the frozen model matrix in a canonical, auditable form.
+    """Return the manifest-declared model matrix in a canonical form.
 
     The legacy single-model fields remain readable for exploratory callers,
     but a confirmatory manifest is normalized to explicit conditions here.
+    Model IDs are deliberately not validated against a Python allowlist: the
+    manifest is the versioned authority for the experiment panel.
     """
     declared = manifest.get("model_conditions")
     if declared is None:
@@ -269,11 +254,17 @@ def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(condition, Mapping):
             raise ValueError("Each model condition must be an object.")
         condition_id = str(condition.get("condition_id", "")).strip()
+        # Exploratory matrix helpers retain a backwards-compatible OpenAI
+        # default; confirmatory preflight separately requires the field to be
+        # explicit in the checked-in manifest.
+        provider = str(condition.get("provider", "openai")).strip()
         planner = str(condition.get("planner_model", "")).strip()
         reconciler = str(condition.get("reconciler_model", planner)).strip()
         repetitions = condition.get("llm_repetitions")
         if not condition_id or condition_id in seen:
             raise ValueError("Model condition IDs must be non-empty and unique.")
+        if not provider:
+            raise ValueError(f"Model condition {condition_id!r} must declare a provider.")
         if not planner or not reconciler:
             raise ValueError(f"Model condition {condition_id!r} must declare planner and reconciler models.")
         if not isinstance(repetitions, int) or repetitions < 1:
@@ -291,31 +282,44 @@ def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
                 raise ValueError(
                     f"Model condition {condition_id!r} llm_repetition_ids must be non-empty and unique."
                 )
+        generation_settings = dict(condition.get("generation_settings", {}) or {})
+        unknown_settings = sorted(
+            set(generation_settings) - {"temperature", "top_p", "seed", "reasoning_effort"}
+        )
+        if unknown_settings:
+            raise ValueError(
+                f"Model condition {condition_id!r} has unknown generation settings: "
+                + ", ".join(unknown_settings)
+            )
+        for key, value in generation_settings.items():
+            if value is not None and key in {"temperature", "top_p", "seed"} and not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Model condition {condition_id!r} generation setting {key!r} must be numeric or null."
+                )
+            if key == "reasoning_effort" and value is not None and (
+                not isinstance(value, str) or not value.strip()
+            ):
+                raise ValueError(
+                    f"Model condition {condition_id!r} reasoning_effort must be a non-empty string or null."
+                )
         result.append({
             "condition_id": condition_id,
+            "provider": provider,
             "planner_model": planner,
             "reconciler_model": reconciler,
             "llm_repetitions": repetitions,
             "llm_repetition_ids": condition_repetition_ids,
             # Preserve nulls: null means provider default and is part of the
             # frozen declaration even though it is omitted from the request.
-            "generation_settings": dict(condition.get("generation_settings", {}) or {}),
+            "generation_settings": generation_settings,
         })
+    fingerprints = {
+        json.dumps(_normalise(item), sort_keys=True, separators=(",", ":"))
+        for item in result
+    }
+    if len(fingerprints) != len(result):
+        raise ValueError("Model conditions must be unique declarations, not duplicate copies.")
     return result
-
-
-def planned_model_conditions() -> list[dict[str, Any]]:
-    """Return the exact predeclared confirmatory model matrix."""
-
-    return [
-        {
-            **condition,
-            "llm_repetitions": CONFIRMATORY_REPETITIONS,
-            "llm_repetition_ids": list(CONFIRMATORY_REPETITION_IDS),
-            "generation_settings": dict(CONFIRMATORY_GENERATION_SETTINGS),
-        }
-        for condition in CONFIRMATORY_MODEL_CONDITIONS
-    ]
 
 
 def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
@@ -326,8 +330,18 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
     """
 
     mismatches: list[str] = []
-    if _normalise(model_conditions(loaded)) != _normalise(planned_model_conditions()):
-        mismatches.append("model_conditions do not match the three predeclared snapshot conditions")
+    conditions = model_conditions(loaded)
+    raw_conditions = loaded.get("model_conditions") or []
+    if any(not isinstance(item, Mapping) or not str(item.get("provider", "")).strip() for item in raw_conditions):
+        mismatches.append("every confirmatory model condition must explicitly declare provider")
+    declared_providers = {condition["provider"] for condition in conditions}
+    if not declared_providers:
+        mismatches.append("model_conditions must declare at least one provider")
+    # The current executor is OpenAI-specific, but the manifest schema keeps
+    # provider metadata explicit so future provider conditions do not require a
+    # redesign of the experiment matrix.
+    if any(provider != "openai" for provider in declared_providers):
+        mismatches.append("the current confirmatory executor supports provider='openai' only")
     repetitions = loaded.get("splits_and_repetitions") or {}
     if repetitions.get("split_seeds") != list(CONFIRMATORY_SPLIT_SEEDS):
         mismatches.append(f"split_seeds must be {list(CONFIRMATORY_SPLIT_SEEDS)!r}")
@@ -337,14 +351,8 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
         mismatches.append("llm_repetition_ids must be rep_001, rep_002, rep_003")
     if loaded.get("generation_settings") != CONFIRMATORY_GENERATION_SETTINGS:
         mismatches.append("global generation_settings differ from the predeclared settings")
-    primary = (loaded.get("ablations") or {}).get("primary")
-    secondary = (loaded.get("ablations") or {}).get("secondary")
-    if primary != list(CONFIRMATORY_PRIMARY_ABLATIONS):
-        mismatches.append("primary ablations do not match the six predeclared variants")
-    if secondary != list(CONFIRMATORY_SECONDARY_ABLATIONS):
-        mismatches.append("secondary ablations must contain llm_with_diagnostics")
     aliases = loaded.get("modeling") or {}
-    first = planned_model_conditions()[0]
+    first = conditions[0]
     for field in ("requested_model", "planner_model", "reconciler_model"):
         value = aliases.get(field)
         if value is not None and value != first[field if field != "requested_model" else "planner_model"]:
@@ -438,13 +446,20 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
 
         from evaluation.ablation import ablation_presets
         presets = ablation_presets()
-        if any(presets[name].analysis_role != "primary" for name in CONFIRMATORY_PRIMARY_ABLATIONS):
-            mismatches.append("at least one primary ablation is not marked primary")
-        diagnostics_spec = presets.get("llm_with_diagnostics")
-        if diagnostics_spec is None or diagnostics_spec.analysis_role != "secondary":
-            mismatches.append("llm_with_diagnostics must be declared as secondary")
-        elif diagnostics_spec.planner_evidence_mode != "training_only_structural_diagnostics":
-            mismatches.append("llm_with_diagnostics must expose training-only structural diagnostics")
+        primary = (loaded.get("ablations") or {}).get("primary") or []
+        secondary = (loaded.get("ablations") or {}).get("secondary") or []
+        if not primary or len(set(primary)) != len(primary):
+            mismatches.append("primary ablations must be non-empty and unique")
+        if len(set(secondary)) != len(secondary):
+            mismatches.append("secondary ablations must be unique")
+        if set(primary) & set(secondary):
+            mismatches.append("primary and secondary ablations must be disjoint")
+        for name in primary:
+            if name not in presets or presets[name].analysis_role != "primary":
+                mismatches.append(f"manifest primary ablation {name!r} is not a registered primary preset")
+        for name in secondary:
+            if name not in presets or presets[name].analysis_role != "secondary":
+                mismatches.append(f"manifest secondary ablation {name!r} is not a registered secondary preset")
     except (ImportError, AttributeError, TypeError, ValueError) as exc:
         mismatches.append(f"runtime protocol definitions could not be checked: {exc}")
     if mismatches:
@@ -472,8 +487,8 @@ def validate_confirmatory_preflight(
     return {
         "status": "draft",
         "model_conditions": model_conditions(loaded),
-        "primary_ablations": list(CONFIRMATORY_PRIMARY_ABLATIONS),
-        "secondary_ablations": list(CONFIRMATORY_SECONDARY_ABLATIONS),
+        "primary_ablations": list((loaded.get("ablations") or {}).get("primary", [])),
+        "secondary_ablations": list((loaded.get("ablations") or {}).get("secondary", [])),
         "split_seeds": list(CONFIRMATORY_SPLIT_SEEDS),
         "llm_repetition_ids": list(CONFIRMATORY_REPETITION_IDS),
         "generation_settings": dict(CONFIRMATORY_GENERATION_SETTINGS),

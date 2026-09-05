@@ -98,6 +98,7 @@ class EvaluationConfig:
     model: str = "gpt-4.1-mini"
     planner_model: str | None = None
     reconciler_model: str | None = None
+    provider: str = "openai"
     offline: bool = False
     include_perturbations: bool = False
     thresholds: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
@@ -120,6 +121,7 @@ class EvaluationConfig:
     generation_settings: dict[str, Any] = field(default_factory=dict)
     llm_repetition_ids: tuple[str, ...] | None = None
     planner_evidence_mode: str = "training_profile_only"
+    analysis_stratum: str = "secondary"
 
     def __post_init__(self) -> None:
         if self.planner_model is None:
@@ -148,6 +150,10 @@ class EvaluationConfig:
             "training_only_structural_diagnostics",
         }:
             raise ValueError("Unsupported planner_evidence_mode.")
+        if self.provider != "openai":
+            raise ValueError(
+                "The current executor supports provider='openai'; other providers remain manifest-compatible but are not executable yet."
+            )
 
 
 class _EvaluationGateAgent:
@@ -603,10 +609,12 @@ def _run_trial(
         "question": case.question,
         "training_profile": training_profile,
         "model_condition_id": config.model_condition_id,
+        "provider": config.provider,
         "llm_repetition_id": repetition_id,
         "planner_model": config.planner_model,
         "reconciler_model": config.reconciler_model,
         "generation_settings": dict(config.generation_settings),
+        "analysis_stratum": config.analysis_stratum,
         "planner_evidence_mode": config.planner_evidence_mode,
         "training_only_structural_diagnostics": planner_diagnostics,
     }
@@ -953,6 +961,29 @@ def _run_trial(
         and not proceeded_unchanged
         and not unsafe_plan_intercepted
     )
+    hard_artifact = (gate_result or {}).get("hard_validation") or {}
+    challenger_hard_status = (
+        (hard_artifact.get("deterministic_challenger") or {}).get("status")
+        if gate_result is not None else None
+    )
+    soft_intervention_eligible = bool(
+        deterministic is not None
+        and config.gate_mode != "llm_only"
+        and initial_validation.status == "passed"
+        and challenger_hard_status in {None, "passed"}
+    )
+    actionable_soft_disagreement = soft_intervention_eligible and method_disagreement
+    preprocessing_only_disagreement = (
+        soft_intervention_eligible
+        and not method_disagreement
+        and preprocessing_disagreement
+    )
+    disagreement_type = (
+        "method_and_preprocessing" if method_disagreement and preprocessing_disagreement
+        else "method" if method_disagreement
+        else "preprocessing" if preprocessing_disagreement
+        else "none"
+    )
 
     # Full empirical-reference candidate fitting is intentionally after the
     # gate call, so final summary results cannot influence the runtime
@@ -1204,6 +1235,7 @@ def _run_trial(
         "test_size": config.test_size,
         "split_contract": split.as_dict(),
         "agent_source": agent_source,
+        "provider": config.provider,
         "requested_live_trial": (
             not config.offline
             and plan_factory is None
@@ -1242,6 +1274,7 @@ def _run_trial(
             and initial_plan_override is None
         ),
         "generation_settings": dict(config.generation_settings),
+        "analysis_stratum": config.analysis_stratum,
         "planner_evidence_mode": config.planner_evidence_mode,
         "planner_structural_diagnostics_exposed": planner_diagnostics is not None,
         "planner_structural_diagnostics": planner_diagnostics,
@@ -1294,6 +1327,15 @@ def _run_trial(
         "task_disagreement": task_disagreement,
         "method_disagreement": method_disagreement,
         "preprocessing_disagreement": preprocessing_disagreement,
+        "disagreement_type": disagreement_type,
+        "soft_intervention_eligible": soft_intervention_eligible,
+        "actionable_soft_disagreement": actionable_soft_disagreement,
+        "preprocessing_only_disagreement": preprocessing_only_disagreement,
+        "preprocessing_disagreement_status": (
+            "preprocessing_disagreement_not_actionable"
+            if preprocessing_only_disagreement
+            else "not_applicable"
+        ),
         "preprocessing_agreement_status": (
             comparison.get("status") if comparison is not None else "unavailable"
         ),
@@ -1604,6 +1646,7 @@ def _failed_trial_record(
         "split_random_state": split_seed,
         "split_contract": split.as_dict(),
         "agent_source": "failed",
+        "provider": config.provider,
         "requested_live_trial": not config.offline and config.gate_mode != "deterministic_only",
         "agent_model": config.planner_model,
         "planner_model": config.planner_model,
@@ -1624,6 +1667,7 @@ def _failed_trial_record(
         "prompt_schema_version": config.prompt_schema_version,
         "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
         "generation_settings": dict(config.generation_settings),
+        "analysis_stratum": config.analysis_stratum,
         "planner_api_provenance": None,
         "reconciler_api_provenance": None,
         "agent_initial": None,
@@ -1710,6 +1754,7 @@ def run_evaluation(
     model: str = "gpt-4.1-mini",
     planner_model: str | None = None,
     reconciler_model: str | None = None,
+    provider: str = "openai",
     offline: bool = False,
     include_perturbations: bool = False,
     thresholds: dict[str, float] | None = None,
@@ -1784,6 +1829,7 @@ def run_evaluation(
         model=model,
         planner_model=planner_model or model,
         reconciler_model=reconciler_model or model,
+        provider=provider,
         offline=offline,
         include_perturbations=include_perturbations,
         thresholds={**DEFAULT_THRESHOLDS, **(thresholds or {})},
@@ -1804,6 +1850,7 @@ def run_evaluation(
         generation_settings=dict(generation_settings or {}),
         llm_repetition_ids=tuple(str(value) for value in llm_repetition_ids) if llm_repetition_ids is not None else None,
         planner_evidence_mode=planner_evidence_mode,
+        analysis_stratum=(spec_values or {}).get("analysis_role", "secondary"),
     )
     if cases is not None:
         selected_cases = list(cases)
@@ -2010,12 +2057,14 @@ def run_evaluation(
         "agent_mode": "offline" if config.offline else "live_required" if config.require_live else "live_or_fallback",
         "model": config.model,
         "model_condition_id": config.model_condition_id,
+        "provider": config.provider,
         "planner_model": config.planner_model,
         "reconciler_model": config.reconciler_model,
         "agent_model_requested": config.model,
         "planner_model_requested": config.planner_model,
         "reconciler_model_requested": config.reconciler_model,
         "generation_settings": dict(config.generation_settings),
+        "analysis_stratum": config.analysis_stratum,
         "planner_evidence_mode": config.planner_evidence_mode,
         "planner_structural_diagnostics_exposed": config.planner_evidence_mode == "training_only_structural_diagnostics",
         "planner_model_effective": agents.model,

@@ -514,17 +514,53 @@ def _soft_decision(record: dict[str, Any]) -> str | None:
     return None
 
 
+def soft_intervention_eligible(record: dict[str, Any]) -> bool:
+    """Return whether a row belongs to the primary soft-gate comparison set.
+
+    Eligibility requires a completed, hard-valid LLM/challenger comparison.
+    This is intentionally separate from preprocessing diagnostics: a
+    preprocessing-only difference is observable but is not an actionable soft
+    disagreement in the current protocol.
+    """
+
+    if record.get("trial_status") == "failed":
+        return False
+    if "challenger_enabled" in record and record.get("challenger_enabled") is not True:
+        return False
+    if (
+        "deterministic_recommendation" in record
+        and record.get("deterministic_recommendation") is None
+        and not record.get("deterministic_method")
+    ):
+        return False
+    if record.get("hard_validation_status") == "failed" or _initial_hard_invalid(record):
+        return False
+    artifact = record.get("hard_validation") or {}
+    initial = artifact.get("initial_proposal") or {}
+    challenger = artifact.get("deterministic_challenger") or {}
+    if initial.get("status") is not None or challenger.get("status") is not None:
+        return initial.get("status") == "passed" and challenger.get("status") == "passed"
+    return record.get("agent_initial_valid") is not False
+
+
+def actionable_soft_disagreement(record: dict[str, Any]) -> bool:
+    """Canonical primary definition of an actionable soft disagreement."""
+
+    return soft_intervention_eligible(record) and record.get("method_disagreement") is True
+
+
+def preprocessing_only_disagreement(record: dict[str, Any]) -> bool:
+    """Return the separately reported, non-actionable preprocessing case."""
+
+    return (
+        soft_intervention_eligible(record)
+        and record.get("method_disagreement") is not True
+        and record.get("preprocessing_disagreement") is True
+    )
+
+
 def _soft_challenges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        record
-        for record in records
-        if _soft_status(record) == "disagreement"
-        and (
-            record.get("hard_validation_status") == "passed"
-            or record.get("agent_initial_valid") is True
-            or not record.get("hard_validation")
-        )
-    ]
+    return [record for record in records if actionable_soft_disagreement(record)]
 
 
 def _soft_decision_records(records: list[dict[str, Any]], decision: str) -> list[dict[str, Any]]:
@@ -781,6 +817,8 @@ def _gate_health(
     """Summarize intervention quality without relying on family-name correctness."""
 
     valid = [record for record in records if record.get("trial_status") != "failed"]
+    soft_eligible = [record for record in valid if soft_intervention_eligible(record)]
+    actionable = [record for record in valid if actionable_soft_disagreement(record)]
     paired = [record for record in valid if _record_regret_reduction(record) is not None]
     challenges = _soft_decision_records(valid, "challenge")
     abstentions = _soft_decision_records(valid, "abstain")
@@ -867,8 +905,7 @@ def _gate_health(
     beneficial_opportunities = sum(
         _alternative_delta(record) is not None
         and _alternative_delta(record) > tolerance
-        for record in valid
-        if _soft_status(record) == "disagreement"
+        for record in actionable
     )
     beneficial_challenges = sum(outcome == "improved" for outcome in challenge_outcomes)
     utility = gate_utility(
@@ -1016,22 +1053,31 @@ def _gate_health(
             "mean_regret_reduction": _mean(group_deltas),
         }
     return {
-        "total_disagreements": sum(_soft_status(record) == "disagreement" for record in valid),
+        "total_disagreements": len(actionable),
+        "actionable_soft_disagreement_count": len(actionable),
+        "soft_intervention_eligible_count": len(soft_eligible),
+        "preprocessing_only_disagreement_count": sum(
+            preprocessing_only_disagreement(record) for record in valid
+        ),
+        "preprocessing_only_disagreement_rate": _rate(
+            sum(preprocessing_only_disagreement(record) for record in valid),
+            len(soft_eligible),
+        ),
         "total_challenges": len(challenges),
         "total_abstentions": len(abstentions),
-        "challenge_rate": _rate(len(challenges), len(challenges) + len(abstentions)),
-        "abstention_rate": _rate(len(abstentions), len(challenges) + len(abstentions)),
+        "challenge_rate": _rate(len(challenges), len(actionable)),
+        "abstention_rate": _rate(len(abstentions), len(actionable)),
         "disagreement_rate": _rate(
-            sum(_soft_status(record) == "disagreement" for record in valid),
-            sum(_soft_status(record) in {"agreement", "disagreement"} for record in valid),
+            len(actionable),
+            len(soft_eligible),
         ),
         "probe_invocation_rate_conditional_on_disagreement": _rate(
-            sum(bool(record.get("empirical_probe_invoked")) for record in valid),
-            sum(_soft_status(record) == "disagreement" for record in valid),
+            sum(bool(record.get("empirical_probe_invoked")) for record in actionable),
+            len(actionable),
         ),
         "abstention_rate_conditional_on_disagreement": _rate(
             len(abstentions),
-            sum(_soft_status(record) == "disagreement" for record in valid),
+            len(actionable),
         ),
         "improved_interventions": primary_improved,
         "worsened_interventions": primary_harmful,
@@ -1053,7 +1099,11 @@ def _gate_health(
         "harmful_intervention_incidence": _rate(primary_harmful, len(valid)),
         "neutral_intervention_incidence": _rate(primary_neutral, len(valid)),
         "intervention_rate": _rate(len(interventions), len(valid)),
-        "abstention_preservation_rate": _rate(len(abstentions), len(challenges) + len(abstentions)),
+        "abstention_preservation_rate": _rate(len(abstentions), len(actionable)),
+        "intervention_rate_conditional_on_disagreement": _rate(
+            sum(_intervention_occurred(record) for record in actionable),
+            len(actionable),
+        ),
         "unnecessary_intervention_count": neutral,
         "unnecessary_intervention_rate": _rate(neutral, len(challenges)),
         "holdout_intervention_metrics": holdout,
@@ -1167,6 +1217,8 @@ def _dataset_macro_health(
         "median_paper_holdout_delta",
         "disagreement_rate", "probe_invocation_rate_conditional_on_disagreement",
         "abstention_rate_conditional_on_disagreement",
+        "intervention_rate_conditional_on_disagreement",
+        "preprocessing_only_disagreement_rate",
     )
     return {
         "dataset_count": len(per_dataset),
@@ -1295,7 +1347,11 @@ def summarize_gate_health(
 def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize runtime probe use without exposing it to runtime decisions."""
 
-    invoked = [record for record in records if record.get("empirical_probe_invoked") is True]
+    invoked = [
+        record for record in records
+        if record.get("empirical_probe_invoked") is True
+        and actionable_soft_disagreement(record)
+    ]
     completed = [
         record for record in invoked
         if (record.get("empirical_probe") or {}).get("status") == "completed"
@@ -1338,11 +1394,11 @@ def _empirical_probe_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "probe_invocation_count": len(invoked),
         "probe_invocation_rate": _rate(
             len(invoked),
-            sum(record.get("method_disagreement") is True for record in records),
+            sum(actionable_soft_disagreement(record) for record in records),
         ),
         "probe_invocation_rate_conditional_on_disagreement": _rate(
             len(invoked),
-            sum(record.get("agreement_status") == "disagreement" for record in records),
+            sum(actionable_soft_disagreement(record) for record in records),
         ),
         "probe_completion_count": len(completed),
         "probe_unavailable_count": len(unavailable),
@@ -1406,7 +1462,6 @@ def summarize_trials(
     initial_invalid = [record for record in completed if record.get("agent_initial_valid") is False]
     initial_valid = [record for record in completed if record.get("agent_initial_valid") is True]
     final_valid = [record for record in completed if record.get("final_valid") is True]
-    agreement = [record for record in deterministic_available if record.get("agreement_status") == "agreement"]
     recon = [record for record in completed if _reconciliation_was_invoked(record)]
     recon_success = [record for record in recon if record.get("reconciliation_status") == "succeeded"]
     soft_challenge_records = _soft_challenges(completed)
@@ -1435,6 +1490,9 @@ def summarize_trials(
         valid_records = [record for record in records if record.get("trial_status") != "failed"]
         initial_valid_records = [record for record in valid_records if record.get("agent_initial_valid") is True]
         final_valid_records = [record for record in valid_records if record.get("final_valid") is True]
+        soft_eligible_records = [record for record in valid_records if soft_intervention_eligible(record)]
+        actionable_records = [record for record in valid_records if actionable_soft_disagreement(record)]
+        preprocessing_only_records = [record for record in valid_records if preprocessing_only_disagreement(record)]
         soft_challenge_records = _soft_challenges(valid_records)
         challenge_records = _soft_decision_records(valid_records, "challenge")
         abstained_records = _soft_decision_records(valid_records, "abstain")
@@ -1530,12 +1588,12 @@ def summarize_trials(
             ),
             "final_hard_invalid_count": sum(_final_hard_invalid(record) for record in valid_records),
             "agreement_rate": _rate(
-                sum(record.get("agreement_status") == "agreement" for record in valid_records),
-                sum(record.get("agreement_status") in {"agreement", "disagreement"} for record in valid_records),
+                len(soft_eligible_records) - len(actionable_records),
+                len(soft_eligible_records),
             ),
             "disagreement_rate": _rate(
-                sum(record.get("agreement_status") == "disagreement" for record in valid_records),
-                sum(record.get("agreement_status") in {"agreement", "disagreement"} for record in valid_records),
+                len(actionable_records),
+                len(soft_eligible_records),
             ),
             "probe_invocation_rate_conditional_on_disagreement": health[
                 "probe_invocation_rate_conditional_on_disagreement"
@@ -1552,8 +1610,8 @@ def summarize_trials(
             ),
             **_reconciliation_rates(valid_records),
             "model_family_disagreement_rate": _rate(
-                sum(record.get("method_disagreement") is True for record in valid_records),
-                sum(record.get("deterministic_recommendation") is not None for record in valid_records),
+                len(actionable_records),
+                len(soft_eligible_records),
             ),
             "preprocessing_disagreement_rate": _rate(
                 sum(record.get("preprocessing_disagreement") is True for record in valid_records),
@@ -1561,10 +1619,19 @@ def summarize_trials(
             ),
             "soft_challenge_count": len(soft_challenge_records),
             "total_disagreements": len(soft_challenge_records),
+            "actionable_soft_disagreement_count": len(actionable_records),
+            "soft_intervention_eligible_count": len(soft_eligible_records),
+            "preprocessing_only_disagreement_count": len(preprocessing_only_records),
+            "preprocessing_only_disagreement_rate": _rate(
+                len(preprocessing_only_records), len(soft_eligible_records)
+            ),
             "challenges": len(challenge_records),
             "abstentions": len(abstained_records),
             "challenge_rate": _rate(len(challenge_records), len(soft_challenge_records)),
             "abstention_rate": _rate(len(abstained_records), len(soft_challenge_records)),
+            "intervention_rate_conditional_on_disagreement": health[
+                "intervention_rate_conditional_on_disagreement"
+            ],
             "soft_challenge_reconciliation_invocation_count": sum(
                 _reconciliation_was_invoked(record) for record in soft_challenge_records
             ),
@@ -1934,13 +2001,15 @@ def summarize_trials(
             "harm_rate": "same numerator and denominator as harmful_intervention_rate",
             "mean_beneficial_holdout_magnitude": "mean positive paper_holdout_delta among beneficial interventions; null when unsupported",
             "mean_harmful_holdout_magnitude": "mean absolute negative paper_holdout_delta among harmful interventions; null when unsupported",
-            "challenge_rate": "challenged eligible initial plans / eligible soft disagreements (challenge plus abstention records after hard-validation eligibility); null when denominator is zero",
+            "challenge_rate": "challenged actionable model-family disagreements / actionable model-family disagreements; null when denominator is zero",
             "intervention_rate": "actual final-plan changes caused by the soft safeguard / completed eligible trials",
-            "abstention_rate": "challenged eligible initial plans preserved because evidence was insufficient / eligible soft disagreements",
+            "abstention_rate": "actionable model-family disagreements preserved because evidence was insufficient / actionable model-family disagreements",
             "abstention_preservation_rate": "same conditional preservation rate as abstention_rate",
-            "disagreement_rate": "LLM/deterministic disagreements / eligible agreement-or-disagreement trials",
-            "probe_invocation_rate_conditional_on_disagreement": "training-only empirical probes invoked / eligible disagreements",
-            "abstention_rate_conditional_on_disagreement": "eligible disagreements preserved without intervention / eligible disagreements",
+            "disagreement_rate": "actionable model-family disagreements / hard-valid LLM/challenger comparisons",
+            "probe_invocation_rate_conditional_on_disagreement": "training-only empirical probes invoked / actionable model-family disagreements",
+            "abstention_rate_conditional_on_disagreement": "actionable disagreements preserved without intervention / actionable model-family disagreements",
+            "intervention_rate_conditional_on_disagreement": "changed soft plans / actionable model-family disagreements",
+            "preprocessing_only_disagreement_rate": "descriptive preprocessing-only disagreements / hard-valid LLM/challenger comparisons; not actionable",
             "beneficial_intervention_incidence": "beneficial actual interventions / eligible completed trials",
             "harmful_intervention_incidence": "harmful actual interventions / eligible completed trials",
             "neutral_intervention_incidence": "neutral actual interventions / eligible completed trials",
@@ -2022,19 +2091,28 @@ def summarize_trials(
             sum(_initial_hard_invalid(record) for record in completed),
         ),
         "final_hard_invalid_count": sum(_final_hard_invalid(record) for record in completed),
-        "agreement_rate": _rate(len(agreement), len(deterministic_available)),
+        "agreement_rate": dataset_gate_health.get("agreement_rate"),
         "reconciliation_success_rate": _rate(len(recon_success), len(recon)),
         "reconciliation_invocation_rate": _rate(len(recon), len(completed)),
-        "model_family_disagreement_rate": _rate(
-            sum(record.get("method_disagreement") is True for record in deterministic_available),
-            len(deterministic_available),
-        ),
+        "model_family_disagreement_rate": dataset_gate_health.get("disagreement_rate"),
         "preprocessing_disagreement_rate": _rate(
             sum(record.get("preprocessing_disagreement") is True for record in deterministic_available),
             len(deterministic_available),
         ),
         "soft_challenge_count": len(soft_challenge_records),
         "total_disagreements": overall_selective["total_disagreements"],
+        "actionable_soft_disagreement_count": overall_selective.get(
+            "actionable_soft_disagreement_count", len(soft_challenge_records)
+        ),
+        "soft_intervention_eligible_count": overall_selective.get(
+            "soft_intervention_eligible_count"
+        ),
+        "preprocessing_only_disagreement_count": overall_selective.get(
+            "preprocessing_only_disagreement_count", 0
+        ),
+        "preprocessing_only_disagreement_rate": overall_selective.get(
+            "preprocessing_only_disagreement_rate"
+        ),
         "challenges": overall_selective["challenges"],
         "abstentions": overall_selective["abstentions"],
         "challenge_rate": dataset_gate_health["challenge_rate"],
@@ -2046,6 +2124,9 @@ def summarize_trials(
         "abstention_rate_conditional_on_disagreement": dataset_gate_health[
             "abstention_rate_conditional_on_disagreement"
         ],
+        "intervention_rate_conditional_on_disagreement": overall_selective.get(
+            "intervention_rate_conditional_on_disagreement"
+        ),
         "trial_weighted_challenge_rate": overall_selective["challenge_rate"],
         "trial_weighted_abstention_rate": overall_selective["abstention_rate"],
         "soft_challenge_reconciliation_invocation_count": sum(

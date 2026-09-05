@@ -37,11 +37,11 @@ changes to included result-affecting files do.
 ## Confirmatory model matrix and repetitions
 
 The manifest is the authority for the LLM experiment matrix. Its
-`model_conditions` list contains three stable `condition_id` values, paired
-planner/reconciler snapshots (`gpt-5-mini-2025-08-07`,
-`gpt-5.4-mini-2026-03-17`, and `gpt-5.4-2026-03-05`), three proposal
-repetitions per condition, and the declared reasoning settings. The checked-in
-file intentionally remains `status: "draft"`; it must still pass independent
+`model_conditions` list currently contains the existing GPT conditions plus
+`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, with paired
+planner/reconciler snapshots, three proposal repetitions per condition, and
+the declared reasoning settings. The checked-in file intentionally remains
+`status: "draft"`; it must still pass independent
 review and a local/synthetic live smoke test before the later freeze. Reconciler
 models are never silently substituted.
 
@@ -58,6 +58,9 @@ namespace.
 
 Strict confirmatory validation rejects undeclared conditions, model or
 repetition overrides, generation-setting changes, and condition-set drift.
+Strict execution runs both manifest-declared primary and secondary ablations;
+each row retains its `analysis_stratum`, and secondary controls are excluded
+from primary summaries and claims.
 Exploratory runs may use the ordinary single-model flags; after freeze those
 flags must agree with the selected condition. The complete matrix must be
 frozen before confirmatory outcomes are inspected.

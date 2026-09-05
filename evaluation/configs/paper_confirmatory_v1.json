@@ -1,11 +1,11 @@
 {
   "manifest_schema_version": "confirmatory-manifest-v1",
-  "status": "frozen",
+  "status": "draft",
   "strict_live_required": true,
   "experiment_name": "selective-intervention-reliability",
   "experiment_config_version": "paper-confirmatory-v1",
-  "expected_experiment_code_sha256": "b72cb25898a5c10a9dc3dab7a0c071499c6ae6fc3c6b63e60813ff69a2e10026",
-  "source_git_commit": "54eb657ed95588ef41e609da7501cea826c526d1",
+  "expected_experiment_code_sha256": null,
+  "source_git_commit": null,
   "code_hash_convention": "The experiment code SHA-256 covers app/, evaluation/ (except this manifest), and pyproject.toml. It is the confirmatory validity identity; source_git_commit is provenance only.",
   "freeze_rule": "Finalize result-affecting code/configuration, compute the canonical experiment code SHA-256, insert it here, set status to frozen, commit the freeze, then validate before inspecting external live outcomes.",
   "research_scope": "LLM-based model-family and preprocessing planning for supervised tabular classification/regression under selective deterministic validation",
@@ -80,6 +80,7 @@
   "model_conditions": [
     {
       "condition_id": "gpt5_mini_2025_08_07",
+      "provider": "openai",
       "planner_model": "gpt-5-mini-2025-08-07",
       "reconciler_model": "gpt-5-mini-2025-08-07",
       "llm_repetitions": 3,
@@ -93,6 +94,7 @@
     },
     {
       "condition_id": "gpt54_mini_2026_03_17",
+      "provider": "openai",
       "planner_model": "gpt-5.4-mini-2026-03-17",
       "reconciler_model": "gpt-5.4-mini-2026-03-17",
       "llm_repetitions": 3,
@@ -106,8 +108,51 @@
     },
     {
       "condition_id": "gpt54_2026_03_05",
+      "provider": "openai",
       "planner_model": "gpt-5.4-2026-03-05",
       "reconciler_model": "gpt-5.4-2026-03-05",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": ["rep_001", "rep_002", "rep_003"],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "condition_id": "gpt56_sol",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-sol",
+      "reconciler_model": "gpt-5.6-sol",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": ["rep_001", "rep_002", "rep_003"],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "condition_id": "gpt56_terra",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-terra",
+      "reconciler_model": "gpt-5.6-terra",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": ["rep_001", "rep_002", "rep_003"],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "condition_id": "gpt56_luna",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-luna",
+      "reconciler_model": "gpt-5.6-luna",
       "llm_repetitions": 3,
       "llm_repetition_ids": ["rep_001", "rep_002", "rep_003"],
       "generation_settings": {

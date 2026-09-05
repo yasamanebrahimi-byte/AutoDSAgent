@@ -6,7 +6,9 @@ is invoked only after the existing formulation gate, frozen split, and hard
 validation. For a valid model-family disagreement, the bounded pairwise probe
 runs first on the frozen training partition. Only moderate or strong evidence
 authorizes reconsideration; unavailable, tied, or weak evidence preserves the
-initial LLM plan. The initial modeling proposal and deterministic recommendation
+initial LLM plan. A preprocessing-only disagreement is recorded as
+`preprocessing_disagreement_not_actionable` and does not invoke this probe or
+reconciler. The initial modeling proposal and deterministic recommendation
 remain independent. Both are restricted to the frozen training partition, but
 they do not necessarily receive identical representations: the LLM sees a
 compact profile while the challenger may use richer pre-specified structural
@@ -116,7 +118,7 @@ other source-specific recommendation fields.
 
 | Ablation | Initial LLM | Hard validation | Deterministic challenger | Empirical probe | Abstention | LLM reconciliation | Direct probe selection |
 |---|---|---|---|---|---|---|---|
-| `llm_only` | yes | minimum execution guard | no soft use | no | no | no | no |
+| `llm_only` | yes | universal validity checks | no deterministic soft challenger | no | no | no | no |
 | `hard_validation_only` | yes | yes; repairs invalid plans only | advisory only | no | no | no | no |
 | `deterministic_only` | no final LLM choice | yes | final choice | no | no | no | no |
 | `always_reconcile` | yes | yes | yes | no | no | every valid disagreement | no |

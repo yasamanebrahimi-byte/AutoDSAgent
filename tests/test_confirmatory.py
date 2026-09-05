@@ -17,6 +17,8 @@ from evaluation.confirmatory import (
     config_sha256,
     deterministic_policy_config,
     empirical_probe_config,
+    load_confirmatory_manifest,
+    validate_confirmatory_preflight,
     repository_commit,
     experiment_code_sha256,
 )
@@ -211,6 +213,28 @@ def test_draft_manifest_is_not_accepted_as_confirmatory():
     manifest["expected_experiment_code_sha256"] = None
     with pytest.raises(ValueError, match="not frozen"):
         validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
+def test_checked_in_manifest_is_validated_without_substituting_a_runtime_hash():
+    manifest = load_confirmatory_manifest(MANIFEST_PATH)
+    if manifest.get("status") == "frozen":
+        assert manifest["expected_experiment_code_sha256"] == experiment_code_sha256()
+        validate_confirmatory_manifest(manifest, _runtime(manifest))
+    else:
+        assert manifest.get("expected_experiment_code_sha256") is None
+        validate_confirmatory_preflight(manifest)
+        with pytest.raises(ValueError, match="not frozen"):
+            validate_confirmatory_manifest(manifest, _runtime(manifest))
+
+
+def test_manifest_declares_existing_conditions_plus_sol_terra_and_luna_without_a_python_allowlist():
+    manifest = load_confirmatory_manifest(MANIFEST_PATH)
+    conditions = manifest["model_conditions"]
+    models = {item["planner_model"] for item in conditions}
+    assert {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} <= models
+    assert len({item["condition_id"] for item in conditions}) == len(conditions)
+    assert all(item["provider"] == "openai" for item in conditions)
+    assert all(item["generation_settings"]["reasoning_effort"] == "medium" for item in conditions)
 
 
 def test_confirmatory_run_copies_exact_frozen_manifest_and_records_metadata(tmp_path: Path):
