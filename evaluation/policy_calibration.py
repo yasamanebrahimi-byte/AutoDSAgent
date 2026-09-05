@@ -1148,7 +1148,7 @@ def build_calibration_artifact(
             "challenge_yield": "deprecated alias for training_reference_challenge_yield",
             "harmful_intervention_rate": "deprecated training-reference alias in calibration artifacts",
             "unnecessary_intervention_rate": "deprecated alias for training_reference_unnecessary_intervention_rate",
-            "challenge_recall": "beneficial challenges made / all disagreements where deterministic alternative would materially help",
+            "challenge_recall": "beneficial challenges made / actionable model-family disagreements where the deterministic alternative would materially help",
             "aggregation": "average repeated seeds within each unique dataset, then summarize across datasets",
         },
         "candidate_policies": [candidate.as_dict() for candidate in candidates],

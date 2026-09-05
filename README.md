@@ -50,18 +50,15 @@ richer pre-specified structural diagnostics. The secondary
 `llm_with_diagnostics` ablation tests whether that information asymmetry alone
 explains any observed difference.
 
-The confirmatory matrix is declared in the manifest and currently contains the
-existing GPT conditions plus GPT-5.6 Sol, Terra, and Luna. Each condition has
-three LLM repetitions (`rep_001`–`rep_003`) and split seed `42`:
+The confirmatory matrix is declared in the manifest and currently contains only
+GPT-5.6 Luna, Sol, and Terra. Each condition has three LLM repetitions
+(`rep_001`–`rep_003`) and split seed `42`:
 
 | Condition | Snapshot |
 |---|---|
-| `gpt5_mini_2025_08_07` | `gpt-5-mini-2025-08-07` |
-| `gpt54_mini_2026_03_17` | `gpt-5.4-mini-2026-03-17` |
-| `gpt54_2026_03_05` | `gpt-5.4-2026-03-05` |
+| `gpt56_luna` | `gpt-5.6-luna` |
 | `gpt56_sol` | `gpt-5.6-sol` |
 | `gpt56_terra` | `gpt-5.6-terra` |
-| `gpt56_luna` | `gpt-5.6-luna` |
 
 The six primary ablations are `llm_only` (LLM + universal validity checks; no
 deterministic soft challenger), `hard_validation_only`,

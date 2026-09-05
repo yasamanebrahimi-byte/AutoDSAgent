@@ -148,9 +148,9 @@ def test_frozen_manifest_rejects_declared_but_wrong_selected_condition_model():
             _runtime(
                 manifest,
                 model_conditions=manifest["model_conditions"],
-                selected_model_condition_id="gpt5_mini_2025_08_07",
-                planner_model="gpt-5.4-mini-2026-03-17",
-                reconciler_model="gpt-5.4-mini-2026-03-17",
+                selected_model_condition_id="gpt56_luna",
+                planner_model="gpt-5.6-sol",
+                reconciler_model="gpt-5.6-sol",
             ),
         )
 
@@ -227,11 +227,14 @@ def test_checked_in_manifest_is_validated_without_substituting_a_runtime_hash():
             validate_confirmatory_manifest(manifest, _runtime(manifest))
 
 
-def test_manifest_declares_existing_conditions_plus_sol_terra_and_luna_without_a_python_allowlist():
+def test_manifest_declares_only_luna_sol_terra_without_a_python_allowlist():
     manifest = load_confirmatory_manifest(MANIFEST_PATH)
     conditions = manifest["model_conditions"]
     models = {item["planner_model"] for item in conditions}
-    assert {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} <= models
+    assert models == {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+    assert [item["condition_id"] for item in conditions] == [
+        "gpt56_luna", "gpt56_sol", "gpt56_terra"
+    ]
     assert len({item["condition_id"] for item in conditions}) == len(conditions)
     assert all(item["provider"] == "openai" for item in conditions)
     assert all(item["generation_settings"]["reasoning_effort"] == "medium" for item in conditions)

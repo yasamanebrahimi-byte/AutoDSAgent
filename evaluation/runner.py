@@ -1744,6 +1744,34 @@ def _cached_plan_from_trial(record: dict[str, Any]) -> ModelingPlan | None:
         return None
 
 
+def _canonicalize_trials(trials: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Keep one canonical persisted row per trial ID.
+
+    A failed row is provisional: if an older bundle contains both a failed
+    attempt and a completed retry, the completed row is canonical.  This also
+    makes resuming a bundle produced by an older runner safe without carrying
+    duplicate evaluation units into confirmatory completeness checks.
+    """
+
+    canonical: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for trial in trials:
+        trial_id = trial.get("trial_id")
+        if not trial_id:
+            raise ValueError("Every persisted trial row must contain a trial_id.")
+        trial_id = str(trial_id)
+        trial["trial_id"] = trial_id
+        existing_position = positions.get(trial_id)
+        if existing_position is None:
+            positions[trial_id] = len(canonical)
+            canonical.append(trial)
+            continue
+        existing = canonical[existing_position]
+        if existing.get("trial_status") == "failed" or trial.get("trial_status") != "failed":
+            canonical[existing_position] = trial
+    return canonical, positions
+
+
 def run_evaluation(
     output_dir: str | Path,
     *,
@@ -2092,7 +2120,7 @@ def run_evaluation(
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
             "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
-            "always_reconcile": "invoke the existing reconciliation path for every valid soft disagreement",
+                "always_reconcile": "invoke the existing reconciliation path for every valid actionable model-family disagreement",
             "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
             "probe_direct": "run the bounded pairwise training-only probe; directly select a moderate or strong empirical winner",
             "full": "run the bounded pairwise training-only probe; invoke blinded reconciliation only for moderate or strong evidence",
@@ -2152,7 +2180,10 @@ def run_evaluation(
         if not config_path.is_file() or not trials_path.is_file():
             raise ValueError("--resume requires an existing evaluation bundle with config.json and trials.jsonl.")
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
-        compare_keys = [key for key in stable_config if key != "repository_commit"]
+        compare_keys = [
+            key for key in stable_config
+            if key not in {"repository_commit", "fallback_rows", "confirmatory_valid", "frozen_manifest_path"}
+        ]
         mismatches = [
             key
             for key in compare_keys
@@ -2164,11 +2195,12 @@ def run_evaluation(
                 + ", ".join(mismatches)
             )
         config_payload = existing_config
-        trials = [
+        loaded_trials = [
             json.loads(line)
             for line in trials_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+        trials, trial_positions = _canonicalize_trials(loaded_trials)
         reference_path = output_path / "empirical_reference.json"
         empirical_reference_cache = (
             json.loads(reference_path.read_text(encoding="utf-8"))
@@ -2184,6 +2216,7 @@ def run_evaluation(
             **stable_config,
         }
         trials = []
+        trial_positions = {}
         empirical_reference_cache = {}
     empirical_reference_file = (
         Path(empirical_reference_cache_path).resolve()
@@ -2209,10 +2242,6 @@ def run_evaluation(
         for trial in trials
         if trial.get("trial_status") != "failed"
     }
-    persisted_ids = [trial.get("trial_id") for trial in trials]
-    duplicate_ids = sorted({trial_id for trial_id in persisted_ids if persisted_ids.count(trial_id) > 1}, key=str)
-    if duplicate_ids:
-        raise ValueError(f"Duplicate confirmatory result detected for trial_id={duplicate_ids[0]}")
     for case in selected_cases:
         scenario_list: list[Perturbation | None] = [None]
         scenario_list.extend(perturbation for perturbation in perturbations if perturbation.applies(case))
@@ -2311,7 +2340,15 @@ def run_evaluation(
                                 if confirmatory_metadata else None
                             ),
                         })
-                        trials.append(trial)
+                        existing_position = trial_positions.get(trial_id)
+                        if existing_position is None:
+                            trial_positions[trial_id] = len(trials)
+                            trials.append(trial)
+                        else:
+                            # Failed rows are persisted checkpoints. A retry
+                            # replaces that checkpoint with the new canonical
+                            # result instead of appending a second unit.
+                            trials[existing_position] = trial
                         if trial.get("trial_status") != "failed":
                             completed_trial_ids.add(trial_id)
                         if config.order_swap and variant == "order_ab" and trial.get("trial_status") != "failed":

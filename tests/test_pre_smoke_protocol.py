@@ -42,9 +42,6 @@ def _case() -> BenchmarkCase:
     )
 
 
-@pytest.mark.skip(
-    reason="v1 manifest is now frozen; draft-preflight coverage will move to the next prospective confirmatory manifest"
-)
 def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     result = validate_confirmatory_preflight(manifest)
@@ -53,9 +50,9 @@ def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
     assert manifest["expected_experiment_code_sha256"] is None
     assert manifest["source_git_commit"] is None
     assert [item["condition_id"] for item in model_conditions(manifest)] == [
-        "gpt5_mini_2025_08_07",
-        "gpt54_mini_2026_03_17",
-        "gpt54_2026_03_05",
+        "gpt56_luna",
+        "gpt56_sol",
+        "gpt56_terra",
     ]
     assert all(item["llm_repetitions"] == 3 for item in result["model_conditions"])
     assert all(item["llm_repetition_ids"] == list(CONFIRMATORY_REPETITION_IDS) for item in result["model_conditions"])
@@ -64,12 +61,9 @@ def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
     assert ablation_presets()["llm_with_diagnostics"].analysis_role == "secondary"
 
 
-@pytest.mark.skip(
-    reason="v1 manifest is now frozen; draft-preflight coverage will move to the next prospective confirmatory manifest"
-)
-def test_draft_preflight_rejects_condition_drift():
+def test_draft_preflight_rejects_confirmatory_design_drift():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    manifest["model_conditions"][1]["planner_model"] = "another-model"
+    manifest["splits_and_repetitions"]["split_seeds"] = [123]
     with pytest.raises(ValueError, match="design preflight"):
         validate_confirmatory_preflight(manifest)
 

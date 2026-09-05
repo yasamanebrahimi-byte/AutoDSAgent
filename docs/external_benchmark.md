@@ -37,10 +37,9 @@ changes to included result-affecting files do.
 ## Confirmatory model matrix and repetitions
 
 The manifest is the authority for the LLM experiment matrix. Its
-`model_conditions` list currently contains the existing GPT conditions plus
-`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, with paired
-planner/reconciler snapshots, three proposal repetitions per condition, and
-the declared reasoning settings. The checked-in file intentionally remains
+`model_conditions` list currently contains only `gpt-5.6-luna`, `gpt-5.6-sol`,
+and `gpt-5.6-terra`, with paired planner/reconciler snapshots, three proposal
+repetitions per condition, and the declared reasoning settings. The checked-in file intentionally remains
 `status: "draft"`; it must still pass independent
 review and a local/synthetic live smoke test before the later freeze. Reconciler
 models are never silently substituted.

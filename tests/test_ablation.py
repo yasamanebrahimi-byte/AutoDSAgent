@@ -11,7 +11,7 @@ from sklearn.datasets import make_moons
 
 from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.deterministic_policy import DeterministicPolicy
-from app.schemas import ModelingPlan, PreprocessingContract
+from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResolution, PreprocessingContract
 from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
 from evaluation.benchmarks import BenchmarkCase
@@ -232,6 +232,223 @@ def test_deterministic_only_does_not_call_initial_factory(tmp_path: Path):
     )
     assert result["trials"][0]["agent_source"] == "deterministic_only"
     assert result["trials"][0]["initial_modeling_call_made"] is False
+
+
+def test_resume_replaces_failed_trial_with_one_successful_canonical_row(tmp_path: Path, monkeypatch):
+    import evaluation.runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "evaluate_empirical_reference",
+        lambda *args, **kwargs: {
+            "best_method": "linear",
+            "best_primary_mean": 0.8,
+            "candidate_metrics": {
+                method: {"status": "evaluated", "primary_mean": 0.8}
+                for method in ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
+            },
+        },
+    )
+    monkeypatch.setattr(runner, "evaluate_plan_cv", lambda *args, **kwargs: {"primary_mean": 0.8})
+    monkeypatch.setattr(
+        runner,
+        "evaluate_holdout_plan",
+        lambda *args, **kwargs: {"holdout_metrics": {}, "validation": {"split": {"contract": {}}}},
+    )
+
+    calls = {"count": 0}
+
+    def fail_once_then_plan(context):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("controlled first-attempt failure")
+        return _plan(context)
+
+    output = tmp_path / "resume"
+    first = run_evaluation(
+        output,
+        cases=[_case()],
+        gate_mode="llm_only",
+        modeling_plan_factory=fail_once_then_plan,
+    )
+    assert first["trials"][0]["trial_status"] == "failed"
+
+    resumed = run_evaluation(
+        output,
+        cases=[_case()],
+        gate_mode="llm_only",
+        modeling_plan_factory=fail_once_then_plan,
+        resume=True,
+    )
+    rows = [json.loads(line) for line in (output / "trials.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert len({row["trial_id"] for row in rows}) == 1
+    assert rows[0]["trial_status"] == "completed"
+    assert resumed["trials"] == rows
+    expected = [{
+        "model_condition_id": rows[0]["model_condition_id"],
+        "llm_repetition_id": rows[0]["llm_repetition_id"],
+        "benchmark_case": rows[0]["benchmark_case"],
+        "perturbation_id": rows[0]["perturbation_id"],
+        "split_seed": rows[0]["split_seed"],
+        "ablation_name": rows[0]["ablation_name"],
+        "evaluation_variant": rows[0]["evaluation_variant"],
+    }]
+    assert validate_confirmatory_completeness(expected, rows)["complete"] is True
+
+    again = run_evaluation(
+        output,
+        cases=[_case()],
+        gate_mode="llm_only",
+        modeling_plan_factory=fail_once_then_plan,
+        resume=True,
+    )
+    assert calls["count"] == 2
+    rows_again = [json.loads(line) for line in (output / "trials.jsonl").read_text().splitlines()]
+    assert rows_again == rows
+    assert again["trials"] == rows
+
+
+def test_primary_ablation_semantics_contract(tmp_path: Path, monkeypatch):
+    import app.pipeline as pipeline
+    import evaluation.runner as runner
+
+    deterministic = DeterministicRecommendation(
+        target_column="target",
+        task_type="classification",
+        recommended_method="tree_ensemble",
+        preprocessing=PreprocessingContract(),
+        reasoning="The controlled deterministic challenger is a valid training-only tree proposal.",
+        evidence=["controlled fixture"],
+        confidence="high",
+        score_margin=10.0,
+    )
+    monkeypatch.setattr(runner, "deterministic_recommendation", lambda *args, **kwargs: deterministic)
+    monkeypatch.setattr(
+        runner,
+        "evaluate_empirical_reference",
+        lambda *args, **kwargs: {
+            "best_method": "linear",
+            "best_primary_mean": 0.8,
+            "candidate_metrics": {
+                method: {"status": "evaluated", "primary_mean": 0.8}
+                for method in ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
+            },
+        },
+    )
+    monkeypatch.setattr(runner, "evaluate_plan_cv", lambda *args, **kwargs: {"primary_mean": 0.8})
+    monkeypatch.setattr(
+        runner,
+        "evaluate_holdout_plan",
+        lambda *args, **kwargs: {"holdout_metrics": {}, "validation": {"split": {"contract": {}}}},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "run_pairwise_model_probe",
+        lambda *args, **kwargs: {
+            "status": "completed",
+            "winner": "A",
+            "evidence_strength": "moderate",
+            "reason": "controlled moderate evidence",
+            "fit_count": 6,
+        },
+    )
+
+    planner_calls: list[str] = []
+    reconciler_calls: list[str] = []
+
+    def planner(context):
+        planner_calls.append(context["trial_id"])
+        return _plan(context)
+
+    def reconciler(context, modeling_plan, recommendation):
+        del context, modeling_plan
+        reconciler_calls.append(recommendation.recommended_method)
+        return ModelingResolution(
+            selected_method="tree_ensemble",
+            selected_preprocessing=recommendation.preprocessing,
+            checks=["controlled_reconciliation"],
+            justification="The blinded controlled reconciler selected one proposed plan.",
+            confidence=0.8,
+        )
+
+    def run_mode(name: str, **kwargs):
+        return run_evaluation(
+            tmp_path / name,
+            cases=[_case()],
+            gate_mode=name,
+            modeling_plan_factory=planner,
+            reconciliation_factory=reconciler,
+            **kwargs,
+        )["trials"][0]
+
+    llm_only = run_mode("llm_only", empirical_probe_enabled=False)
+    assert llm_only["initial_modeling_call_made"] is True
+    assert llm_only["agent_initial_valid"] is True
+    assert llm_only["empirical_probe_invoked"] is False
+    assert llm_only["reconciliation_invoked"] is False
+    assert llm_only["soft_intervention_occurred"] is False
+
+    hard_only = run_mode("hard_validation_only", empirical_probe_enabled=False)
+    assert hard_only["initial_modeling_call_made"] is True
+    assert hard_only["method_disagreement"] is True
+    assert hard_only["empirical_probe_invoked"] is False
+    assert hard_only["reconciliation_invoked"] is False
+    assert hard_only["final_method"] == hard_only["agent_initial_method"]
+
+    deterministic_only = run_mode("deterministic_only", empirical_probe_enabled=False)
+    assert deterministic_only["initial_modeling_call_made"] is False
+    assert deterministic_only["agent_source"] == "deterministic_only"
+    assert deterministic_only["final_method"] == "tree_ensemble"
+
+    always = run_mode("always_reconcile", empirical_probe_enabled=False)
+    assert always["method_disagreement"] is True
+    assert always["reconciliation_invoked"] is True
+    assert always["empirical_probe_invoked"] is False
+
+    preprocessing_case = replace(
+        _case(),
+        name="ablation_preprocessing_fixture",
+        dataframe=_case().load().assign(
+            category=["a" if index % 2 else "b" for index in range(48)]
+        ),
+    )
+    preprocessing_only_plan = ModelingPlan(
+        recommended_method="tree_ensemble",
+        preprocessing=PreprocessingContract(
+            categorical_encoding="ordinal",
+            categorical_unknown_handling="use_encoded_value",
+        ),
+        reasoning="The controlled preprocessing variant is independently hard-valid.",
+        confidence=0.7,
+    )
+    preprocessing_only = run_evaluation(
+        tmp_path / "always_reconcile_preprocessing_only",
+        cases=[preprocessing_case],
+        gate_mode="always_reconcile",
+        empirical_probe_enabled=False,
+        modeling_plan_factory=lambda context: preprocessing_only_plan,
+        reconciliation_factory=reconciler,
+    )["trials"][0]
+    assert preprocessing_only["method_disagreement"] is False
+    assert preprocessing_only["preprocessing_only_disagreement"] is True
+    assert preprocessing_only["actionable_soft_disagreement"] is False
+    assert preprocessing_only["reconciliation_invoked"] is False
+
+    probe_direct = run_mode("probe_direct", empirical_probe_enabled=True)
+    assert probe_direct["method_disagreement"] is True
+    assert probe_direct["empirical_probe_invoked"] is True
+    assert probe_direct["reconciliation_invoked"] is False
+    assert probe_direct["final_method"] in {"linear", "tree_ensemble"}
+
+    before_full_reconciliation = len(reconciler_calls)
+    full = run_mode("full", empirical_probe_enabled=True)
+    assert full["method_disagreement"] is True
+    assert full["empirical_probe_invoked"] is True
+    assert full["reconciliation_invoked"] is True
+    assert len(reconciler_calls) == before_full_reconciliation + 1
+    assert full["selected_proposal"] in {"A", "B"}
+    assert full["final_method"] in {"linear", "tree_ensemble"}
 
 
 def test_strict_live_records_failure_without_fallback(tmp_path: Path, monkeypatch):

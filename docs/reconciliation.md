@@ -121,14 +121,14 @@ other source-specific recommendation fields.
 | `llm_only` | yes | universal validity checks | no deterministic soft challenger | no | no | no | no |
 | `hard_validation_only` | yes | yes; repairs invalid plans only | advisory only | no | no | no | no |
 | `deterministic_only` | no final LLM choice | yes | final choice | no | no | no | no |
-| `always_reconcile` | yes | yes | yes | no | no | every valid disagreement | no |
+| `always_reconcile` | yes | yes | yes | no | no | every valid actionable model-family disagreement | no |
 | `probe_direct` | yes | yes | yes | yes | weak/tied/unavailable | no | moderate/strong winner |
 | `full` | yes | yes | yes | yes | weak/tied/unavailable | moderate/strong disagreement | no |
 | `llm_with_diagnostics` (secondary) | yes + training-only structural diagnostics | minimum execution guard | no soft use | no | no | no | no |
 
 The primary sequence answers distinct causal questions: the quality of the raw
 planner; the safety contribution of invariants; the deterministic alternative;
-the cost of intervening on every disagreement; whether probe evidence alone is
+the cost of intervening on every valid actionable model-family disagreement; whether probe evidence alone is
 enough; and whether blinded reconciliation improves on that direct choice.
 `selective_calibrated` and `probe_first` are retained only as legacy aliases or
 diagnostic modes. Calibration metadata is recorded for audit but is not the

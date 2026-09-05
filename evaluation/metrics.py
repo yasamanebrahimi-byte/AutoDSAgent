@@ -2013,7 +2013,7 @@ def summarize_trials(
             "beneficial_intervention_incidence": "beneficial actual interventions / eligible completed trials",
             "harmful_intervention_incidence": "harmful actual interventions / eligible completed trials",
             "neutral_intervention_incidence": "neutral actual interventions / eligible completed trials",
-            "challenge_recall": "beneficial_challenges_made/all_disagreements_where_deterministic_alternative_would_help",
+            "challenge_recall": "beneficial_challenges_made/actionable_model_family_disagreements_where_deterministic_alternative_would_help",
             "rescue_recall": "same as challenge_recall; denominator is a training-only empirical-reference rescue opportunity, never a holdout-derived gate",
             "potentially_unnecessary_intervention": "valid initial plan AND method disagreement AND final method changed AND initial regret within the task tolerance",
         },
