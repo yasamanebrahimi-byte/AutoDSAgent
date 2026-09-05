@@ -59,6 +59,9 @@ PRIMARY_ABLATION_NAMES = (
     "probe_direct",
     "full",
 )
+SECONDARY_PAIRED_COMPARISON_PAIRS = (
+    ("llm_with_diagnostics", "llm_only"),
+)
 SECONDARY_ABLATION_NAMES = ("llm_with_diagnostics",)
 
 
@@ -454,11 +457,28 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- `{item['first']}` vs `{item['second']}`: dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`)."
             )
-    lines.extend(["", "## Secondary `llm_with_diagnostics` Analysis", "", "This control remains a separate secondary stratum and does not enter the paper-primary summaries or paired comparisons."])
-    for condition_id, condition_payload in by_condition.items():
-        for ablation_name, summary in condition_payload.get("secondary", {}).items():
+    lines.extend([
+        "",
+        "## Secondary information-asymmetry control",
+        "",
+        "Within each model condition, `llm_with_diagnostics` is compared directly with `llm_only`. "
+        "This tests whether exposing the initial planner to the same richer training-only structural "
+        "diagnostics available to the deterministic challenger changes planner performance. It is a "
+        "secondary diagnostic analysis and does not enter the paper-primary confirmatory claim.",
+        "",
+    ])
+    for condition_id, items in payload.get("secondary_paired_comparisons_by_model_condition", {}).items():
+        lines.append(f"### `{condition_id}`")
+        if not items:
+            lines.append("- No secondary paired comparison was available.")
+            continue
+        for item in items:
             lines.append(
-                f"- `{condition_id}` / `{ablation_name}`: intervention `{summary.get('intervention_rate')}`, abstention `{summary.get('abstention_rate')}`, dataset-macro holdout delta `{summary.get('dataset_macro_paper_holdout_delta_mean')}`."
+                f"- Secondary diagnostic: `{item['first']}` vs `{item['second']}`: "
+                f"dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, "
+                f"tied `{item['tied']}`, mean first holdout advantage "
+                f"`{item['mean_paired_holdout_delta_difference_first_advantage']}` "
+                f"(CI `{item['paired_holdout_delta_ci']}`)."
             )
     lines.extend(["", "## Combined Cross-Model Descriptive Audit", "", "The following totals pool model conditions only for audit/descriptive purposes; they are not paper-primary estimates.", "", "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|"])
     for row in payload["central_table"]:
@@ -968,13 +988,22 @@ def run_ablation_study(
         ]
         secondary_rows_by_name = {
             name: results[name]["condition_results"][condition_id]["trials"]
-            for name in selected_secondary_names
+            for first, second in SECONDARY_PAIRED_COMPARISON_PAIRS
+            for name in (first, second)
+            if name in results
         }
-        secondary_paired_comparisons_by_condition[condition_id] = [
-            _paired_comparison(secondary_rows_by_name, first, second, tolerance=pair_tolerance)
-            for first, second in pairs
-            if first in secondary_rows_by_name and second in secondary_rows_by_name
-        ]
+        secondary_paired_comparisons_by_condition[condition_id] = []
+        for first, second in SECONDARY_PAIRED_COMPARISON_PAIRS:
+            if first not in secondary_rows_by_name or second not in secondary_rows_by_name:
+                continue
+            comparison = _paired_comparison(
+                secondary_rows_by_name, first, second, tolerance=pair_tolerance
+            )
+            comparison.update({
+                "analysis_role": "secondary_diagnostic",
+                "comparison_scope": "within_model_condition",
+            })
+            secondary_paired_comparisons_by_condition[condition_id].append(comparison)
     combined = {
         **root_config,
         "central_table": central,

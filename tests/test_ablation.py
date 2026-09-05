@@ -13,7 +13,12 @@ from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.deterministic_policy import DeterministicPolicy
 from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResolution, PreprocessingContract
 from app.soft_challenge import decide_soft_challenge
-from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
+from evaluation.ablation import (
+    PRIMARY_ABLATION_NAMES,
+    _paired_comparison,
+    ablation_presets,
+    run_ablation_study,
+)
 from evaluation.benchmarks import BenchmarkCase
 from evaluation.runner import _canonicalize_trials, _proposal_cache_key, run_evaluation
 from evaluation.confirmatory import (
@@ -488,6 +493,13 @@ def test_proposal_cache_contains_no_credentials(tmp_path: Path):
     assert "Authorization" not in content
 
 
+def test_runtime_metadata_defines_hard_validation_only(tmp_path: Path):
+    result = run_evaluation(tmp_path / "metadata", cases=[_case()], offline=True)
+    definition = result["config"]["gate_mode_definitions"]["hard_validation_only"]
+    assert "retain hard-valid initial LLM plans" in definition
+    assert "do not use the empirical soft probe" in definition
+
+
 def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path: Path, monkeypatch):
     """Exercise the paper-level loop with a no-API, two-condition fixture."""
     import evaluation.ablation as ablation
@@ -558,6 +570,19 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     assert set(result["summary"]["by_model_condition"]) == {"model_a", "model_b"}
     assert set(result["summary"]["analysis_summaries_by_model_condition"]) == {"model_a", "model_b"}
     assert set(result["summary"]["paired_comparisons_by_model_condition"]) == {"model_a", "model_b"}
+    secondary_pairs = result["summary"]["secondary_paired_comparisons_by_model_condition"]
+    assert set(secondary_pairs) == {"model_a", "model_b"}
+    for comparisons in secondary_pairs.values():
+        assert len(comparisons) == 1
+        assert comparisons[0]["first"] == "llm_with_diagnostics"
+        assert comparisons[0]["second"] == "llm_only"
+        assert comparisons[0]["analysis_role"] == "secondary_diagnostic"
+        assert comparisons[0]["comparison_scope"] == "within_model_condition"
+    assert all(
+        "llm_with_diagnostics" not in {item["first"], item["second"]}
+        for items in result["summary"]["paired_comparisons_by_model_condition"].values()
+        for item in items
+    )
     for condition_payload in result["summary"]["analysis_summaries_by_model_condition"].values():
         assert set(condition_payload["primary"]) == {"llm_only", "full"}
         assert set(condition_payload["secondary"]) == {"llm_with_diagnostics"}
@@ -571,9 +596,11 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     markdown = Path(result["paths"]["summary_markdown"]).read_text(encoding="utf-8")
     assert markdown.index("Paper-Primary Results by Model Condition") < markdown.index(
         "Paper-Primary Paired Comparisons by Model Condition"
-    ) < markdown.index("Secondary `llm_with_diagnostics` Analysis") < markdown.index(
+    ) < markdown.index("Secondary information-asymmetry control") < markdown.index(
         "Combined Cross-Model Descriptive Audit"
     )
+    assert "`llm_with_diagnostics` vs `llm_only`" in markdown
+    assert "secondary diagnostic analysis" in markdown
     assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
         "descriptive audit total"
     )
@@ -609,3 +636,63 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     } == {"primary"}
     with pytest.raises(ValueError, match="incomplete"):
         validate_confirmatory_completeness(expected, persisted[:-1])
+
+
+def test_secondary_diagnostics_comparison_is_condition_specific_and_not_primary():
+    def row(condition_id: str, dataset: str, repetition: int, holdout_delta: float) -> dict:
+        return {
+            "benchmark_case": dataset,
+            "perturbation_id": "clean",
+            "split_seed": 42,
+            "trial": repetition,
+            "evaluation_variant": "standard",
+            "model_condition_id": condition_id,
+            "llm_repetition_id": f"r{repetition}",
+            "trial_status": "success",
+            "task_type": "classification",
+            "paper_holdout_delta": holdout_delta,
+        }
+
+    by_condition = {
+        "model_a": {
+            "llm_with_diagnostics": [
+                row("model_a", "dataset_1", 1, 0.4),
+                row("model_a", "dataset_2", 1, 0.2),
+            ],
+            "llm_only": [
+                row("model_a", "dataset_1", 1, 0.1),
+                row("model_a", "dataset_2", 1, 0.1),
+            ],
+        },
+        "model_b": {
+            "llm_with_diagnostics": [
+                row("model_b", "dataset_1", 1, -0.1),
+                row("model_b", "dataset_2", 1, -0.2),
+            ],
+            "llm_only": [
+                row("model_b", "dataset_1", 1, 0.1),
+                row("model_b", "dataset_2", 1, 0.0),
+            ],
+        },
+    }
+
+    comparisons = {
+        condition_id: _paired_comparison(rows, "llm_with_diagnostics", "llm_only")
+        for condition_id, rows in by_condition.items()
+    }
+    assert comparisons["model_a"]["first"] == "llm_with_diagnostics"
+    assert comparisons["model_a"]["second"] == "llm_only"
+    assert comparisons["model_a"]["mean_paired_holdout_delta_difference_first_advantage"] > 0
+    assert comparisons["model_b"]["first"] == "llm_with_diagnostics"
+    assert comparisons["model_b"]["second"] == "llm_only"
+    assert comparisons["model_b"]["mean_paired_holdout_delta_difference_first_advantage"] < 0
+
+    pooled = _paired_comparison(
+        {
+            name: [item for rows in by_condition.values() for item in rows[name]]
+            for name in ("llm_with_diagnostics", "llm_only")
+        },
+        "llm_with_diagnostics",
+        "llm_only",
+    )
+    assert pooled["mean_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0)

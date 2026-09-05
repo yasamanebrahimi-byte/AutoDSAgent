@@ -2145,6 +2145,7 @@ def run_evaluation(
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "gate_mode_definitions": {
             "llm_only": "retain the initial agent plan after initial validation; never reconcile soft disagreement",
+            "hard_validation_only": "retain hard-valid initial LLM plans; repair or intercept only hard-invalid plans; do not use the empirical soft probe or preference-level reconciliation",
             "deterministic_only": "use the deterministic recommendation directly without an initial modeling-agent call",
                 "always_reconcile": "invoke the existing reconciliation path for every valid actionable model-family disagreement",
             "selective": "invoke reconciliation only when the versioned soft-challenge policy authorizes a challenge",
