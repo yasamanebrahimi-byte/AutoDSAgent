@@ -1407,7 +1407,6 @@ def summarize_trials(
     initial_valid = [record for record in completed if record.get("agent_initial_valid") is True]
     final_valid = [record for record in completed if record.get("final_valid") is True]
     agreement = [record for record in deterministic_available if record.get("agreement_status") == "agreement"]
-    disagreements = [record for record in deterministic_available if record.get("agreement_status") == "disagreement"]
     recon = [record for record in completed if _reconciliation_was_invoked(record)]
     recon_success = [record for record in recon if record.get("reconciliation_status") == "succeeded"]
     soft_challenge_records = _soft_challenges(completed)
