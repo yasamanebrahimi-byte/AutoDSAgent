@@ -15,7 +15,7 @@ from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResol
 from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import PRIMARY_ABLATION_NAMES, ablation_presets, run_ablation_study
 from evaluation.benchmarks import BenchmarkCase
-from evaluation.runner import _proposal_cache_key, run_evaluation
+from evaluation.runner import _canonicalize_trials, _proposal_cache_key, run_evaluation
 from evaluation.confirmatory import (
     experiment_code_sha256,
     validate_confirmatory_completeness,
@@ -309,6 +309,19 @@ def test_resume_replaces_failed_trial_with_one_successful_canonical_row(tmp_path
     assert again["trials"] == rows
 
 
+def test_duplicate_trial_canonicalization_is_strict_for_completed_rows():
+    failed = {"trial_id": "duplicate", "trial_status": "failed", "error": "first"}
+    completed = {"trial_id": "duplicate", "trial_status": "completed", "value": 1}
+    assert _canonicalize_trials([failed, completed])[0] == [completed]
+    assert _canonicalize_trials([completed, failed])[0] == [completed]
+    retained, _ = _canonicalize_trials([failed, {**failed, "error": "latest"}])
+    assert retained == [{**failed, "error": "latest"}]
+    with pytest.raises(ValueError, match="duplicate.*completed.*duplicate"):
+        _canonicalize_trials([completed, {**completed, "value": 2}])
+    with pytest.raises(ValueError, match="duplicate.*completed.*duplicate"):
+        _canonicalize_trials([completed, completed.copy()])
+
+
 def test_primary_ablation_semantics_contract(tmp_path: Path, monkeypatch):
     import app.pipeline as pipeline
     import evaluation.runner as runner
@@ -543,6 +556,24 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         modeling_plan_factory=factory,
     )
     assert set(result["summary"]["by_model_condition"]) == {"model_a", "model_b"}
+    assert set(result["summary"]["analysis_summaries_by_model_condition"]) == {"model_a", "model_b"}
+    assert set(result["summary"]["paired_comparisons_by_model_condition"]) == {"model_a", "model_b"}
+    for condition_payload in result["summary"]["analysis_summaries_by_model_condition"].values():
+        assert set(condition_payload["primary"]) == {"llm_only", "full"}
+        assert set(condition_payload["secondary"]) == {"llm_with_diagnostics"}
+        assert condition_payload["independent_unit"] == "dataset/task"
+        assert condition_payload["independent_dataset_unit_count_by_ablation"] == {
+            "llm_only": 2,
+            "full": 2,
+        }
+    assert result["summary"]["descriptive_combined_summary"]["role"] == "descriptive_only"
+    assert result["summary"]["descriptive_combined_paired_comparisons"]["role"] == "descriptive_only"
+    markdown = Path(result["paths"]["summary_markdown"]).read_text(encoding="utf-8")
+    assert markdown.index("Paper-Primary Results by Model Condition") < markdown.index(
+        "Paper-Primary Paired Comparisons by Model Condition"
+    ) < markdown.index("Secondary `llm_with_diagnostics` Analysis") < markdown.index(
+        "Combined Cross-Model Descriptive Audit"
+    )
     assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
         "descriptive audit total"
     )

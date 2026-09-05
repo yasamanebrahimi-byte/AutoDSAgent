@@ -10,6 +10,7 @@ from evaluation.confirmatory import (
     runtime_manifest_values,
     validate_confirmatory_completeness,
 )
+from evaluation.ablation import _paired_comparison
 from evaluation.runner import _proposal_cache_key
 from evaluation.benchmarks import BenchmarkCase
 
@@ -47,6 +48,64 @@ def test_proposal_cache_identity_separates_models_and_repetitions():
     assert _proposal_cache_key(**common, llm_repetition=1, model_condition_id="a") != _proposal_cache_key(**common, llm_repetition=1, model_condition_id="b")
     assert _proposal_cache_key(**common, llm_repetition=1, llm_repetition_id="r1") != _proposal_cache_key(**common, llm_repetition=2, llm_repetition_id="r2")
     assert _proposal_cache_key(**common, llm_repetition=1, generation_settings={"temperature": 0.1}) != _proposal_cache_key(**common, llm_repetition=1, generation_settings={"temperature": 0.2})
+
+
+def test_proposal_cache_identity_separates_declared_providers():
+    case = BenchmarkCase("task", None, "q", "classification", "test")
+    common = dict(
+        case=case,
+        perturbation_id="clean",
+        split_seed=42,
+        llm_repetition=1,
+        model="same-model",
+        model_condition_id="same-condition",
+        prompt_schema_version="p",
+        training_profile={},
+    )
+    assert _proposal_cache_key(**common, provider="openai") != _proposal_cache_key(
+        **common, provider="anthropic"
+    )
+
+
+def test_primary_paired_effects_remain_separate_from_descriptive_cross_model_pool():
+    def row(condition: str, ablation: str, delta: float) -> dict:
+        return {
+            "model_condition_id": condition,
+            "ablation_name": ablation,
+            "benchmark_case": "task-1",
+            "perturbation_id": "clean",
+            "split_seed": 42,
+            "trial": 0,
+            "llm_repetition_id": "r1",
+            "evaluation_variant": "standard",
+            "trial_status": "completed",
+            "task_type": "classification",
+            "paper_holdout_delta": delta,
+        }
+
+    primary_a = _paired_comparison(
+        {"llm_only": [row("a", "llm_only", 0.0)], "full": [row("a", "full", 0.4)]},
+        "full",
+        "llm_only",
+    )
+    primary_b = _paired_comparison(
+        {"llm_only": [row("b", "llm_only", 0.0)], "full": [row("b", "full", -0.4)]},
+        "full",
+        "llm_only",
+    )
+    descriptive = _paired_comparison(
+        {
+            "llm_only": [row("a", "llm_only", 0.0), row("b", "llm_only", 0.0)],
+            "full": [row("a", "full", 0.4), row("b", "full", -0.4)],
+        },
+        "full",
+        "llm_only",
+    )
+    assert primary_a["mean_paired_holdout_delta_difference_first_advantage"] == 0.4
+    assert primary_b["mean_paired_holdout_delta_difference_first_advantage"] == -0.4
+    assert primary_a["n_paired_datasets"] == primary_b["n_paired_datasets"] == 1
+    assert descriptive["mean_paired_holdout_delta_difference_first_advantage"] == 0.0
+    assert {primary_a["first_better"], primary_b["second_better"]} == {1}
 
 
 def test_runtime_matrix_projection_can_detect_condition_set_drift():

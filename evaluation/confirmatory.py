@@ -37,6 +37,8 @@ CONFIRMATORY_GENERATION_SETTINGS = {
     "top_p": None,
     "seed": None,
 }
+PRIMARY_MODEL_CONDITION_REPORTING = "separate"
+CROSS_MODEL_CONDITION_AGGREGATION = "descriptive_only"
 _EXCLUDED_DIRECTORY_NAMES = {
     ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".cache", "cache", "caches", "evaluation_results", "results", "tmp", "temp",
@@ -330,6 +332,14 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
     """
 
     mismatches: list[str] = []
+    if loaded.get("primary_model_condition_reporting") != PRIMARY_MODEL_CONDITION_REPORTING:
+        mismatches.append(
+            "primary_model_condition_reporting must be 'separate'"
+        )
+    if loaded.get("cross_model_condition_aggregation") != CROSS_MODEL_CONDITION_AGGREGATION:
+        mismatches.append(
+            "cross_model_condition_aggregation must be 'descriptive_only'"
+        )
     conditions = model_conditions(loaded)
     raw_conditions = loaded.get("model_conditions") or []
     if any(not isinstance(item, Mapping) or not str(item.get("provider", "")).strip() for item in raw_conditions):
@@ -872,6 +882,56 @@ def validate_confirmatory_manifest(
         "source_git_commit": repository_commit(),
         "benchmark_manifest_matches": not any(item.startswith(("benchmark_manifest_sha256", "benchmark_manifest_version", "benchmark_tranches", "benchmark membership", "external benchmark membership")) for item in mismatches),
     }
+
+
+def validate_resume_manifest_identity(
+    existing_config: Mapping[str, Any],
+    manifest_path: str | Path,
+    *,
+    frozen_manifest_path: str | Path | None = None,
+) -> None:
+    """Fail closed if a strict resume is pointed at another experiment.
+
+    This check intentionally happens before trial loading or any output copy.
+    The manifest SHA is the primary study identity; the expected code SHA and
+    any persisted frozen-manifest artifact must agree with it as well.
+    """
+
+    current_manifest = load_confirmatory_manifest(manifest_path)
+    current_manifest_sha = manifest_sha256(current_manifest)
+    stored_manifest_sha = existing_config.get("experiment_config_sha256")
+    if stored_manifest_sha != current_manifest_sha:
+        raise ValueError(
+            "Existing study belongs to a different frozen experiment manifest: "
+            f"stored experiment_config_sha256={stored_manifest_sha!r}, "
+            f"supplied={current_manifest_sha!r}."
+        )
+
+    current_code_sha = current_manifest.get("expected_experiment_code_sha256")
+    stored_code_sha = existing_config.get("expected_experiment_code_sha256")
+    if stored_code_sha != current_code_sha:
+        raise ValueError(
+            "Existing study belongs to a different frozen experiment code identity: "
+            f"stored expected_experiment_code_sha256={stored_code_sha!r}, "
+            f"supplied={current_code_sha!r}."
+        )
+    observed_code_sha = experiment_code_sha256()
+    if current_code_sha != observed_code_sha:
+        raise ValueError(
+            "Current frozen experiment code identity does not match the supplied manifest: "
+            f"expected={current_code_sha!r}, observed={observed_code_sha!r}."
+        )
+
+    if frozen_manifest_path is not None:
+        artifact = Path(frozen_manifest_path)
+        if artifact.is_file():
+            artifact_sha = manifest_sha256(artifact)
+            if artifact_sha != stored_manifest_sha:
+                raise ValueError(
+                    "Existing frozen_confirmatory_manifest.json does not match the "
+                    "study's stored experiment manifest identity: "
+                    f"stored={stored_manifest_sha!r}, artifact={artifact_sha!r}."
+                )
 
 
 # Descriptive aliases for callers that use "config" rather than "manifest".

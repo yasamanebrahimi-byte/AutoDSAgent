@@ -35,6 +35,7 @@ from evaluation.confirmatory import (
     config_sha256,
     repository_commit as current_repository_commit,
     experiment_code_sha256,
+    validate_resume_manifest_identity,
     model_conditions,
     condition_repetition_ids,
     expand_confirmatory_evaluation_units,
@@ -432,13 +433,34 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         f"- Primary ablations: `{payload.get('selected_primary_ablations', [])}`",
         f"- Secondary ablations: `{payload.get('selected_secondary_ablations', [])}`",
         "- Primary and secondary ablations are separate analysis strata; secondary diagnostics are not pooled into the primary claim.",
-        "- When more than one model condition is present, combined summaries are descriptive audit totals only; all model-condition estimates remain in the separate condition table.",
+        "- Paper-primary estimates are reported separately for each declared model condition. Repetitions remain nested within dataset/task.",
+        "- Any across-model aggregate below is explicitly descriptive/audit-only and is not a paper-primary estimand.",
         "",
-        "## Central Comparison",
+        "## Paper-Primary Results by Model Condition",
         "",
-        "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro, descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|",
+        "| Model condition | Ablation | Datasets | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro) | Holdout CI |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
+    by_condition = payload.get("analysis_summaries_by_model_condition", {})
+    for condition_id, condition_payload in by_condition.items():
+        for ablation_name, summary in condition_payload.get("primary", {}).items():
+            lines.append(
+                f"| {condition_id} | {ablation_name} | {summary.get('dataset_macro_gate_health', {}).get('dataset_count', 0)} | {summary.get('challenge_rate')} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} | {summary.get('dataset_macro_paper_holdout_delta_ci')} |"
+            )
+    lines.extend(["", "## Paper-Primary Paired Comparisons by Model Condition", ""])
+    for condition_id, items in payload.get("paired_comparisons_by_model_condition", {}).items():
+        lines.append(f"### `{condition_id}`")
+        for item in items:
+            lines.append(
+                f"- `{item['first']}` vs `{item['second']}`: dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`)."
+            )
+    lines.extend(["", "## Secondary `llm_with_diagnostics` Analysis", "", "This control remains a separate secondary stratum and does not enter the paper-primary summaries or paired comparisons."])
+    for condition_id, condition_payload in by_condition.items():
+        for ablation_name, summary in condition_payload.get("secondary", {}).items():
+            lines.append(
+                f"- `{condition_id}` / `{ablation_name}`: intervention `{summary.get('intervention_rate')}`, abstention `{summary.get('abstention_rate')}`, dataset-macro holdout delta `{summary.get('dataset_macro_paper_holdout_delta_mean')}`."
+            )
+    lines.extend(["", "## Combined Cross-Model Descriptive Audit", "", "The following totals pool model conditions only for audit/descriptive purposes; they are not paper-primary estimates.", "", "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|"])
     for row in payload["central_table"]:
         api = row["api_usage"]
         probe = payload["summaries"][row["ablation"]].get("probe_invocation_count", 0)
@@ -446,23 +468,13 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
             "analysis_role", "secondary"
         )
         lines.append(
-            f"| {role} | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
+            f"| {role} / descriptive-only | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
         )
-    lines.extend(["", "## Paired Comparisons", ""])
-    for item in payload["paired_comparisons"]:
+    lines.extend(["", "### Combined Cross-Model Descriptive Paired Comparisons", ""])
+    for item in payload.get("descriptive_combined_paired_comparisons", {}).get("comparisons", []):
         lines.append(
-            f"- `{item['first']}` vs `{item['second']}`: dataset-macro untouched-holdout first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`). Trial-weighted diagnostic mean: `{item['trial_weighted_mean_paired_holdout_delta_difference_first_advantage']}`. Training-reference regret difference is secondary diagnostic: `{item['mean_paired_regret_difference_first_advantage']}`."
+            f"- `{item['first']}` vs `{item['second']}` (descriptive-only): first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`)."
         )
-    lines.extend(["", "## Model-Condition Summaries", "", "Model conditions are reported separately; repetitions remain nested within dataset/task and are never silently pooled."])
-    lines.extend(["", "| Model condition | Analysis role | Ablation | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta |", "|---|---|---|---:|---:|---:|---:|---:|---:|"])
-    for condition_id, condition_payload in payload.get("by_model_condition", {}).items():
-        for ablation_name, summary in condition_payload.get("by_ablation", {}).items():
-            role = (payload.get("ablation_definitions", {}).get(ablation_name, {}) or {}).get(
-                "analysis_role", "secondary"
-            )
-            lines.append(
-                f"| {condition_id} | {role} | {ablation_name} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} |"
-            )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
         api = row["api_usage"]
@@ -537,6 +549,19 @@ def run_ablation_study(
     if not split_seeds:
         raise ValueError("At least one split seed is required.")
     configured_thresholds = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    root = Path(output_dir).resolve()
+    config_path = root / "config.json"
+    if resume and confirmatory_config_path is not None:
+        if not config_path.is_file():
+            raise ValueError(
+                "--resume requires an existing confirmatory study config before any trial execution."
+            )
+        existing_for_identity = json.loads(config_path.read_text(encoding="utf-8"))
+        validate_resume_manifest_identity(
+            existing_for_identity,
+            confirmatory_config_path,
+            frozen_manifest_path=root / "frozen_confirmatory_manifest.json",
+        )
     confirmatory_metadata: dict[str, Any] | None = None
     frozen_conditions: list[dict[str, Any]] | None = None
     if confirmatory_config_path is not None:
@@ -638,9 +663,7 @@ def run_ablation_study(
     selected_secondary_names = [
         name for name in selected_names if all_specs[name].analysis_role == "secondary"
     ]
-    root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    config_path = root / "config.json"
     def repository_commit() -> str | None:
         try:
             return subprocess.run(
@@ -698,6 +721,8 @@ def run_ablation_study(
         },
         "model_condition_reporting": {
             "condition_ids": [str(condition["condition_id"]) for condition in (frozen_conditions or [{"condition_id": "default"}])],
+            "primary_model_condition_reporting": "separate",
+            "cross_model_condition_aggregation": "descriptive_only",
             "per_condition_results": "by_model_condition.<condition_id>.by_ablation",
             "combined_summary_role": "descriptive audit total only; never a pseudo-model estimate or confirmatory model comparison",
         },
@@ -798,7 +823,7 @@ def run_ablation_study(
     else:
         config_path.write_text(json.dumps(root_config, indent=2, sort_keys=True), encoding="utf-8")
 
-    if confirmatory_metadata is not None:
+    if confirmatory_metadata is not None and not resume:
         shutil.copyfile(
             Path(confirmatory_config_path),
             root / "frozen_confirmatory_manifest.json",
@@ -906,17 +931,95 @@ def run_ablation_study(
             expected_units,
             [row for rows in trial_rows.values() for row in rows],
         )
+    primary_summaries_by_condition = {
+        str(condition["condition_id"]): {
+            name: results[name]["condition_results"][str(condition["condition_id"])]["summary"]
+            for name in selected_primary_names
+        }
+        for condition in execution_conditions
+    }
+    secondary_summaries_by_condition = {
+        str(condition["condition_id"]): {
+            name: results[name]["condition_results"][str(condition["condition_id"])]["summary"]
+            for name in selected_secondary_names
+        }
+        for condition in execution_conditions
+    }
+    paired_comparisons_by_condition = {}
+    secondary_paired_comparisons_by_condition = {}
+    pair_tolerance = {
+        "classification": holdout_neutral_tolerance(
+            "classification", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+        ),
+        "regression": holdout_neutral_tolerance(
+            "regression", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+        ),
+    }
+    for condition in execution_conditions:
+        condition_id = str(condition["condition_id"])
+        primary_rows_by_name = {
+            name: results[name]["condition_results"][condition_id]["trials"]
+            for name in selected_primary_names
+        }
+        paired_comparisons_by_condition[condition_id] = [
+            _paired_comparison(primary_rows_by_name, first, second, tolerance=pair_tolerance)
+            for first, second in pairs
+            if first in primary_rows_by_name and second in primary_rows_by_name
+        ]
+        secondary_rows_by_name = {
+            name: results[name]["condition_results"][condition_id]["trials"]
+            for name in selected_secondary_names
+        }
+        secondary_paired_comparisons_by_condition[condition_id] = [
+            _paired_comparison(secondary_rows_by_name, first, second, tolerance=pair_tolerance)
+            for first, second in pairs
+            if first in secondary_rows_by_name and second in secondary_rows_by_name
+        ]
     combined = {
         **root_config,
         "central_table": central,
         "central_by_ablation": {row["ablation"]: row for row in central},
         "summaries": summaries,
+        "analysis_summaries_by_model_condition": {
+            condition_id: {
+                "primary": primary_summaries_by_condition[condition_id],
+                "secondary": secondary_summaries_by_condition[condition_id],
+                "independent_unit": "dataset/task",
+                "repetition_nesting": "repetitions nested within dataset/task × model condition",
+                "primary_estimand": "dataset-macro within this model condition",
+                "independent_dataset_unit_count_by_ablation": {
+                    name: summary.get("dataset_macro_gate_health", {}).get("dataset_count", 0)
+                    for name, summary in primary_summaries_by_condition[condition_id].items()
+                },
+            }
+            for condition_id in primary_summaries_by_condition
+        },
+        "paired_comparisons_by_model_condition": paired_comparisons_by_condition,
+        "secondary_paired_comparisons_by_model_condition": secondary_paired_comparisons_by_condition,
+        # Compatibility aliases for older consumers.  Their role is explicit
+        # so they cannot be mistaken for the paper-primary estimand.
         "analysis_summaries": {
             "primary": {name: summaries[name] for name in selected_primary_names},
             "secondary": {name: summaries[name] for name in selected_secondary_names},
-            "rule": "Only the primary stratum contributes to the confirmatory claim; secondary diagnostics are reported separately.",
+            "role": "descriptive_only_compatibility_alias",
+            "warning": "Use analysis_summaries_by_model_condition for paper-primary reporting.",
         },
-        "paired_comparisons": paired,
+        "paired_comparisons": {
+            "comparisons": paired,
+            "role": "descriptive_only_compatibility_alias",
+            "warning": "Use paired_comparisons_by_model_condition for paper-primary reporting.",
+        },
+        "descriptive_combined_summary": {
+            "primary": {name: summaries[name] for name in selected_primary_names},
+            "secondary": {name: summaries[name] for name in selected_secondary_names},
+            "role": "descriptive_only",
+            "warning": "Across-model totals are audit/descriptive aggregates and are not paper-primary estimands.",
+        },
+        "descriptive_combined_paired_comparisons": {
+            "comparisons": paired,
+            "role": "descriptive_only",
+            "warning": "Across-model paired comparisons are audit/descriptive aggregates and are not paper-primary estimands.",
+        },
         "live_integrity": {
             row["ablation"]: row["api_usage"] for row in central
         },

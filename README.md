@@ -160,6 +160,20 @@ before launching a strict-live external run. Strict confirmatory execution
 refuses a draft manifest; the final freeze is intentionally not part of this
 pre-freeze engineering state.
 
+Confirmatory paper-primary estimates are reported separately for each declared
+model condition (currently Luna, Sol, and Terra). Repetitions remain nested
+within dataset/task, and dataset/task is the independent statistical unit.
+Any cross-model aggregate or paired comparison is explicitly descriptive and
+audit-only. `llm_with_diagnostics` remains a secondary control and cannot
+enter the primary summaries or paired comparisons.
+
+Strict confirmatory resume is bound to the exact frozen manifest SHA and its
+expected experiment-code SHA. A mismatched resume fails closed before trial
+execution or replacement of the frozen manifest artifact. Proposal-cache
+identity includes the declared provider. A failed attempt may be superseded
+by a completed retry, while conflicting duplicate completed trial IDs fail
+closed.
+
 The confirmatory code identity is a canonical SHA-256 over sorted relative
 paths and bytes in `app/`, `evaluation/` (excluding the confirmatory manifest),
 and `pyproject.toml`. Git metadata, generated evaluation results, caches,

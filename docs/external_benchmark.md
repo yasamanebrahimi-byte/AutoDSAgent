@@ -48,7 +48,7 @@ Each repetition is a new initial stochastic proposal under fixed evidence.
 Stable `llm_repetition_ids` make its identity auditable. Initial proposals are
 cached and reused across compatible ablations, so ablation effects are not
 confounded with fresh planner samples. The cache identity includes benchmark
-case, perturbation, split seed, model condition, exact planner model,
+case, perturbation, split seed, provider, model condition, exact planner model,
 repetition number and ID, prompt schema, generation settings,
 training-profile digest, approved target, approved task, planner evidence mode,
 and a canonical structural-diagnostics digest. Therefore the ordinary paired
@@ -68,9 +68,16 @@ Rows record the manifest/configuration hash, condition and model IDs,
 repetition ID, cache identity, prompt/schema versions, generation settings,
 and reconciliation invocation/status. Proposal counts therefore differ from
 reconciliation API-call counts because proposals are reused and reconciliation
-is conditional. Summaries are emitted under `by_model_condition`; models are
-not silently pooled. Repetitions remain nested within dataset/task, and the
-dataset-cluster bootstrap treats dataset/task as the independent unit.
+is conditional. Paper-primary summaries and paired comparisons are emitted
+under `analysis_summaries_by_model_condition` and
+`paired_comparisons_by_model_condition`; models are not silently pooled. These
+outputs contain separate dataset-macro estimates and uncertainty for each
+condition. `descriptive_combined_summary` and
+`descriptive_combined_paired_comparisons` are audit-only cross-model totals.
+Repetitions remain nested within dataset/task, and the dataset-cluster
+bootstrap treats dataset/task as the independent unit. A strict resume must
+use the exact same frozen manifest identity; a failed retry may be replaced by
+a completed row, but conflicting duplicate completed trial IDs fail closed.
 
 The original AMLB citation is:
 

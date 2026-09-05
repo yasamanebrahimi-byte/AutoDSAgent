@@ -2,6 +2,8 @@
   "manifest_schema_version": "confirmatory-manifest-v1",
   "status": "draft",
   "strict_live_required": true,
+  "primary_model_condition_reporting": "separate",
+  "cross_model_condition_aggregation": "descriptive_only",
   "experiment_name": "selective-intervention-reliability",
   "experiment_config_version": "paper-confirmatory-v1",
   "expected_experiment_code_sha256": null,

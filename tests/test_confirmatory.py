@@ -14,6 +14,7 @@ from evaluation.confirmatory import (
     manifest_sha256,
     runtime_manifest_values,
     validate_confirmatory_manifest,
+    validate_resume_manifest_identity,
     config_sha256,
     deterministic_policy_config,
     empirical_probe_config,
@@ -288,6 +289,109 @@ def test_confirmatory_run_copies_exact_frozen_manifest_and_records_metadata(tmp_
     config = json.loads((result_dir / "config.json").read_text(encoding="utf-8"))
     assert config["experiment_config_sha256"] == manifest_sha256(manifest_path)
     assert config["frozen_manifest_path"] == str(copied)
+
+
+def test_resume_manifest_identity_requires_exact_manifest_and_artifact_match(tmp_path: Path):
+    manifest_a = _manifest()
+    manifest_path = tmp_path / "manifest-a.json"
+    manifest_path.write_text(json.dumps(manifest_a), encoding="utf-8")
+    artifact = tmp_path / "frozen_confirmatory_manifest.json"
+    artifact.write_bytes(manifest_path.read_bytes())
+    config = {
+        "experiment_config_sha256": manifest_sha256(manifest_a),
+        "expected_experiment_code_sha256": manifest_a["expected_experiment_code_sha256"],
+    }
+
+    # An exact resume is accepted.
+    validate_resume_manifest_identity(config, manifest_path, frozen_manifest_path=artifact)
+
+    changed_matrix = copy.deepcopy(manifest_a)
+    changed_matrix["model_conditions"][0]["planner_model"] = "different-model"
+    changed_matrix_path = tmp_path / "changed-matrix.json"
+    changed_matrix_path.write_text(json.dumps(changed_matrix), encoding="utf-8")
+    with pytest.raises(ValueError, match="different frozen experiment manifest"):
+        validate_resume_manifest_identity(config, changed_matrix_path, frozen_manifest_path=artifact)
+
+    changed_generation = copy.deepcopy(manifest_a)
+    changed_generation["model_conditions"][0]["generation_settings"]["reasoning_effort"] = "high"
+    changed_generation_path = tmp_path / "changed-generation.json"
+    changed_generation_path.write_text(json.dumps(changed_generation), encoding="utf-8")
+    with pytest.raises(ValueError, match="different frozen experiment manifest"):
+        validate_resume_manifest_identity(config, changed_generation_path, frozen_manifest_path=artifact)
+
+    same_broad_structure = copy.deepcopy(manifest_a)
+    same_broad_structure["statistics"]["confidence_level"] = 0.90
+    same_broad_structure_path = tmp_path / "changed-structure.json"
+    same_broad_structure_path.write_text(json.dumps(same_broad_structure), encoding="utf-8")
+    with pytest.raises(ValueError, match="different frozen experiment manifest"):
+        validate_resume_manifest_identity(config, same_broad_structure_path, frozen_manifest_path=artifact)
+
+    before = artifact.read_bytes()
+    assert before == manifest_path.read_bytes()
+    artifact.write_text(json.dumps(changed_matrix), encoding="utf-8")
+    artifact_before_failed_resume = artifact.read_bytes()
+    with pytest.raises(ValueError, match="frozen_confirmatory_manifest.json"):
+        validate_resume_manifest_identity(config, manifest_path, frozen_manifest_path=artifact)
+    assert artifact.read_bytes() == artifact_before_failed_resume
+
+
+def test_run_evaluation_matching_resume_and_mismatch_fail_before_artifact_change(
+    tmp_path: Path, monkeypatch
+):
+    manifest_a = _manifest()
+    manifest_path = tmp_path / "manifest-a.json"
+    manifest_path.write_text(json.dumps(manifest_a), encoding="utf-8")
+    metadata = {
+        "status": "frozen",
+        "experiment_config_sha256": manifest_sha256(manifest_a),
+        "expected_experiment_code_sha256": manifest_a["expected_experiment_code_sha256"],
+        "source_git_commit": None,
+        "benchmark_manifest_matches": True,
+    }
+    monkeypatch.setattr("evaluation.runner.validate_confirmatory_manifest", lambda *_args: metadata)
+    frame = pd.DataFrame({"x": list(range(24)), "target": ["yes" if i % 2 else "no" for i in range(24)]})
+    case = BenchmarkCase(
+        name="resume_identity_fixture",
+        dataframe=frame,
+        target_column="target",
+        question="Classify target from x.",
+        expected_task_type="classification",
+        dataset_source="in-memory test fixture",
+        openml_task_id=359983,
+        benchmark_suite_version="1.0.0",
+    )
+    output = tmp_path / "study"
+    run_evaluation(output, cases=[case], offline=True, suite="external", confirmatory_config_path=manifest_path)
+    artifact = output / "frozen_confirmatory_manifest.json"
+    artifact_before = artifact.read_bytes()
+    trials_before = (output / "trials.jsonl").read_bytes()
+
+    # Matching resume is accepted and leaves the frozen artifact intact.
+    run_evaluation(
+        output,
+        cases=[case],
+        offline=True,
+        suite="external",
+        confirmatory_config_path=manifest_path,
+        resume=True,
+    )
+    assert artifact.read_bytes() == artifact_before
+
+    manifest_b = copy.deepcopy(manifest_a)
+    manifest_b["model_conditions"][0]["planner_model"] = "changed-model"
+    manifest_b_path = tmp_path / "manifest-b.json"
+    manifest_b_path.write_text(json.dumps(manifest_b), encoding="utf-8")
+    with pytest.raises(ValueError, match="different frozen experiment manifest"):
+        run_evaluation(
+            output,
+            cases=[case],
+            offline=True,
+            suite="external",
+            confirmatory_config_path=manifest_b_path,
+            resume=True,
+        )
+    assert artifact.read_bytes() == artifact_before
+    assert (output / "trials.jsonl").read_bytes() == trials_before
 
 
 def test_manifest_schema_version_is_explicit():

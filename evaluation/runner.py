@@ -65,6 +65,7 @@ from evaluation.confirmatory import (
     deterministic_policy_config,
     empirical_probe_config,
     config_sha256,
+    validate_resume_manifest_identity,
     repository_commit,
     experiment_code_sha256,
     model_conditions,
@@ -424,6 +425,7 @@ def _proposal_cache_key(
     perturbation_id: str,
     split_seed: int,
     llm_repetition: int,
+    provider: str = "openai",
     model: str,
     prompt_schema_version: str,
     llm_repetition_id: str | None = None,
@@ -441,6 +443,7 @@ def _proposal_cache_key(
         "split_seed": split_seed,
         "llm_repetition": llm_repetition,
         "llm_repetition_id": llm_repetition_id or f"rep_{llm_repetition + 1:03d}",
+        "provider": provider,
         "model_condition_id": model_condition_id,
         "model": model,
         "initial_modeling_prompt_schema_version": prompt_schema_version,
@@ -658,6 +661,7 @@ def _run_trial(
         split_seed=experimental_split_seed,
         llm_repetition=trial_number,
         llm_repetition_id=config.llm_repetition_id,
+        provider=config.provider,
         model_condition_id=config.model_condition_id,
         model=config.planner_model,
         prompt_schema_version=config.prompt_schema_version,
@@ -1748,9 +1752,10 @@ def _canonicalize_trials(trials: list[dict[str, Any]]) -> tuple[list[dict[str, A
     """Keep one canonical persisted row per trial ID.
 
     A failed row is provisional: if an older bundle contains both a failed
-    attempt and a completed retry, the completed row is canonical.  This also
-    makes resuming a bundle produced by an older runner safe without carrying
-    duplicate evaluation units into confirmatory completeness checks.
+    attempt and a completed retry, the completed row is canonical.  Multiple
+    failures retain the latest failure, matching retry checkpoint semantics.
+    Two completed rows are an integrity error; the runner never silently
+    chooses the later completed result.
     """
 
     canonical: list[dict[str, Any]] = []
@@ -1767,7 +1772,14 @@ def _canonicalize_trials(trials: list[dict[str, Any]]) -> tuple[list[dict[str, A
             canonical.append(trial)
             continue
         existing = canonical[existing_position]
-        if existing.get("trial_status") == "failed" or trial.get("trial_status") != "failed":
+        existing_failed = existing.get("trial_status") == "failed"
+        trial_failed = trial.get("trial_status") == "failed"
+        if not existing_failed and not trial_failed:
+            raise ValueError(
+                "duplicate completed confirmatory trial is not allowed: "
+                f"trial_id={trial_id!r}."
+            )
+        if existing_failed or not trial_failed:
             canonical[existing_position] = trial
     return canonical, positions
 
@@ -1897,6 +1909,20 @@ def run_evaluation(
         raise ValueError("No benchmark cases selected.")
     perturbations = default_perturbations() if include_perturbations else []
     output_path = Path(output_dir).resolve()
+    if resume and confirmatory_config_path is not None:
+        existing_config_path = output_path / "config.json"
+        if not existing_config_path.is_file():
+            raise ValueError(
+                "--resume requires an existing confirmatory config before any trial execution."
+            )
+        existing_for_identity = json.loads(
+            existing_config_path.read_text(encoding="utf-8")
+        )
+        validate_resume_manifest_identity(
+            existing_for_identity,
+            confirmatory_config_path,
+            frozen_manifest_path=output_path / "frozen_confirmatory_manifest.json",
+        )
     confirmatory_metadata: dict[str, Any] | None = None
     legacy_offline_condition_projection = False
     if confirmatory_config_path is not None:
@@ -2345,10 +2371,19 @@ def run_evaluation(
                             trial_positions[trial_id] = len(trials)
                             trials.append(trial)
                         else:
+                            existing_trial = trials[existing_position]
+                            existing_failed = existing_trial.get("trial_status") == "failed"
+                            trial_failed = trial.get("trial_status") == "failed"
+                            if not existing_failed and not trial_failed:
+                                raise ValueError(
+                                    "duplicate completed confirmatory trial is not allowed: "
+                                    f"trial_id={trial_id!r}."
+                                )
                             # Failed rows are persisted checkpoints. A retry
                             # replaces that checkpoint with the new canonical
                             # result instead of appending a second unit.
-                            trials[existing_position] = trial
+                            if existing_failed or not trial_failed:
+                                trials[existing_position] = trial
                         if trial.get("trial_status") != "failed":
                             completed_trial_ids.add(trial_id)
                         if config.order_swap and variant == "order_ab" and trial.get("trial_status") != "failed":
@@ -2424,7 +2459,7 @@ def run_evaluation(
     }
     summary.update(confirmatory_result_metadata)
     config_payload.update(confirmatory_result_metadata)
-    if confirmatory_metadata is not None:
+    if confirmatory_metadata is not None and not resume:
         frozen_manifest_path = output_path / "frozen_confirmatory_manifest.json"
         shutil.copyfile(Path(confirmatory_config_path), frozen_manifest_path)
     paths = _write_outputs(output_path, config_payload, trials, summary, empirical_reference_cache)
