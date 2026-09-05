@@ -2024,7 +2024,6 @@ def summarize_trials(
         ),
         "final_hard_invalid_count": sum(_final_hard_invalid(record) for record in completed),
         "agreement_rate": _rate(len(agreement), len(deterministic_available)),
-        "disagreement_rate": _rate(len(disagreements), len(deterministic_available)),
         "reconciliation_success_rate": _rate(len(recon_success), len(recon)),
         "reconciliation_invocation_rate": _rate(len(recon), len(completed)),
         "model_family_disagreement_rate": _rate(
