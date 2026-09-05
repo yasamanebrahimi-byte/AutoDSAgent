@@ -676,7 +676,11 @@ def runtime_manifest_values(
         "planner_model": planner_model,
         "reconciler_model": reconciler_model,
         "model_conditions": [dict(item) for item in model_conditions] if model_conditions is not None else [{"condition_id": "default", "planner_model": planner_model, "reconciler_model": reconciler_model, "llm_repetitions": int(llm_repetitions), "generation_settings": {}}],
-        "generation_settings": dict(generation_settings or {}),
+        "generation_settings": {
+            key: value
+            for key, value in (generation_settings or {}).items()
+            if value is not None
+        },
         "llm_repetition_ids": list(llm_repetition_ids) if llm_repetition_ids is not None else [f"rep_{index:03d}" for index in range(1, int(llm_repetitions) + 1)],
         "selected_model_condition_id": selected_model_condition_id,
         "split_seeds": list(split_seeds),

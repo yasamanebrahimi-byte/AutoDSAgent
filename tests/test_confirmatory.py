@@ -91,6 +91,22 @@ def test_frozen_manifest_accepts_matching_runtime_and_records_hash():
     assert metadata["expected_experiment_code_sha256"] == experiment_code_sha256()
 
 
+def test_runtime_generation_settings_omit_provider_defaults_for_frozen_manifest():
+    manifest = _manifest()
+    runtime = _runtime(
+        manifest,
+        generation_settings={
+            "temperature": None,
+            "top_p": None,
+            "seed": None,
+            "reasoning_effort": "medium",
+        },
+    )
+
+    assert runtime["generation_settings"] == {"reasoning_effort": "medium"}
+    assert validate_confirmatory_manifest(manifest, runtime)["status"] == "frozen"
+
+
 def test_frozen_manifest_rejects_wrong_experiment_code_hash():
     manifest = _manifest()
     manifest["expected_experiment_code_sha256"] = "0" * 64
