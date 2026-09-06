@@ -152,7 +152,7 @@
   "statistics": {
     "independent_unit": "dataset/task",
     "primary_estimate": "dataset-macro",
-    "secondary_estimate": "trial-weighted",
+    "secondary_estimate": "dataset-macro",
     "bootstrap_method": "dataset_cluster_bootstrap_percentile",
     "bootstrap_replicates": 10000,
     "confidence_level": 0.95,
@@ -178,6 +178,18 @@
     "primary": ["llm_only", "hard_validation_only", "deterministic_only", "always_reconcile", "probe_direct", "full"],
     "secondary": ["llm_with_diagnostics"],
     "definitions_source": "evaluation.ablation.ablation_presets"
+  },
+  "secondary_analyses": {
+    "diagnostics_vs_llm_only": {
+      "first_ablation": "llm_with_diagnostics",
+      "comparator": "llm_only",
+      "role": "secondary_information_asymmetry_control",
+      "estimand": "initial_planner_holdout_performance",
+      "validity_estimand": "paired_initial_plan_validity",
+      "aggregation": "dataset_macro",
+      "model_condition_reporting": "separate",
+      "cross_model_aggregation": "descriptive_only"
+    }
   },
   "prohibited_after_freeze": [
     "policy tuning based on external performance",

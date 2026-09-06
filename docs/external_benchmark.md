@@ -72,7 +72,11 @@ is conditional. Paper-primary summaries and paired comparisons are emitted
 under `analysis_summaries_by_model_condition` and
 `paired_comparisons_by_model_condition`; models are not silently pooled. These
 outputs contain separate dataset-macro estimates and uncertainty for each
-condition. `descriptive_combined_summary` and
+condition. The secondary `diagnostics_vs_llm_only` analysis compares initial
+planner holdout quality and paired initial-plan validity within each model
+condition; it is not included in primary intervention summaries. Invalid
+initial plans remain in the validity counts and are excluded only from the
+jointly evaluable quality effect. `descriptive_combined_summary` and
 `descriptive_combined_paired_comparisons` are audit-only cross-model totals.
 Repetitions remain nested within dataset/task, and the dataset-cluster
 bootstrap treats dataset/task as the independent unit. A strict resume must

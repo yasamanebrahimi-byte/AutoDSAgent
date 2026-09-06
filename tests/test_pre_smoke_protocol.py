@@ -59,6 +59,17 @@ def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
     assert result["split_seeds"] == list(CONFIRMATORY_SPLIT_SEEDS)
     assert result["generation_settings"] == CONFIRMATORY_GENERATION_SETTINGS
     assert ablation_presets()["llm_with_diagnostics"].analysis_role == "secondary"
+    assert manifest["statistics"]["secondary_estimate"] == "dataset-macro"
+    assert manifest["secondary_analyses"]["diagnostics_vs_llm_only"] == {
+        "first_ablation": "llm_with_diagnostics",
+        "comparator": "llm_only",
+        "role": "secondary_information_asymmetry_control",
+        "estimand": "initial_planner_holdout_performance",
+        "validity_estimand": "paired_initial_plan_validity",
+        "aggregation": "dataset_macro",
+        "model_condition_reporting": "separate",
+        "cross_model_aggregation": "descriptive_only",
+    }
 
 
 def test_draft_preflight_rejects_confirmatory_design_drift():

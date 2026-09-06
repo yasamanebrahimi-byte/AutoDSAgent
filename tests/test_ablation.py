@@ -15,7 +15,8 @@ from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResol
 from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import (
     PRIMARY_ABLATION_NAMES,
-    _paired_comparison,
+    _paired_initial_plan_validity,
+    _paired_initial_planner_comparison,
     ablation_presets,
     run_ablation_study,
 )
@@ -576,8 +577,12 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         assert len(comparisons) == 1
         assert comparisons[0]["first"] == "llm_with_diagnostics"
         assert comparisons[0]["second"] == "llm_only"
-        assert comparisons[0]["analysis_role"] == "secondary_diagnostic"
+        assert comparisons[0]["analysis_role"] == "secondary_information_asymmetry_control"
         assert comparisons[0]["comparison_scope"] == "within_model_condition"
+        assert comparisons[0]["estimand"] == "initial_planner_holdout_performance"
+    assert set(result["summary"]["secondary_initial_planner_validity_by_model_condition"]) == {
+        "model_a", "model_b"
+    }
     assert all(
         "llm_with_diagnostics" not in {item["first"], item["second"]}
         for items in result["summary"]["paired_comparisons_by_model_condition"].values()
@@ -600,7 +605,7 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         "Combined Cross-Model Descriptive Audit"
     )
     assert "`llm_with_diagnostics` vs `llm_only`" in markdown
-    assert "secondary diagnostic analysis" in markdown
+    assert "secondary information-asymmetry analysis" in markdown
     assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
         "descriptive audit total"
     )
@@ -638,8 +643,16 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         validate_confirmatory_completeness(expected, persisted[:-1])
 
 
-def test_secondary_diagnostics_comparison_is_condition_specific_and_not_primary():
-    def row(condition_id: str, dataset: str, repetition: int, holdout_delta: float) -> dict:
+def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention_delta():
+    def row(
+        condition_id: str,
+        dataset: str,
+        repetition: int,
+        *,
+        initial_metric: float,
+        task_type: str,
+        valid: bool = True,
+    ) -> dict:
         return {
             "benchmark_case": dataset,
             "perturbation_id": "clean",
@@ -649,50 +662,159 @@ def test_secondary_diagnostics_comparison_is_condition_specific_and_not_primary(
             "model_condition_id": condition_id,
             "llm_repetition_id": f"r{repetition}",
             "trial_status": "success",
-            "task_type": "classification",
-            "paper_holdout_delta": holdout_delta,
+            "task_type": task_type,
+            "agent_initial_valid": valid,
+            "initial_holdout_metric": initial_metric,
+            # LLM-only modes preserve the initial plan, so intervention delta
+            # is zero even when their initial planner quality differs.
+            "paper_holdout_delta": 0.0,
         }
 
-    by_condition = {
-        "model_a": {
-            "llm_with_diagnostics": [
-                row("model_a", "dataset_1", 1, 0.4),
-                row("model_a", "dataset_2", 1, 0.2),
-            ],
-            "llm_only": [
-                row("model_a", "dataset_1", 1, 0.1),
-                row("model_a", "dataset_2", 1, 0.1),
-            ],
-        },
-        "model_b": {
-            "llm_with_diagnostics": [
-                row("model_b", "dataset_1", 1, -0.1),
-                row("model_b", "dataset_2", 1, -0.2),
-            ],
-            "llm_only": [
-                row("model_b", "dataset_1", 1, 0.1),
-                row("model_b", "dataset_2", 1, 0.0),
-            ],
-        },
-    }
-
-    comparisons = {
-        condition_id: _paired_comparison(rows, "llm_with_diagnostics", "llm_only")
-        for condition_id, rows in by_condition.items()
-    }
-    assert comparisons["model_a"]["first"] == "llm_with_diagnostics"
-    assert comparisons["model_a"]["second"] == "llm_only"
-    assert comparisons["model_a"]["mean_paired_holdout_delta_difference_first_advantage"] > 0
-    assert comparisons["model_b"]["first"] == "llm_with_diagnostics"
-    assert comparisons["model_b"]["second"] == "llm_only"
-    assert comparisons["model_b"]["mean_paired_holdout_delta_difference_first_advantage"] < 0
-
-    pooled = _paired_comparison(
+    classification = _paired_initial_planner_comparison(
         {
-            name: [item for rows in by_condition.values() for item in rows[name]]
-            for name in ("llm_with_diagnostics", "llm_only")
+            "llm_with_diagnostics": [
+                row("luna", "classification_a", 1, initial_metric=0.80, task_type="classification"),
+            ],
+            "llm_only": [
+                row("luna", "classification_a", 1, initial_metric=0.70, task_type="classification"),
+            ],
         },
         "llm_with_diagnostics",
         "llm_only",
     )
-    assert pooled["mean_paired_holdout_delta_difference_first_advantage"] == pytest.approx(0)
+    assert classification["initial_planner_quality_effect"] == pytest.approx(0.10)
+    assert classification["first_better"] == 1
+
+    regression = _paired_initial_planner_comparison(
+        {
+            "llm_with_diagnostics": [
+                row("luna", "regression_a", 1, initial_metric=8.0, task_type="regression"),
+            ],
+            "llm_only": [
+                row("luna", "regression_a", 1, initial_metric=10.0, task_type="regression"),
+            ],
+        },
+        "llm_with_diagnostics",
+        "llm_only",
+    )
+    assert regression["initial_planner_quality_effect"] == pytest.approx(0.20)
+
+    reverse = _paired_initial_planner_comparison(
+        {
+            "llm_with_diagnostics": [
+                row("luna", "classification_b", 1, initial_metric=0.60, task_type="classification"),
+            ],
+            "llm_only": [
+                row("luna", "classification_b", 1, initial_metric=0.70, task_type="classification"),
+            ],
+        },
+        "llm_with_diagnostics",
+        "llm_only",
+    )
+    assert reverse["initial_planner_quality_effect"] == pytest.approx(-0.10)
+
+    reverse_regression = _paired_initial_planner_comparison(
+        {
+            "llm_with_diagnostics": [
+                row("luna", "regression_b", 1, initial_metric=12.0, task_type="regression"),
+            ],
+            "llm_only": [
+                row("luna", "regression_b", 1, initial_metric=10.0, task_type="regression"),
+            ],
+        },
+        "llm_with_diagnostics",
+        "llm_only",
+    )
+    assert reverse_regression["initial_planner_quality_effect"] == pytest.approx(-0.20)
+
+
+def test_secondary_initial_planner_quality_remains_separate_by_model_condition():
+    def row(condition_id: str, dataset: str, diagnostics_metric: float, ordinary_metric: float) -> dict:
+        def base(ablation: str, metric: float) -> dict:
+            return {
+                "benchmark_case": dataset,
+                "perturbation_id": "clean",
+                "split_seed": 42,
+                "trial": 1,
+                "evaluation_variant": "standard",
+                "model_condition_id": condition_id,
+                "llm_repetition_id": "rep_001",
+                "trial_status": "completed",
+                "task_type": "classification",
+                "agent_initial_valid": True,
+                "initial_holdout_metric": metric,
+                "paper_holdout_delta": 0.0,
+                "ablation_name": ablation,
+            }
+        return {
+            "llm_with_diagnostics": base("llm_with_diagnostics", diagnostics_metric),
+            "llm_only": base("llm_only", ordinary_metric),
+        }
+
+    rows_by_condition = {
+        "gpt56_luna": row("gpt56_luna", "task", 0.80, 0.70),
+        "gpt56_sol": row("gpt56_sol", "task", 0.60, 0.70),
+        "gpt56_terra": row("gpt56_terra", "task", 0.70, 0.70),
+    }
+    comparisons = {
+        condition: _paired_initial_planner_comparison(
+            {name: [item] for name, item in rows.items()},
+            "llm_with_diagnostics",
+            "llm_only",
+        )
+        for condition, rows in rows_by_condition.items()
+    }
+    assert comparisons["gpt56_luna"]["initial_planner_quality_effect"] > 0
+    assert comparisons["gpt56_sol"]["initial_planner_quality_effect"] < 0
+    assert comparisons["gpt56_terra"]["initial_planner_quality_effect"] == pytest.approx(0)
+    assert set(comparisons) == {"gpt56_luna", "gpt56_sol", "gpt56_terra"}
+
+
+def test_secondary_initial_plan_validity_reports_all_paired_outcomes_and_quality_excludes_invalid():
+    def row(dataset: str, *, diagnostics_valid: bool, ordinary_valid: bool, metric: float) -> dict:
+        common = {
+            "benchmark_case": dataset,
+            "perturbation_id": "clean",
+            "split_seed": 42,
+            "trial": 1,
+            "evaluation_variant": "standard",
+            "model_condition_id": "gpt56_luna",
+            "llm_repetition_id": f"rep_{dataset}",
+            "trial_status": "completed",
+            "task_type": "classification",
+            "paper_holdout_delta": 0.0,
+        }
+        return {
+            "llm_with_diagnostics": {
+                **common,
+                "agent_initial_valid": diagnostics_valid,
+                "initial_holdout_metric": metric,
+            },
+            "llm_only": {
+                **common,
+                "agent_initial_valid": ordinary_valid,
+                "initial_holdout_metric": 0.70,
+            },
+        }
+
+    paired = [
+        row("both_valid", diagnostics_valid=True, ordinary_valid=True, metric=0.80),
+        row("diagnostics_only", diagnostics_valid=True, ordinary_valid=False, metric=0.99),
+        row("ordinary_only", diagnostics_valid=False, ordinary_valid=True, metric=0.01),
+        row("both_invalid", diagnostics_valid=False, ordinary_valid=False, metric=0.99),
+    ]
+    rows_by_name = {
+        "llm_with_diagnostics": [item["llm_with_diagnostics"] for item in paired],
+        "llm_only": [item["llm_only"] for item in paired],
+    }
+    validity = _paired_initial_plan_validity(rows_by_name, "llm_with_diagnostics", "llm_only")
+    assert validity["both_initial_valid_count"] == 1
+    assert validity["diagnostics_valid_ordinary_invalid_count"] == 1
+    assert validity["diagnostics_invalid_ordinary_valid_count"] == 1
+    assert validity["both_initial_invalid_count"] == 1
+    assert validity["ordinary_initial_plan_valid_rate"] == pytest.approx(0.5)
+    assert validity["diagnostics_initial_plan_valid_rate"] == pytest.approx(0.5)
+
+    quality = _paired_initial_planner_comparison(rows_by_name, "llm_with_diagnostics", "llm_only")
+    assert quality["jointly_evaluable_initial_plan_units"] == 1
+    assert quality["initial_planner_quality_effect"] == pytest.approx(0.10)

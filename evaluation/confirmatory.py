@@ -31,6 +31,17 @@ CONFIRMATORY_PRIMARY_ABLATIONS = (
     "full",
 )
 CONFIRMATORY_SECONDARY_ABLATIONS = ("llm_with_diagnostics",)
+CONFIRMATORY_SECONDARY_ANALYSIS_ID = "diagnostics_vs_llm_only"
+CONFIRMATORY_SECONDARY_ANALYSIS = {
+    "first_ablation": "llm_with_diagnostics",
+    "comparator": "llm_only",
+    "role": "secondary_information_asymmetry_control",
+    "estimand": "initial_planner_holdout_performance",
+    "validity_estimand": "paired_initial_plan_validity",
+    "aggregation": "dataset_macro",
+    "model_condition_reporting": "separate",
+    "cross_model_aggregation": "descriptive_only",
+}
 CONFIRMATORY_GENERATION_SETTINGS = {
     "reasoning_effort": "medium",
     "temperature": None,
@@ -412,7 +423,7 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
         expected_statistics = {
             "independent_unit": "dataset/task",
             "primary_estimate": "dataset-macro",
-            "secondary_estimate": "trial-weighted",
+            "secondary_estimate": "dataset-macro",
             "bootstrap_method": "dataset_cluster_bootstrap_percentile",
             "bootstrap_replicates": 10000,
             "confidence_level": 0.95,
@@ -421,6 +432,15 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
         for key, expected_value in expected_statistics.items():
             if statistics.get(key) != expected_value:
                 mismatches.append(f"statistics.{key} differs from the predeclared definition")
+
+        secondary_analysis = (loaded.get("secondary_analyses") or {}).get(
+            CONFIRMATORY_SECONDARY_ANALYSIS_ID
+        )
+        if secondary_analysis != CONFIRMATORY_SECONDARY_ANALYSIS:
+            mismatches.append(
+                "secondary_analyses.diagnostics_vs_llm_only must predeclare the "
+                "initial-planner-quality and paired-validity estimands"
+            )
 
         modeling = loaded.get("modeling") or {}
         if modeling.get("candidate_model_families") != [

@@ -47,8 +47,11 @@ that no fitting occurs before the final plan is selected. The LLM and
 challenger use the same training partition but not necessarily the same
 representation: the LLM receives a compact profile while the challenger uses
 richer pre-specified structural diagnostics. The secondary
-`llm_with_diagnostics` ablation tests whether that information asymmetry alone
-explains any observed difference.
+`llm_with_diagnostics` control asks whether giving the LLM those richer,
+pre-specified training-only diagnostics improves its initial plan. Its outcomes
+are initial untouched-holdout planner quality and paired initial-plan validity,
+not intervention delta; results remain separate by model condition and
+secondary to the selective-intervention estimand.
 
 The confirmatory matrix is declared in the manifest and currently contains only
 GPT-5.6 Luna, Sol, and Terra. Each condition has three LLM repetitions
@@ -63,9 +66,10 @@ GPT-5.6 Luna, Sol, and Terra. Each condition has three LLM repetitions
 The six primary ablations are `llm_only` (LLM + universal validity checks; no
 deterministic soft challenger), `hard_validation_only`,
 `deterministic_only`, `always_reconcile`, `probe_direct`, and `full`.
-`llm_with_diagnostics` is secondary and is reported separately. Dataset/task
-is the independent statistical unit; repetitions are nested observations and
-are retained by the dataset-cluster bootstrap. The 40-task OpenML/AMLB panel
+`llm_with_diagnostics` is secondary and is reported separately. Its initial
+planner-quality effect averages matched repetitions within each dataset/task,
+then uses dataset/task as the independent statistical unit and a
+dataset-cluster bootstrap. The 40-task OpenML/AMLB panel
 is a frozen, predeclared evaluation panel, not a statistically random sample
 of AMLB tasks.
 
@@ -164,8 +168,11 @@ Confirmatory paper-primary estimates are reported separately for each declared
 model condition (currently Luna, Sol, and Terra). Repetitions remain nested
 within dataset/task, and dataset/task is the independent statistical unit.
 Any cross-model aggregate or paired comparison is explicitly descriptive and
-audit-only. `llm_with_diagnostics` remains a secondary control and cannot
-enter the primary summaries or paired comparisons.
+audit-only. `llm_with_diagnostics` remains a secondary information-asymmetry
+control and cannot enter the primary summaries or paired comparisons. The
+control compares initial plans and reports paired initial-plan validity; the
+untouched holdout is evaluation-only and results remain separate for Luna, Sol,
+and Terra.
 
 Strict confirmatory resume is bound to the exact frozen manifest SHA and its
 expected experiment-code SHA. A mismatched resume fails closed before trial

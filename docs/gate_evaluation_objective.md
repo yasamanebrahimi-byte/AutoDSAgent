@@ -21,9 +21,11 @@ sufficiently strong evidence can trigger blinded reconciliation before the
 final plan is frozen. A preprocessing-only disagreement is retained as a
 diagnostic and does not independently invoke the empirical probe or
 reconciliation path in this protocol. The secondary `llm_with_diagnostics`
-ablation gives the initial LLM the canonical training-only diagnostics without
-enabling the intervention gate, to test whether the information advantage
-alone explains an effect.
+control gives the initial LLM the canonical training-only diagnostics without
+enabling the intervention gate. Its secondary estimand is whether those
+diagnostics improve the initial LLM plan, measured from persisted initial
+untouched-holdout performance; paired initial-plan validity is reported
+separately. It is not an intervention-delta estimate.
 
 These are pre-final-training validation stages: small training-only fits/CV
 probes are allowed inside the safeguard. They are not a claim of zero model
@@ -200,10 +202,17 @@ repetitions. It is never an IID row bootstrap. Key mean metrics include a
 fixed-seed dataset-clustered interval; support below 20 is marked unstable.
 
 Paired ablation effects follow the same independent-unit rule: trials are
-paired by case, perturbation, split seed, repetition, and evaluation variant;
-paired holdout deltas are averaged within each dataset/task; the headline is
-the mean of those dataset effects; and the paired CI resamples one complete
-dataset effect at a time. Trial-weighted paired values remain diagnostics only.
+paired by case, perturbation, split seed, model condition, LLM repetition, and
+evaluation variant. Primary intervention comparisons use
+`paper_holdout_delta`. The secondary diagnostics control instead compares
+initial plans: classification uses
+`diagnostics_initial_macro_f1 - ordinary_initial_macro_f1`, while regression
+uses `(ordinary_initial_rmse - diagnostics_initial_rmse) /
+max(abs(ordinary_initial_rmse), rmse_epsilon)`. Repetitions are averaged within
+each dataset/task, the headline is the equal-weighted dataset macro effect,
+and the paired CI resamples one complete dataset effect at a time. Invalid
+initial plans remain in the separate paired-validity analysis and are excluded
+only from jointly evaluable planner-quality effects.
 
 The pooled `paper_holdout_delta` is descriptive because classification uses
 absolute macro-F1 points while regression uses relative RMSE improvement.

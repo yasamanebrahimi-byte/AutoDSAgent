@@ -24,7 +24,14 @@ from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_SEED,
     cluster_bootstrap_ci,
 )
-from evaluation.metrics import DEFAULT_THRESHOLDS, holdout_neutral_tolerance, paper_holdout_delta, summarize_trials
+from evaluation.metrics import (
+    DEFAULT_THRESHOLDS,
+    REGRESSION_HOLDOUT_RMSE_EPSILON,
+    holdout_neutral_tolerance,
+    paper_holdout_delta,
+    relative_rmse_improvement,
+    summarize_trials,
+)
 from evaluation.confirmatory import (
     CONFIRMATORY_EXPERIMENT_NAME,
     load_confirmatory_manifest,
@@ -422,6 +429,219 @@ def _paired_comparison(
     }
 
 
+def _initial_holdout_metric(row: dict[str, Any]) -> float | None:
+    """Return the persisted initial untouched-holdout metric for a trial."""
+
+    direct = row.get("initial_holdout_metric")
+    if direct is not None:
+        return float(direct)
+    metric_name = "macro_f1" if str(row.get("task_type", "classification")) == "classification" else "rmse"
+    nested = (row.get("agent_initial_holdout_metrics") or {}).get(metric_name)
+    return float(nested) if nested is not None else None
+
+
+def _initial_planner_quality_difference(
+    task_type: str,
+    diagnostics_metric: float,
+    ordinary_metric: float,
+    *,
+    epsilon: float,
+) -> float:
+    """Return a direction-normalized diagnostics-minus-ordinary effect."""
+
+    if task_type == "classification":
+        return float(diagnostics_metric - ordinary_metric)
+    if task_type == "regression":
+        return float(relative_rmse_improvement(ordinary_metric, diagnostics_metric, epsilon=epsilon))
+    raise ValueError(f"Unsupported task type: {task_type!r}")
+
+
+def _paired_initial_planner_comparison(
+    rows_by_name: dict[str, list[dict[str, Any]]],
+    first: str,
+    second: str,
+    tolerance: float | dict[str, float] = 1e-12,
+    *,
+    rmse_epsilon: float = REGRESSION_HOLDOUT_RMSE_EPSILON,
+) -> dict[str, Any]:
+    """Compare initial planner quality for a secondary information control.
+
+    ``first`` and ``second`` are paired at the same trial unit.  Only jointly
+    valid initial plans with persisted initial holdout metrics contribute to
+    the quality effect; validity itself is reported separately by
+    :func:`_paired_initial_plan_validity`.
+    """
+
+    left = {
+        _unit_key(row): row
+        for row in rows_by_name.get(first, [])
+        if row.get("trial_status") != "failed"
+    }
+    right = {
+        _unit_key(row): row
+        for row in rows_by_name.get(second, [])
+        if row.get("trial_status") != "failed"
+    }
+    shared = sorted(set(left) & set(right), key=str)
+    differences: list[float] = []
+    task_types: list[str] = []
+    by_dataset: dict[str, list[float]] = {}
+    dataset_task_types: dict[str, set[str]] = {}
+    for key in shared:
+        first_row = left[key]
+        second_row = right[key]
+        if first_row.get("agent_initial_valid") is not True or second_row.get("agent_initial_valid") is not True:
+            continue
+        first_metric = _initial_holdout_metric(first_row)
+        second_metric = _initial_holdout_metric(second_row)
+        if first_metric is None or second_metric is None:
+            continue
+        task_type = str(first_row.get("task_type", "classification"))
+        difference = _initial_planner_quality_difference(
+            task_type,
+            first_metric,
+            second_metric,
+            epsilon=rmse_epsilon,
+        )
+        differences.append(difference)
+        task_types.append(task_type)
+        dataset = str(key[0])
+        by_dataset.setdefault(dataset, []).append(difference)
+        dataset_task_types.setdefault(dataset, set()).add(task_type)
+
+    dataset_effects = [
+        {
+            "benchmark_case": dataset,
+            "difference": mean(values),
+            "paired_trial_count": len(values),
+            "task_type": sorted(dataset_task_types.get(dataset, {"classification"}))[0],
+        }
+        for dataset, values in sorted(by_dataset.items())
+    ]
+    dataset_means = [row["difference"] for row in dataset_effects]
+    dataset_better = {"first": 0, "second": 0, "tied": 0}
+    for row in dataset_effects:
+        task_type = row["task_type"]
+        pair_tolerance = (
+            holdout_neutral_tolerance(task_type, tolerance)
+            if isinstance(tolerance, dict)
+            else float(tolerance)
+        )
+        if row["difference"] > pair_tolerance:
+            dataset_better["first"] += 1
+        elif row["difference"] < -pair_tolerance:
+            dataset_better["second"] += 1
+        else:
+            dataset_better["tied"] += 1
+    quality_ci = cluster_bootstrap_ci(
+        dataset_effects,
+        lambda sample: mean(row["difference"] for row in sample) if sample else None,
+        "benchmark_case",
+    )
+    dataset_macro_effect = mean(dataset_means) if dataset_means else None
+    return {
+        "first": first,
+        "second": second,
+        "analysis_role": "secondary_information_asymmetry_control",
+        "comparison_scope": "within_model_condition",
+        "estimand": "initial_planner_holdout_performance",
+        "paired_units": len(shared),
+        "jointly_evaluable_initial_plan_units": len(differences),
+        "n_paired_datasets": len(dataset_effects),
+        "paired_initial_planner_dataset_effects": dataset_effects,
+        "first_better": dataset_better["first"],
+        "second_better": dataset_better["second"],
+        "tied": dataset_better["tied"],
+        "dataset_macro_first_better": dataset_better["first"],
+        "dataset_macro_second_better": dataset_better["second"],
+        "dataset_macro_tied": dataset_better["tied"],
+        "initial_planner_quality_effect": dataset_macro_effect,
+        "dataset_macro_initial_planner_quality_effect": dataset_macro_effect,
+        "initial_planner_quality_ci": quality_ci,
+        "initial_planner_quality_difference_sign": (
+            "diagnostics_initial_minus_ordinary_initial; positive favors diagnostics"
+        ),
+        "classification_effect_formula": "diagnostics_initial_macro_f1 - ordinary_initial_macro_f1",
+        "regression_effect_formula": (
+            "(ordinary_initial_rmse - diagnostics_initial_rmse) "
+            "/ max(abs(ordinary_initial_rmse), rmse_epsilon)"
+        ),
+        "pairing_unit": "dataset/task, perturbation, split seed, trial, model condition, LLM repetition, evaluation variant",
+        "aggregation": "mean repetitions within dataset/task, then equal-weighted dataset macro",
+        "uncertainty": "dataset_cluster_bootstrap_percentile",
+        "win_loss_tie_unit": "dataset/task mean paired initial-planner-quality difference",
+        "paired_initial_planner_quality_differences": differences,
+        "paired_initial_planner_quality_task_types": task_types,
+    }
+
+
+def _paired_initial_plan_validity(
+    rows_by_name: dict[str, list[dict[str, Any]]],
+    first: str,
+    second: str,
+) -> dict[str, Any]:
+    """Report paired validity outcomes without conditioning on holdout metrics."""
+
+    left = {
+        _unit_key(row): row
+        for row in rows_by_name.get(first, [])
+        if row.get("trial_status") != "failed"
+    }
+    right = {
+        _unit_key(row): row
+        for row in rows_by_name.get(second, [])
+        if row.get("trial_status") != "failed"
+    }
+    shared = sorted(set(left) & set(right), key=str)
+    counts = {
+        "both_initial_valid": 0,
+        "diagnostics_valid_ordinary_invalid": 0,
+        "diagnostics_invalid_ordinary_valid": 0,
+        "both_initial_invalid": 0,
+    }
+    unclassified = 0
+    for key in shared:
+        diagnostics_valid = left[key].get("agent_initial_valid")
+        ordinary_valid = right[key].get("agent_initial_valid")
+        if not isinstance(diagnostics_valid, bool) or not isinstance(ordinary_valid, bool):
+            unclassified += 1
+        elif diagnostics_valid and ordinary_valid:
+            counts["both_initial_valid"] += 1
+        elif diagnostics_valid and not ordinary_valid:
+            counts["diagnostics_valid_ordinary_invalid"] += 1
+        elif not diagnostics_valid and ordinary_valid:
+            counts["diagnostics_invalid_ordinary_valid"] += 1
+        else:
+            counts["both_initial_invalid"] += 1
+    classified = sum(counts.values())
+    ordinary_valid_count = counts["both_initial_valid"] + counts["diagnostics_invalid_ordinary_valid"]
+    diagnostics_valid_count = counts["both_initial_valid"] + counts["diagnostics_valid_ordinary_invalid"]
+    ordinary_rate = ordinary_valid_count / classified if classified else None
+    diagnostics_rate = diagnostics_valid_count / classified if classified else None
+    return {
+        "first": first,
+        "second": second,
+        "analysis_role": "secondary_information_asymmetry_control",
+        "comparison_scope": "within_model_condition",
+        "estimand": "paired_initial_plan_validity",
+        "paired_units": len(shared),
+        "classified_paired_units": classified,
+        "unclassified_paired_units": unclassified,
+        **{f"{name}_count": value for name, value in counts.items()},
+        "ordinary_initial_plan_valid_count": ordinary_valid_count,
+        "diagnostics_initial_plan_valid_count": diagnostics_valid_count,
+        "ordinary_initial_plan_valid_rate": ordinary_rate,
+        "diagnostics_initial_plan_valid_rate": diagnostics_rate,
+        "validity_rate_difference_diagnostics_minus_ordinary": (
+            diagnostics_rate - ordinary_rate
+            if diagnostics_rate is not None and ordinary_rate is not None
+            else None
+        ),
+        "pairing_unit": "dataset/task, perturbation, split seed, trial, model condition, LLM repetition, evaluation variant",
+        "invalid_plan_handling": "invalid initial plans remain in validity outcomes and are excluded only from jointly evaluable quality effects",
+    }
+
+
 def _render_combined_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Paired Modeling-Gate Ablation Study",
@@ -461,24 +681,41 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Secondary information-asymmetry control",
         "",
-        "Within each model condition, `llm_with_diagnostics` is compared directly with `llm_only`. "
-        "This tests whether exposing the initial planner to the same richer training-only structural "
-        "diagnostics available to the deterministic challenger changes planner performance. It is a "
-        "secondary diagnostic analysis and does not enter the paper-primary confirmatory claim.",
+        "Within each model condition, `llm_with_diagnostics` is compared directly with `llm_only` "
+        "using initial untouched-holdout planner quality, not intervention delta. This tests whether "
+        "giving the initial LLM planner the richer pre-specified training-only structural diagnostics "
+        "available to the deterministic challenger improves its initial plan. Initial-plan validity "
+        "is reported separately; this secondary information-asymmetry analysis does not enter the "
+        "paper-primary confirmatory claim.",
         "",
     ])
     for condition_id, items in payload.get("secondary_paired_comparisons_by_model_condition", {}).items():
-        lines.append(f"### `{condition_id}`")
+        lines.append(f"### `{condition_id}` — initial planner quality")
         if not items:
             lines.append("- No secondary paired comparison was available.")
             continue
         for item in items:
             lines.append(
-                f"- Secondary diagnostic: `{item['first']}` vs `{item['second']}`: "
+                f"- `{item['first']}` vs `{item['second']}`: "
                 f"dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, "
-                f"tied `{item['tied']}`, mean first holdout advantage "
-                f"`{item['mean_paired_holdout_delta_difference_first_advantage']}` "
-                f"(CI `{item['paired_holdout_delta_ci']}`)."
+                f"tied `{item['tied']}`, diagnostics initial-plan advantage "
+                f"`{item['initial_planner_quality_effect']}` "
+                f"(CI `{item['initial_planner_quality_ci']}`)."
+            )
+    lines.extend(["", "### Secondary initial-plan validity", ""])
+    for condition_id, items in payload.get("secondary_initial_planner_validity_by_model_condition", {}).items():
+        lines.append(f"- `{condition_id}`:")
+        if not items:
+            lines.append("  - No paired validity comparison was available.")
+            continue
+        for item in items:
+            lines.append(
+                f"  - ordinary valid rate `{item['ordinary_initial_plan_valid_rate']}`, "
+                f"diagnostics valid rate `{item['diagnostics_initial_plan_valid_rate']}`, "
+                f"both valid `{item['both_initial_valid_count']}`, "
+                f"diagnostics valid/ordinary invalid `{item['diagnostics_valid_ordinary_invalid_count']}`, "
+                f"diagnostics invalid/ordinary valid `{item['diagnostics_invalid_ordinary_valid_count']}`, "
+                f"both invalid `{item['both_initial_invalid_count']}`."
             )
     lines.extend(["", "## Combined Cross-Model Descriptive Audit", "", "The following totals pool model conditions only for audit/descriptive purposes; they are not paper-primary estimates.", "", "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|"])
     for row in payload["central_table"]:
@@ -503,7 +740,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         )
     lines.extend([
         "",
-        "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, model, prompt schema, training-profile digest, target, task, evidence mode, and diagnostics digest. Ordinary paired ablations reuse the same proposal; the diagnostics-enabled planner has a distinct cache namespace.",
+        "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, provider, model condition, model, prompt schema, training-profile digest, target, task, evidence mode, and diagnostics digest. Ordinary paired ablations reuse the same proposal; the diagnostics-enabled planner has a distinct cache namespace.",
         "",
         "Split-seed variation is represented by `split_seed`; stochastic LLM variation is represented independently by `trial`/LLM repetition. Every paired comparison uses the same unit key.",
     ])
@@ -967,6 +1204,7 @@ def run_ablation_study(
     }
     paired_comparisons_by_condition = {}
     secondary_paired_comparisons_by_condition = {}
+    secondary_initial_planner_validity_by_condition = {}
     pair_tolerance = {
         "classification": holdout_neutral_tolerance(
             "classification", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
@@ -996,14 +1234,21 @@ def run_ablation_study(
         for first, second in SECONDARY_PAIRED_COMPARISON_PAIRS:
             if first not in secondary_rows_by_name or second not in secondary_rows_by_name:
                 continue
-            comparison = _paired_comparison(
-                secondary_rows_by_name, first, second, tolerance=pair_tolerance
+            comparison = _paired_initial_planner_comparison(
+                secondary_rows_by_name,
+                first,
+                second,
+                tolerance=pair_tolerance,
+                rmse_epsilon=configured_thresholds["holdout_rmse_epsilon"],
             )
-            comparison.update({
-                "analysis_role": "secondary_diagnostic",
-                "comparison_scope": "within_model_condition",
-            })
             secondary_paired_comparisons_by_condition[condition_id].append(comparison)
+        secondary_initial_planner_validity_by_condition[condition_id] = []
+        for first, second in SECONDARY_PAIRED_COMPARISON_PAIRS:
+            if first not in secondary_rows_by_name or second not in secondary_rows_by_name:
+                continue
+            secondary_initial_planner_validity_by_condition[condition_id].append(
+                _paired_initial_plan_validity(secondary_rows_by_name, first, second)
+            )
     combined = {
         **root_config,
         "central_table": central,
@@ -1016,6 +1261,8 @@ def run_ablation_study(
                 "independent_unit": "dataset/task",
                 "repetition_nesting": "repetitions nested within dataset/task × model condition",
                 "primary_estimand": "dataset-macro within this model condition",
+                "secondary_estimand": "initial planner holdout performance; dataset-macro within this model condition",
+                "secondary_validity_estimand": "paired initial-plan validity",
                 "independent_dataset_unit_count_by_ablation": {
                     name: summary.get("dataset_macro_gate_health", {}).get("dataset_count", 0)
                     for name, summary in primary_summaries_by_condition[condition_id].items()
@@ -1025,6 +1272,8 @@ def run_ablation_study(
         },
         "paired_comparisons_by_model_condition": paired_comparisons_by_condition,
         "secondary_paired_comparisons_by_model_condition": secondary_paired_comparisons_by_condition,
+        "secondary_initial_planner_quality_by_model_condition": secondary_paired_comparisons_by_condition,
+        "secondary_initial_planner_validity_by_model_condition": secondary_initial_planner_validity_by_condition,
         # Compatibility aliases for older consumers.  Their role is explicit
         # so they cannot be mistaken for the paper-primary estimand.
         "analysis_summaries": {

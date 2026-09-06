@@ -14,9 +14,12 @@ they do not necessarily receive identical representations: the LLM sees a
 compact profile while the challenger may use richer pre-specified structural
 diagnostics. The deterministic recommendation is an advisory hypothesis, and
 its compatibility scores are heuristics rather than predicted accuracy or
-probabilities. The secondary `llm_with_diagnostics` ablation exposes the same
+probabilities. The secondary `llm_with_diagnostics` control exposes the same
 canonical training-only structural diagnostics to the initial LLM without
-enabling the intervention gate.
+enabling the intervention gate. It asks whether the diagnostics improve the
+initial LLM plan, with initial untouched-holdout planner quality and paired
+initial-plan validity reported separately by model condition; it does not use
+intervention delta as its outcome.
 
 ## Prompt contract
 
