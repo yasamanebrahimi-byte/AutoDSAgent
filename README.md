@@ -67,9 +67,12 @@ The six primary ablations are `llm_only` (LLM + universal validity checks; no
 deterministic soft challenger), `hard_validation_only`,
 `deterministic_only`, `always_reconcile`, `probe_direct`, and `full`.
 `llm_with_diagnostics` is secondary and is reported separately. Its initial
-planner-quality effect averages matched repetitions within each dataset/task,
-then uses dataset/task as the independent statistical unit and a
-dataset-cluster bootstrap. The 40-task OpenML/AMLB panel
+planner-quality analysis aligns repetitions by declared slot for balanced
+analysis, but the slots are not shared-seed stochastic matches across the
+separate planner calls. Classification and regression magnitudes are reported
+separately, conditional on jointly valid and evaluable initial plans; dataset/task
+remains the independent statistical unit and uncertainty uses a dataset-cluster
+bootstrap. The 40-task OpenML/AMLB panel
 is a frozen, predeclared evaluation panel, not a statistically random sample
 of AMLB tasks.
 

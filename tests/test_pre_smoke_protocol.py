@@ -59,7 +59,7 @@ def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
     assert result["split_seeds"] == list(CONFIRMATORY_SPLIT_SEEDS)
     assert result["generation_settings"] == CONFIRMATORY_GENERATION_SETTINGS
     assert ablation_presets()["llm_with_diagnostics"].analysis_role == "secondary"
-    assert manifest["statistics"]["secondary_estimate"] == "dataset-macro"
+    assert manifest["statistics"]["secondary_estimate"] == "trial-weighted"
     assert manifest["secondary_analyses"]["diagnostics_vs_llm_only"] == {
         "first_ablation": "llm_with_diagnostics",
         "comparator": "llm_only",

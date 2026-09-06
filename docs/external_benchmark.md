@@ -45,7 +45,11 @@ review and a local/synthetic live smoke test before the later freeze. Reconciler
 models are never silently substituted.
 
 Each repetition is a new initial stochastic proposal under fixed evidence.
-Stable `llm_repetition_ids` make its identity auditable. Initial proposals are
+Repetition IDs are aligned by declared repetition slot for balanced analysis;
+`rep_001` under different model conditions or planner-information conditions
+does not denote a shared-seed stochastic match because those are separate
+planner calls. Stable `llm_repetition_ids` make its identity auditable.
+Initial proposals are
 cached and reused across compatible ablations, so ablation effects are not
 confounded with fresh planner samples. The cache identity includes benchmark
 case, perturbation, split seed, provider, model condition, exact planner model,
@@ -53,7 +57,8 @@ repetition number and ID, prompt schema, generation settings,
 training-profile digest, approved target, approved task, planner evidence mode,
 and a canonical structural-diagnostics digest. Therefore the ordinary paired
 ablations share proposals, while `llm_with_diagnostics` has a separate cache
-namespace.
+namespace. This proposal reuse within compatible ablations does not make
+same-slot calls across conditions shared-randomness matches.
 
 Strict confirmatory validation rejects undeclared conditions, model or
 repetition overrides, generation-setting changes, and condition-set drift.

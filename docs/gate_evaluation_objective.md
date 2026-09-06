@@ -209,10 +209,12 @@ initial plans: classification uses
 `diagnostics_initial_macro_f1 - ordinary_initial_macro_f1`, while regression
 uses `(ordinary_initial_rmse - diagnostics_initial_rmse) /
 max(abs(ordinary_initial_rmse), rmse_epsilon)`. Repetitions are averaged within
-each dataset/task, the headline is the equal-weighted dataset macro effect,
-and the paired CI resamples one complete dataset effect at a time. Invalid
-initial plans remain in the separate paired-validity analysis and are excluded
-only from jointly evaluable planner-quality effects.
+each dataset/task, classification and regression magnitudes are reported as
+separate equal-weighted dataset-macro effects with separate clustered CIs.
+Directional dataset win/tie/loss counts may remain cross-task-type using each
+task's neutral tolerance. Invalid initial plans remain in the separate
+paired-validity analysis and are excluded from quality magnitudes, which are
+conditional on jointly valid and evaluable initial plans.
 
 The pooled `paper_holdout_delta` is descriptive because classification uses
 absolute macro-F1 points while regression uses relative RMSE improvement.

@@ -2170,7 +2170,7 @@ def run_evaluation(
             "holdout_rmse_delta_raw": "initial_holdout_rmse-final_holdout_rmse (diagnostic/native units)",
             "holdout_rmse_relative_improvement": "(initial_holdout_rmse-final_holdout_rmse)/max(abs(initial_holdout_rmse), holdout_rmse_epsilon)",
             "paper_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
-            "repetition_design": "same split and training-only profile; stochastic LLM response is the intended varying factor",
+            "repetition_design": "same split and training-only profile; repetitions are aligned by declared slot for balanced analysis, not shared-seed stochastic matches across separate planner calls",
             "objective": "intervention quality; exact family match is diagnostic only",
             "neutrality": "training-side regret uses neutral_tolerance; holdout outcomes use task-specific classification/regression tolerances",
             "catastrophic_regret": "normalized regret at or above catastrophic_regret_threshold",

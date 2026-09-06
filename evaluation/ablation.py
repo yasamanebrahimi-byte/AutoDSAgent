@@ -533,12 +533,50 @@ def _paired_initial_planner_comparison(
             dataset_better["second"] += 1
         else:
             dataset_better["tied"] += 1
-    quality_ci = cluster_bootstrap_ci(
-        dataset_effects,
-        lambda sample: mean(row["difference"] for row in sample) if sample else None,
-        "benchmark_case",
-    )
-    dataset_macro_effect = mean(dataset_means) if dataset_means else None
+    def task_type_summary(task_type: str) -> dict[str, Any]:
+        task_effects = [row for row in dataset_effects if row["task_type"] == task_type]
+        task_means = [row["difference"] for row in task_effects]
+        task_ci = cluster_bootstrap_ci(
+            task_effects,
+            lambda sample: mean(row["difference"] for row in sample) if sample else None,
+            "benchmark_case",
+        )
+        formula = (
+            "diagnostics_initial_macro_f1 - ordinary_initial_macro_f1"
+            if task_type == "classification"
+            else "(ordinary_initial_rmse - diagnostics_initial_rmse) / "
+            "max(abs(ordinary_initial_rmse), rmse_epsilon)"
+        )
+        return {
+            "task_type": task_type,
+            "dataset_count": len(task_effects),
+            "eligible_dataset_count": len(task_effects),
+            "dataset_macro_effect": mean(task_means) if task_means else None,
+            "confidence_interval": task_ci,
+            "effect_formula": formula,
+            "dataset_effects": task_effects,
+        }
+
+    task_summaries = {
+        task_type: task_type_summary(task_type)
+        for task_type in ("classification", "regression")
+    }
+    descriptive_only = {
+        "role": "descriptive_only",
+        "estimand": "mixed_task_initial_planner_quality_magnitude",
+        "dataset_count": len(dataset_effects),
+        "dataset_macro_effect": mean(dataset_means) if dataset_means else None,
+        "confidence_interval": cluster_bootstrap_ci(
+            dataset_effects,
+            lambda sample: mean(row["difference"] for row in sample) if sample else None,
+            "benchmark_case",
+        ),
+        "warning": (
+            "Classification macro-F1-point effects and regression relative-RMSE "
+            "effects are on different measurement scales; this mixed-task magnitude "
+            "is audit-only and is not the headline secondary estimand."
+        ),
+    }
     return {
         "first": first,
         "second": second,
@@ -555,9 +593,17 @@ def _paired_initial_planner_comparison(
         "dataset_macro_first_better": dataset_better["first"],
         "dataset_macro_second_better": dataset_better["second"],
         "dataset_macro_tied": dataset_better["tied"],
-        "initial_planner_quality_effect": dataset_macro_effect,
-        "dataset_macro_initial_planner_quality_effect": dataset_macro_effect,
-        "initial_planner_quality_ci": quality_ci,
+        "quality_estimand_condition": (
+            "conditional on jointly valid and evaluable initial plans"
+        ),
+        "classification": task_summaries["classification"],
+        "regression": task_summaries["regression"],
+        "directional_dataset_outcomes": {
+            "diagnostics_better": dataset_better["first"],
+            "ordinary_better": dataset_better["second"],
+            "tied": dataset_better["tied"],
+        },
+        "descriptive_only": descriptive_only,
         "initial_planner_quality_difference_sign": (
             "diagnostics_initial_minus_ordinary_initial; positive favors diagnostics"
         ),
@@ -570,6 +616,10 @@ def _paired_initial_planner_comparison(
         "aggregation": "mean repetitions within dataset/task, then equal-weighted dataset macro",
         "uncertainty": "dataset_cluster_bootstrap_percentile",
         "win_loss_tie_unit": "dataset/task mean paired initial-planner-quality difference",
+        "quality_magnitude_scope": (
+            "classification and regression magnitudes are summarized separately; "
+            "directional dataset outcomes may remain cross-task-type"
+        ),
         "paired_initial_planner_quality_differences": differences,
         "paired_initial_planner_quality_task_types": task_types,
     }
@@ -638,7 +688,11 @@ def _paired_initial_plan_validity(
             else None
         ),
         "pairing_unit": "dataset/task, perturbation, split seed, trial, model condition, LLM repetition, evaluation variant",
-        "invalid_plan_handling": "invalid initial plans remain in validity outcomes and are excluded only from jointly evaluable quality effects",
+        "invalid_plan_handling": (
+            "invalid initial plans remain in validity outcomes and are excluded from "
+            "quality magnitudes; quality is conditional on jointly valid and evaluable "
+            "initial plans"
+        ),
     }
 
 
@@ -657,6 +711,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         f"- Secondary ablations: `{payload.get('selected_secondary_ablations', [])}`",
         "- Primary and secondary ablations are separate analysis strata; secondary diagnostics are not pooled into the primary claim.",
         "- Paper-primary estimates are reported separately for each declared model condition. Repetitions remain nested within dataset/task.",
+        "- Repetitions are aligned by declared repetition slot for balanced analysis; `rep_001` across model conditions or ablations is not a shared-seed stochastic match, because those are separate planner calls.",
         "- Any across-model aggregate below is explicitly descriptive/audit-only and is not a paper-primary estimand.",
         "",
         "## Paper-Primary Results by Model Condition",
@@ -685,8 +740,10 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "using initial untouched-holdout planner quality, not intervention delta. This tests whether "
         "giving the initial LLM planner the richer pre-specified training-only structural diagnostics "
         "available to the deterministic challenger improves its initial plan. Initial-plan validity "
-        "is reported separately; this secondary information-asymmetry analysis does not enter the "
-        "paper-primary confirmatory claim.",
+        "is reported separately, and planner-quality magnitude is conditional on jointly valid and "
+        "evaluable initial plans. Classification and regression magnitudes are reported separately; "
+        "directional dataset outcomes may remain cross-task-type. This secondary information-asymmetry "
+        "analysis does not enter the paper-primary confirmatory claim.",
         "",
     ])
     for condition_id, items in payload.get("secondary_paired_comparisons_by_model_condition", {}).items():
@@ -695,12 +752,17 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
             lines.append("- No secondary paired comparison was available.")
             continue
         for item in items:
+            classification = item.get("classification", {})
+            regression = item.get("regression", {})
+            outcomes = item.get("directional_dataset_outcomes", {})
             lines.append(
                 f"- `{item['first']}` vs `{item['second']}`: "
-                f"dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, "
-                f"tied `{item['tied']}`, diagnostics initial-plan advantage "
-                f"`{item['initial_planner_quality_effect']}` "
-                f"(CI `{item['initial_planner_quality_ci']}`)."
+                f"classification diagnostics effect `{classification.get('dataset_macro_effect')}` "
+                f"(n=`{classification.get('dataset_count')}`, CI `{classification.get('confidence_interval')}`); "
+                f"regression diagnostics effect `{regression.get('dataset_macro_effect')}` "
+                f"(n=`{regression.get('dataset_count')}`, CI `{regression.get('confidence_interval')}`); "
+                f"directional outcomes diagnostics better `{outcomes.get('diagnostics_better', 0)}`, "
+                f"ordinary better `{outcomes.get('ordinary_better', 0)}`, tied `{outcomes.get('tied', 0)}`."
             )
     lines.extend(["", "### Secondary initial-plan validity", ""])
     for condition_id, items in payload.get("secondary_initial_planner_validity_by_model_condition", {}).items():
@@ -742,7 +804,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, provider, model condition, model, prompt schema, training-profile digest, target, task, evidence mode, and diagnostics digest. Ordinary paired ablations reuse the same proposal; the diagnostics-enabled planner has a distinct cache namespace.",
         "",
-        "Split-seed variation is represented by `split_seed`; stochastic LLM variation is represented independently by `trial`/LLM repetition. Every paired comparison uses the same unit key.",
+        "Split-seed variation is represented by `split_seed`; stochastic LLM variation is represented independently by `trial`/LLM repetition. Repetitions are aligned by declared repetition slot for balanced analysis, not shared-seed stochastic matches across separate planner calls. Every paired comparison uses the same unit key.",
     ])
     return "\n".join(lines) + "\n"
 

@@ -423,7 +423,7 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
         expected_statistics = {
             "independent_unit": "dataset/task",
             "primary_estimate": "dataset-macro",
-            "secondary_estimate": "dataset-macro",
+            "secondary_estimate": "trial-weighted",
             "bootstrap_method": "dataset_cluster_bootstrap_percentile",
             "bootstrap_replicates": 10000,
             "confidence_level": 0.95,

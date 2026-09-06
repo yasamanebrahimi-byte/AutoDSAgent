@@ -580,6 +580,15 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         assert comparisons[0]["analysis_role"] == "secondary_information_asymmetry_control"
         assert comparisons[0]["comparison_scope"] == "within_model_condition"
         assert comparisons[0]["estimand"] == "initial_planner_holdout_performance"
+        assert set(comparisons[0]["classification"]) >= {
+            "dataset_count", "dataset_macro_effect", "confidence_interval"
+        }
+        assert set(comparisons[0]["regression"]) >= {
+            "dataset_count", "dataset_macro_effect", "confidence_interval"
+        }
+        assert "llm_with_diagnostics" not in {
+            item["first"] for item in result["summary"]["paired_comparisons_by_model_condition"]["model_a"]
+        }
     assert set(result["summary"]["secondary_initial_planner_validity_by_model_condition"]) == {
         "model_a", "model_b"
     }
@@ -682,8 +691,14 @@ def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention
         "llm_with_diagnostics",
         "llm_only",
     )
-    assert classification["initial_planner_quality_effect"] == pytest.approx(0.10)
-    assert classification["first_better"] == 1
+    assert classification["classification"]["dataset_macro_effect"] == pytest.approx(0.10)
+    assert classification["classification"]["dataset_count"] == 1
+    assert classification["regression"]["dataset_count"] == 0
+    assert classification["directional_dataset_outcomes"] == {
+        "diagnostics_better": 1,
+        "ordinary_better": 0,
+        "tied": 0,
+    }
 
     regression = _paired_initial_planner_comparison(
         {
@@ -697,7 +712,9 @@ def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention
         "llm_with_diagnostics",
         "llm_only",
     )
-    assert regression["initial_planner_quality_effect"] == pytest.approx(0.20)
+    assert regression["regression"]["dataset_macro_effect"] == pytest.approx(0.20)
+    assert regression["regression"]["dataset_count"] == 1
+    assert regression["classification"]["dataset_count"] == 0
 
     reverse = _paired_initial_planner_comparison(
         {
@@ -711,7 +728,7 @@ def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention
         "llm_with_diagnostics",
         "llm_only",
     )
-    assert reverse["initial_planner_quality_effect"] == pytest.approx(-0.10)
+    assert reverse["classification"]["dataset_macro_effect"] == pytest.approx(-0.10)
 
     reverse_regression = _paired_initial_planner_comparison(
         {
@@ -725,7 +742,31 @@ def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention
         "llm_with_diagnostics",
         "llm_only",
     )
-    assert reverse_regression["initial_planner_quality_effect"] == pytest.approx(-0.20)
+    assert reverse_regression["regression"]["dataset_macro_effect"] == pytest.approx(-0.20)
+
+    mixed = _paired_initial_planner_comparison(
+        {
+            "llm_with_diagnostics": [
+                row("luna", "mixed_classification", 1, initial_metric=0.80, task_type="classification"),
+                row("luna", "mixed_regression", 1, initial_metric=8.0, task_type="regression"),
+            ],
+            "llm_only": [
+                row("luna", "mixed_classification", 1, initial_metric=0.70, task_type="classification"),
+                row("luna", "mixed_regression", 1, initial_metric=10.0, task_type="regression"),
+            ],
+        },
+        "llm_with_diagnostics",
+        "llm_only",
+    )
+    assert mixed["classification"]["dataset_macro_effect"] == pytest.approx(0.10)
+    assert mixed["regression"]["dataset_macro_effect"] == pytest.approx(0.20)
+    assert mixed["descriptive_only"]["role"] == "descriptive_only"
+    assert mixed["directional_dataset_outcomes"] == {
+        "diagnostics_better": 2,
+        "ordinary_better": 0,
+        "tied": 0,
+    }
+    assert "initial_planner_quality_effect" not in mixed
 
 
 def test_secondary_initial_planner_quality_remains_separate_by_model_condition():
@@ -764,9 +805,9 @@ def test_secondary_initial_planner_quality_remains_separate_by_model_condition()
         )
         for condition, rows in rows_by_condition.items()
     }
-    assert comparisons["gpt56_luna"]["initial_planner_quality_effect"] > 0
-    assert comparisons["gpt56_sol"]["initial_planner_quality_effect"] < 0
-    assert comparisons["gpt56_terra"]["initial_planner_quality_effect"] == pytest.approx(0)
+    assert comparisons["gpt56_luna"]["classification"]["dataset_macro_effect"] > 0
+    assert comparisons["gpt56_sol"]["classification"]["dataset_macro_effect"] < 0
+    assert comparisons["gpt56_terra"]["classification"]["dataset_macro_effect"] == pytest.approx(0)
     assert set(comparisons) == {"gpt56_luna", "gpt56_sol", "gpt56_terra"}
 
 
@@ -814,7 +855,15 @@ def test_secondary_initial_plan_validity_reports_all_paired_outcomes_and_quality
     assert validity["both_initial_invalid_count"] == 1
     assert validity["ordinary_initial_plan_valid_rate"] == pytest.approx(0.5)
     assert validity["diagnostics_initial_plan_valid_rate"] == pytest.approx(0.5)
+    assert "jointly valid and evaluable initial plans" in validity["invalid_plan_handling"]
 
     quality = _paired_initial_planner_comparison(rows_by_name, "llm_with_diagnostics", "llm_only")
     assert quality["jointly_evaluable_initial_plan_units"] == 1
-    assert quality["initial_planner_quality_effect"] == pytest.approx(0.10)
+    assert quality["quality_estimand_condition"] == "conditional on jointly valid and evaluable initial plans"
+    assert quality["classification"]["dataset_macro_effect"] == pytest.approx(0.10)
+    assert quality["classification"]["dataset_count"] == 1
+    assert quality["directional_dataset_outcomes"] == {
+        "diagnostics_better": 1,
+        "ordinary_better": 0,
+        "tied": 0,
+    }
