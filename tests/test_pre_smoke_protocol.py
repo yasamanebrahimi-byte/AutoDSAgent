@@ -24,6 +24,15 @@ from evaluation.benchmarks import BenchmarkCase
 MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_confirmatory_v2.json"
 
 
+def _draft_manifest() -> dict:
+    """Use the frozen v2 design as an isolated development preflight fixture."""
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest["status"] = "draft"
+    manifest["expected_experiment_code_sha256"] = None
+    manifest["source_git_commit"] = None
+    return manifest
+
+
 def _case() -> BenchmarkCase:
     frame = pd.DataFrame(
         {
@@ -43,7 +52,7 @@ def _case() -> BenchmarkCase:
 
 
 def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = _draft_manifest()
     result = validate_confirmatory_preflight(manifest)
 
     assert manifest["status"] == "draft"
@@ -73,7 +82,7 @@ def test_draft_preflight_has_exact_matrix_and_never_freezes_manifest():
 
 
 def test_draft_preflight_rejects_confirmatory_design_drift():
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = _draft_manifest()
     manifest["splits_and_repetitions"]["split_seeds"] = [123]
     with pytest.raises(ValueError, match="design preflight"):
         validate_confirmatory_preflight(manifest)
