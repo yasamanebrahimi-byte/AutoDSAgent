@@ -70,6 +70,14 @@ SECONDARY_PAIRED_COMPARISON_PAIRS = (
     ("llm_with_diagnostics", "llm_only"),
 )
 SECONDARY_ABLATION_NAMES = ("llm_with_diagnostics",)
+PRIMARY_PAIRED_COMPARISON_PAIRS = (
+    ("full", "llm_only"),
+    ("hard_validation_only", "llm_only"),
+    ("deterministic_only", "hard_validation_only"),
+    ("always_reconcile", "full"),
+    ("probe_direct", "full"),
+)
+FINAL_PLAN_PERFORMANCE_PAIR = frozenset(("deterministic_only", "hard_validation_only"))
 
 
 @dataclass(frozen=True)
@@ -282,12 +290,54 @@ def _unit_key(row: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _final_holdout_metric(row: dict[str, Any]) -> float | None:
+    """Return the frozen primary metric for the evaluated final plan."""
+
+    direct = row.get("final_holdout_metric")
+    if direct is not None:
+        return float(direct)
+    metric_name = "macro_f1" if str(row.get("task_type", "classification")) == "classification" else "rmse"
+    nested = (row.get("gated_final_holdout_metrics") or {}).get(metric_name)
+    return float(nested) if nested is not None else None
+
+
+def _final_plan_holdout_difference(
+    task_type: str,
+    first_metric: float | None,
+    second_metric: float | None,
+    *,
+    epsilon: float = REGRESSION_HOLDOUT_RMSE_EPSILON,
+) -> float | None:
+    """Compare final plans with positive values favoring the first arm."""
+
+    if first_metric is None or second_metric is None:
+        return None
+    if task_type == "classification":
+        return float(first_metric - second_metric)
+    if task_type == "regression":
+        # Normalize by the second arm's RMSE so this remains comparable across
+        # datasets while retaining the intuitive ``rmse_second - rmse_first``
+        # direction.
+        return float(relative_rmse_improvement(second_metric, first_metric, epsilon=epsilon))
+    raise ValueError(f"Unsupported task type: {task_type!r}")
+
+
 def _paired_comparison(
     rows_by_name: dict[str, list[dict[str, Any]]],
     first: str,
     second: str,
     tolerance: float | dict[str, float] = 1e-12,
+    *,
+    comparison_estimand: str | None = None,
 ) -> dict[str, Any]:
+    if comparison_estimand is None:
+        comparison_estimand = (
+            "final_plan_holdout_performance"
+            if frozenset((first, second)) == FINAL_PLAN_PERFORMANCE_PAIR
+            else "intervention_effect"
+        )
+    if comparison_estimand not in {"intervention_effect", "final_plan_holdout_performance"}:
+        raise ValueError(f"Unsupported paired comparison estimand: {comparison_estimand!r}")
     left = {_unit_key(row): row for row in rows_by_name.get(first, []) if row.get("trial_status") != "failed"}
     right = {_unit_key(row): row for row in rows_by_name.get(second, []) if row.get("trial_status") != "failed"}
     shared = sorted(set(left) & set(right), key=str)
@@ -300,30 +350,39 @@ def _paired_comparison(
     for key in shared:
         first_row = left[key]
         second_row = right[key]
-        first_delta = first_row.get("paper_holdout_delta")
-        second_delta = second_row.get("paper_holdout_delta")
-        if first_delta is None:
-            first_delta = paper_holdout_delta(
-                str(first_row.get("task_type", "classification")),
-                first_row.get("initial_holdout_metric"),
-                first_row.get("final_holdout_metric"),
+        task_type = str(first_row.get("task_type", "classification"))
+        if comparison_estimand == "final_plan_holdout_performance":
+            first_value = _final_holdout_metric(first_row)
+            second_value = _final_holdout_metric(second_row)
+            difference = _final_plan_holdout_difference(task_type, first_value, second_value)
+            first_delta = second_delta = None
+        else:
+            first_delta = first_row.get("paper_holdout_delta")
+            second_delta = second_row.get("paper_holdout_delta")
+            if first_delta is None:
+                first_delta = paper_holdout_delta(
+                    task_type,
+                    first_row.get("initial_holdout_metric"),
+                    first_row.get("final_holdout_metric"),
+                )
+            if second_delta is None:
+                second_delta = paper_holdout_delta(
+                    task_type,
+                    second_row.get("initial_holdout_metric"),
+                    second_row.get("final_holdout_metric"),
+                )
+            difference = (
+                float(first_delta) - float(second_delta)
+                if first_delta is not None and second_delta is not None
+                else None
             )
-        if second_delta is None:
-            second_delta = paper_holdout_delta(
-                str(second_row.get("task_type", "classification")),
-                second_row.get("initial_holdout_metric"),
-                second_row.get("final_holdout_metric"),
-            )
-        if first_delta is not None and second_delta is not None:
-            # Positive means the first configuration produced the better
-            # untouched-holdout intervention outcome.
-            difference = float(first_delta) - float(second_delta)
+        if difference is not None:
             holdout_differences.append(difference)
-            holdout_task_types.append(str(first_row.get("task_type", "classification")))
+            holdout_task_types.append(task_type)
             dataset = str(key[0])
             holdout_by_dataset.setdefault(dataset, []).append(difference)
             dataset_task_types.setdefault(dataset, set()).add(
-                str(first_row.get("task_type", "classification"))
+                task_type
             )
         a = first_row.get("gated_normalized_regret")
         b = second_row.get("gated_normalized_regret")
@@ -333,7 +392,7 @@ def _paired_comparison(
             diagnostic_difference = float(b) - float(a)
             diagnostic_differences.append(diagnostic_difference)
             diagnostic_rows.append({"benchmark_case": key[0], "difference": diagnostic_difference})
-        if first_delta is None or second_delta is None:
+        if difference is None:
             continue
     dataset_effects = [
         {
@@ -374,9 +433,10 @@ def _paired_comparison(
         lambda sample: mean(row["difference"] for row in sample) if sample else None,
         "benchmark_case",
     )
-    return {
+    result = {
         "first": first,
         "second": second,
+        "comparison_estimand": comparison_estimand,
         "paired_units": len(holdout_differences),
         "paired_holdout_units": len(holdout_differences),
         "paired_training_diagnostic_units": len(diagnostic_differences),
@@ -390,15 +450,27 @@ def _paired_comparison(
         "dataset_macro_first_better": dataset_better["first"],
         "dataset_macro_second_better": dataset_better["second"],
         "dataset_macro_tied": dataset_better["tied"],
-        "mean_paired_holdout_delta_difference_first_advantage": mean(dataset_means) if dataset_means else None,
-        "median_paired_holdout_delta_difference_first_advantage": median(dataset_means) if dataset_means else None,
-        "dataset_macro_mean_paired_holdout_delta_difference_first_advantage": mean(dataset_means) if dataset_means else None,
-        "dataset_macro_median_paired_holdout_delta_difference_first_advantage": median(dataset_means) if dataset_means else None,
-        "paired_holdout_delta_ci": holdout_difference_ci,
+        "mean_paired_holdout_delta_difference_first_advantage": (
+            mean(dataset_means) if comparison_estimand == "intervention_effect" and dataset_means else None
+        ),
+        "median_paired_holdout_delta_difference_first_advantage": (
+            median(dataset_means) if comparison_estimand == "intervention_effect" and dataset_means else None
+        ),
+        "dataset_macro_mean_paired_holdout_delta_difference_first_advantage": (
+            mean(dataset_means) if comparison_estimand == "intervention_effect" and dataset_means else None
+        ),
+        "dataset_macro_median_paired_holdout_delta_difference_first_advantage": (
+            median(dataset_means) if comparison_estimand == "intervention_effect" and dataset_means else None
+        ),
+        "paired_holdout_delta_ci": holdout_difference_ci if comparison_estimand == "intervention_effect" else None,
         # Explicitly secondary, trial-weighted diagnostics retained for
         # reproducibility with earlier reports.
-        "trial_weighted_mean_paired_holdout_delta_difference_first_advantage": trial_weighted_mean,
-        "trial_weighted_median_paired_holdout_delta_difference_first_advantage": trial_weighted_median,
+        "trial_weighted_mean_paired_holdout_delta_difference_first_advantage": (
+            trial_weighted_mean if comparison_estimand == "intervention_effect" else None
+        ),
+        "trial_weighted_median_paired_holdout_delta_difference_first_advantage": (
+            trial_weighted_median if comparison_estimand == "intervention_effect" else None
+        ),
         "trial_weighted_first_better": sum(
             difference > (
                 holdout_neutral_tolerance(task_type, tolerance)
@@ -424,9 +496,36 @@ def _paired_comparison(
         "paired_regret_difference_ci": diagnostic_difference_ci,
         "trial_weighted_paired_regret_difference_ci": diagnostic_difference_ci,
         "training_reference_comparison_role": "secondary diagnostic; primary comparison uses untouched holdout",
-        "paired_holdout_difference_sign": "first ablation paper_holdout_delta minus second ablation paper_holdout_delta; positive favors first",
+        "paired_holdout_difference_sign": (
+            "first ablation paper_holdout_delta minus second ablation paper_holdout_delta; positive favors first"
+            if comparison_estimand == "intervention_effect"
+            else "direction-normalized final holdout performance difference; positive favors first"
+        ),
         "win_loss_tie_unit": "dataset/task mean paired difference",
     }
+    if comparison_estimand == "final_plan_holdout_performance":
+        result.update({
+            "final_holdout_metric_role": "frozen primary final-plan holdout metric",
+            "mean_paired_final_holdout_performance_difference_first_advantage": mean(dataset_means) if dataset_means else None,
+            "median_paired_final_holdout_performance_difference_first_advantage": median(dataset_means) if dataset_means else None,
+            "dataset_macro_mean_paired_final_holdout_performance_difference_first_advantage": mean(dataset_means) if dataset_means else None,
+            "dataset_macro_median_paired_final_holdout_performance_difference_first_advantage": median(dataset_means) if dataset_means else None,
+            "paired_final_holdout_performance_ci": holdout_difference_ci,
+            "trial_weighted_mean_paired_final_holdout_performance_difference_first_advantage": trial_weighted_mean,
+            "trial_weighted_median_paired_final_holdout_performance_difference_first_advantage": trial_weighted_median,
+        })
+    else:
+        result.update({
+            "final_holdout_metric_role": None,
+            "mean_paired_final_holdout_performance_difference_first_advantage": None,
+            "median_paired_final_holdout_performance_difference_first_advantage": None,
+            "dataset_macro_mean_paired_final_holdout_performance_difference_first_advantage": None,
+            "dataset_macro_median_paired_final_holdout_performance_difference_first_advantage": None,
+            "paired_final_holdout_performance_ci": None,
+            "trial_weighted_mean_paired_final_holdout_performance_difference_first_advantage": None,
+            "trial_weighted_median_paired_final_holdout_performance_difference_first_advantage": None,
+        })
+    return result
 
 
 def _initial_holdout_metric(row: dict[str, Any]) -> float | None:
@@ -716,7 +815,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Paper-Primary Results by Model Condition",
         "",
-        "| Model condition | Ablation | Datasets | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (dataset macro) | Holdout CI |",
+        "| Model condition | Ablation | Datasets | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Within-arm intervention delta (dataset macro) | CI |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     by_condition = payload.get("analysis_summaries_by_model_condition", {})
@@ -729,8 +828,16 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
     for condition_id, items in payload.get("paired_comparisons_by_model_condition", {}).items():
         lines.append(f"### `{condition_id}`")
         for item in items:
+            if item.get("comparison_estimand") == "final_plan_holdout_performance":
+                effect = item.get("mean_paired_final_holdout_performance_difference_first_advantage")
+                interval = item.get("paired_final_holdout_performance_ci")
+                label = "final-plan holdout performance advantage"
+            else:
+                effect = item.get("mean_paired_holdout_delta_difference_first_advantage")
+                interval = item.get("paired_holdout_delta_ci")
+                label = "within-arm intervention-effect advantage"
             lines.append(
-                f"- `{item['first']}` vs `{item['second']}`: dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`)."
+                f"- `{item['first']}` vs `{item['second']}` (`{item.get('comparison_estimand')}`): dataset-macro first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean {label} `{effect}` (CI `{interval}`)."
             )
     lines.extend([
         "",
@@ -791,8 +898,16 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         )
     lines.extend(["", "### Combined Cross-Model Descriptive Paired Comparisons", ""])
     for item in payload.get("descriptive_combined_paired_comparisons", {}).get("comparisons", []):
+        if item.get("comparison_estimand") == "final_plan_holdout_performance":
+            effect = item.get("mean_paired_final_holdout_performance_difference_first_advantage")
+            interval = item.get("paired_final_holdout_performance_ci")
+            label = "final-plan holdout performance advantage"
+        else:
+            effect = item.get("mean_paired_holdout_delta_difference_first_advantage")
+            interval = item.get("paired_holdout_delta_ci")
+            label = "within-arm intervention-effect advantage"
         lines.append(
-            f"- `{item['first']}` vs `{item['second']}` (descriptive-only): first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean first holdout advantage `{item['mean_paired_holdout_delta_difference_first_advantage']}` (CI `{item['paired_holdout_delta_ci']}`)."
+            f"- `{item['first']}` vs `{item['second']}` (descriptive-only; `{item.get('comparison_estimand')}`): first better `{item['first_better']}`, second better `{item['second_better']}`, tied `{item['tied']}`, mean {label} `{effect}` (CI `{interval}`)."
         )
     lines.extend(["", "## Live-Trial Integrity", ""])
     for name, row in payload["central_by_ablation"].items():
@@ -804,7 +919,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "",
         "Initial proposals are keyed by case, perturbation, split seed, LLM repetition, provider, model condition, model, prompt schema, training-profile digest, target, task, evidence mode, and diagnostics digest. Ordinary paired ablations reuse the same proposal; the diagnostics-enabled planner has a distinct cache namespace.",
         "",
-        "Split-seed variation is represented by `split_seed`; stochastic LLM variation is represented independently by `trial`/LLM repetition. Repetitions are aligned by declared repetition slot for balanced analysis, not shared-seed stochastic matches across separate planner calls. Every paired comparison uses the same unit key.",
+        "The effective split random state is exactly `split_seed`; `case_random_seed` is recorded as benchmark provenance and is not added to the split seed. Stochastic LLM variation is represented independently by `trial`/LLM repetition. Repetitions are aligned by declared repetition slot for balanced analysis, not shared-seed stochastic matches across separate planner calls. Every paired comparison uses the same unit key.",
     ])
     return "\n".join(lines) + "\n"
 
@@ -1010,6 +1125,8 @@ def run_ablation_study(
         "ablation_schema_version": ABLATION_SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seeds": list(split_seeds),
+        "split_random_state_rule": "split_random_state = split_seed; case_random_seed is provenance only",
+        "case_seed_semantics": "BenchmarkCase.random_seed is retained as case provenance and is not added to the experiment split seed.",
         "llm_repetitions": (
             int((manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", repetitions))
             if frozen_conditions is not None else repetitions
@@ -1235,18 +1352,17 @@ def run_ablation_study(
     central = [_health_row(name, results[name], all_specs[name]) for name in selected_names]
     summaries = {name: results[name]["summary"] for name in selected_names}
     rows_by_name = {name: trial_rows[name] for name in selected_names}
-    pairs = [
-        ("full", "llm_only"),
-        ("hard_validation_only", "llm_only"),
-        ("deterministic_only", "hard_validation_only"),
-        ("always_reconcile", "full"),
-        ("probe_direct", "full"),
-    ]
+    pairs = PRIMARY_PAIRED_COMPARISON_PAIRS
     paired = [
         _paired_comparison(
             rows_by_name,
             first,
             second,
+            comparison_estimand=(
+                "final_plan_holdout_performance"
+                if frozenset((first, second)) == FINAL_PLAN_PERFORMANCE_PAIR
+                else "intervention_effect"
+            ),
             tolerance={
                 "classification": holdout_neutral_tolerance(
                     "classification", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
@@ -1303,7 +1419,17 @@ def run_ablation_study(
             for name in selected_primary_names
         }
         paired_comparisons_by_condition[condition_id] = [
-            _paired_comparison(primary_rows_by_name, first, second, tolerance=pair_tolerance)
+            _paired_comparison(
+                primary_rows_by_name,
+                first,
+                second,
+                comparison_estimand=(
+                    "final_plan_holdout_performance"
+                    if frozenset((first, second)) == FINAL_PLAN_PERFORMANCE_PAIR
+                    else "intervention_effect"
+                ),
+                tolerance=pair_tolerance,
+            )
             for first, second in pairs
             if first in primary_rows_by_name and second in primary_rows_by_name
         ]

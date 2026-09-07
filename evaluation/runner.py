@@ -350,6 +350,35 @@ def _validate_initial_plan(
     return result
 
 
+def _compute_deterministic_recommendation(
+    training_frame: pd.DataFrame,
+    case: BenchmarkCase,
+    config: EvaluationConfig,
+    warnings: list[str],
+) -> tuple[DeterministicRecommendation | None, str | None]:
+    """Compute the independent safeguard recommendation with audit metadata."""
+
+    try:
+        policy = DeterministicPolicy(
+            enable_regression_interaction_diagnostics=config.enable_regression_interaction_diagnostics,
+            enable_classification_boundary_diagnostics=config.enable_classification_boundary_diagnostics,
+        )
+        return (
+            deterministic_recommendation(
+                training_frame,
+                case.question,
+                case.target_column,
+                task_type=case.expected_task_type,
+                policy=policy,
+            ),
+            None,
+        )
+    except Exception as exc:
+        error = _redact_error(exc)
+        warnings.append(f"Deterministic recommendation failed closed: {error}")
+        return None, error
+
+
 def _choose_source(
     *,
     config: EvaluationConfig,
@@ -548,7 +577,11 @@ def _run_trial(
     # split seed is therefore a property of the case/experiment, not of the
     # repetition number.
     experimental_split_seed = config.seed if requested_split_seed is None else requested_split_seed
-    split_seed = experimental_split_seed + case.random_seed
+    # The experiment-level split seed is the actual sklearn random state.  A
+    # case seed remains part of benchmark provenance, but is not silently
+    # added to the frozen data split (which previously turned 42 into 84 for
+    # cases whose local random_seed was also 42).
+    split_seed = experimental_split_seed
     perturbation_seed = split_seed + 1009
     base_frame = case.load()
     split = freeze_supervised_split(
@@ -599,21 +632,14 @@ def _run_trial(
     warnings: list[str] = []
     deterministic: DeterministicRecommendation | None = None
     deterministic_failure: str | None = None
-    try:
-        policy = DeterministicPolicy(
-            enable_regression_interaction_diagnostics=config.enable_regression_interaction_diagnostics,
-            enable_classification_boundary_diagnostics=config.enable_classification_boundary_diagnostics,
+    deterministic_computed_before_planner = (
+        config.gate_mode == "deterministic_only"
+        or config.planner_evidence_mode == "training_only_structural_diagnostics"
+    )
+    if deterministic_computed_before_planner:
+        deterministic, deterministic_failure = _compute_deterministic_recommendation(
+            training_frame, case, config, warnings
         )
-        deterministic = deterministic_recommendation(
-            training_frame,
-            case.question,
-            case.target_column,
-            task_type=case.expected_task_type,
-            policy=policy,
-        )
-    except Exception as exc:
-        deterministic_failure = _redact_error(exc)
-        warnings.append(f"Deterministic recommendation failed closed: {_redact_error(exc)}")
 
     planner_diagnostics = (
         _canonical_diagnostics(deterministic.diagnostics)
@@ -726,7 +752,29 @@ def _run_trial(
     can_use_cached = cached_plan is not None and not (
         config.require_live and (cached_proposal or {}).get("source") != "openai"
     )
-    if initial_plan_override is None and can_use_cached:
+    if config.gate_mode == "deterministic_only":
+        if deterministic is not None:
+            plan = ModelingPlan(
+                recommended_method=deterministic.recommended_method,
+                preprocessing=deterministic.preprocessing,
+                reasoning=deterministic.reasoning,
+                confidence={"low": 0.35, "medium": 0.65, "high": 0.90}[deterministic.confidence],
+            )
+        else:
+            # Preserve the existing fail-closed fallback behavior if the
+            # independent recommender itself is unavailable. This remains a
+            # non-LLM plan and is recorded as such below.
+            plan = _fallback_modeling_plan(
+                training_profile,
+                case.question,
+                case.target_column,
+                case.expected_task_type,
+            )
+        agent_source = "deterministic_only"
+        agent_model = None
+        agent_request_status = "not_requested"
+        agent_request_error = deterministic_failure
+    elif initial_plan_override is None and can_use_cached:
         plan = cached_plan
         proposal_cache_hit = True
         agent_source = str((cached_proposal or {}).get("source") or "cached")
@@ -741,17 +789,6 @@ def _run_trial(
                     "Strict-live cached proposal has no matching effective planner model: "
                     f"expected {config.planner_model!r}, got {effective_model!r}."
                 )
-    elif config.gate_mode == "deterministic_only":
-        plan = _fallback_modeling_plan(
-            training_profile,
-            case.question,
-            case.target_column,
-            case.expected_task_type,
-        )
-        agent_source = "deterministic_only"
-        agent_model = None
-        agent_request_status = "not_requested"
-        agent_request_error = None
     elif initial_plan_override is None:
         plan, agent_source, agent_model, agent_request_status, agent_request_error = _choose_source(
             config=config,
@@ -784,6 +821,14 @@ def _run_trial(
                     "Strict-live reused proposal has no matching effective planner model: "
                     f"expected {config.planner_model!r}, got {effective_model!r}."
                 )
+    if not deterministic_computed_before_planner:
+        # Primary conditions deliberately fix the LLM proposal first. The
+        # safeguard recommendation is then computed from the same training
+        # partition, without exposing it to the planner.
+        deterministic, deterministic_failure = _compute_deterministic_recommendation(
+            training_frame, case, config, warnings
+        )
+
     initial_validation = _validate_initial_plan(
         training_frame,
         split,
@@ -798,23 +843,6 @@ def _run_trial(
         target_column=case.target_column,
         task_type=case.expected_task_type,
     )
-    if config.gate_mode == "deterministic_only" and deterministic is not None:
-        plan = ModelingPlan(
-            recommended_method=deterministic.recommended_method,
-            preprocessing=deterministic.preprocessing,
-            reasoning=deterministic.reasoning,
-            confidence={"low": 0.35, "medium": 0.65, "high": 0.90}[deterministic.confidence],
-        )
-        initial_validation = _validate_initial_plan(
-            training_frame,
-            split,
-            plan,
-            expected_target=case.target_column,
-            expected_task=case.expected_task_type,
-            test_size=config.test_size,
-            random_state=split_seed,
-        )
-
     if (
         proposal_cache is not None
         and not proposal_cache_hit
@@ -1211,7 +1239,9 @@ def _run_trial(
     # final plan; reconciliation may preserve the initial proposal.
     soft_intervention_occurred = intervention_occurred
     final_selection_source = (gate_result or {}).get("final", {}).get("selected_source")
-    if final_selection_source == "agent":
+    if config.gate_mode == "deterministic_only":
+        final_selection_source = "deterministic" if deterministic is not None else "deterministic_fallback"
+    elif final_selection_source == "agent":
         final_selection_source = "initial_llm"
     elif final_selection_source == "deterministic":
         final_selection_source = "deterministic"
@@ -1295,6 +1325,8 @@ def _run_trial(
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": experimental_split_seed,
         "split_random_state": split_seed,
+        "case_random_seed": case.random_seed,
+        "split_random_state_rule": "split_random_state = split_seed; case_random_seed is provenance only",
         "test_size": config.test_size,
         "split_contract": split.as_dict(),
         "agent_source": agent_source,
@@ -1382,7 +1414,7 @@ def _run_trial(
         "hard_validation_status": (
             (gate_result or {}).get("hard_validation", {}).get("status")
             if gate_result
-            else ("failed" if initial_validation.status == "failed" else "unavailable")
+            else initial_validation.status
         ),
         "soft_challenge_status": (
             (gate_result or {}).get("soft_challenge", {}).get("status")
@@ -1431,7 +1463,7 @@ def _run_trial(
         "selected_proposal_source": (gate_result or {}).get("selected_proposal_source"),
         "reconciliation": gate_result.get("reconciliation") if gate_result else None,
         "hard_validation": gate_result.get("hard_validation") if gate_result else {
-            "status": "failed" if initial_validation.status == "failed" else "unavailable",
+            "status": initial_validation.status,
             "intervention_required": initial_validation.status == "failed",
             "initial_hard_invalid": initial_validation.status == "failed",
             "checks": initial_validation.as_dict().get("checks", []),
@@ -1464,7 +1496,13 @@ def _run_trial(
         "decision_path": (gate_result or {}).get("decision_path"),
         "final_decision": gate_result.get("final") if gate_result else {
             **final_fields,
-            "selected_source": None,
+            "selected_source": (
+                "deterministic"
+                if config.gate_mode == "deterministic_only" and deterministic is not None
+                else "deterministic_fallback"
+                if config.gate_mode == "deterministic_only"
+                else None
+            ),
         },
         "final_target": final_fields["target"],
         "final_task": final_fields["task"],
@@ -1720,7 +1758,7 @@ def _failed_trial_record(
     """Persist an execution failure without inventing a modeling decision."""
 
     experimental_split_seed = config.seed if requested_split_seed is None else requested_split_seed
-    split_seed = experimental_split_seed + case.random_seed
+    split_seed = experimental_split_seed
     perturbation_id = perturbation.id if perturbation is not None else "clean"
     split = freeze_supervised_split(
         case.load(),
@@ -1762,6 +1800,8 @@ def _failed_trial_record(
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": experimental_split_seed,
         "split_random_state": split_seed,
+        "case_random_seed": case.random_seed,
+        "split_random_state_rule": "split_random_state = split_seed; case_random_seed is provenance only",
         "split_contract": split.as_dict(),
         "agent_source": "failed",
         "provider": config.provider,
@@ -2259,6 +2299,7 @@ def run_evaluation(
         "repetitions": config.repetitions,
         "seed": config.seed,
         "split_seeds": list(config.split_seeds),
+        "split_random_state_rule": "split_random_state = split_seed; case_random_seed is provenance only",
         "llm_repetitions": config.repetitions,
         "llm_repetition_id": config.llm_repetition_id,
         "llm_repetition_ids": list(config.llm_repetition_ids or []),

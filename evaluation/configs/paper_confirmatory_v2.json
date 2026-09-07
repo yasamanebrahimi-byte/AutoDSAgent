@@ -6,7 +6,7 @@
   "cross_model_condition_aggregation": "descriptive_only",
   "experiment_name": "selective-intervention-reliability",
   "experiment_config_version": "paper-confirmatory-v2",
-  "expected_experiment_code_sha256": "854919863f7a40c3dcbec753dd2011e889632d45aefa852e6bc3b1369e475480",
+  "expected_experiment_code_sha256": "bf4235fac3080d027103a845f9492548a688266884f42c41a01aa2b937275b48",
   "source_git_commit": "c3dffb0c3a8c0229fffe8d52bcdd657823681923",
   "code_hash_convention": "The experiment code SHA-256 covers app/, evaluation/ (except this manifest), and pyproject.toml. It is the confirmatory validity identity; source_git_commit is provenance only.",
   "freeze_rule": "Finalize result-affecting code/configuration, compute the canonical experiment code SHA-256, insert it here, set status to frozen, commit the freeze, then validate before inspecting external live outcomes.",
@@ -166,6 +166,7 @@
     "split_seeds": [
       42
     ],
+    "split_random_state_rule": "effective sklearn split random_state equals the experiment split_seed; BenchmarkCase.random_seed is provenance only and is not added",
     "llm_repetitions": 3,
     "llm_repetition_ids": [
       "rep_001",

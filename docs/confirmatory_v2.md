@@ -17,6 +17,37 @@ authoritative and fail-closed.
 
 Reporting uses three distinct terms:
 
+The primary causal ordering is physically enforced as:
+
+`contract-aware LLM proposal -> deterministic safeguard -> selective intervention -> final evaluation`.
+
+The execution contract gives the planner implementation constraints and
+dataset-specific legal model/preprocessing combinations, but it does not give
+the deterministic safeguard's preferred family, scores, ranking, probe
+outcomes, or any holdout information. The secondary
+`llm_with_diagnostics` condition may compute training-only structural
+diagnostics before its planner call because those diagnostics are the defined
+information-asymmetry treatment.
+
+`deterministic_only` has no LLM proposal: its initial and final plan fields,
+hard-validation fields, and final-selection provenance all refer to the
+deterministic plan that is evaluated; its final selection source is
+`deterministic`. The historical `agent_initial_*` result fields retain their
+names for schema compatibility but carry the evaluated deterministic plan in
+this arm.
+
+Pairwise reporting distinguishes the estimand. Comparisons of arms sharing an
+initial LLM proposal use the within-arm intervention effect
+(`final - initial`, direction-normalized). `deterministic_only` versus
+`hard_validation_only` instead uses the paired final-plan holdout performance
+comparison, because those arms do not share an initial plan. Classification
+uses final macro-F1 directly; regression uses direction-normalized relative
+RMSE improvement, with positive values always favoring the first arm.
+
+The confirmatory split seed is exact: the effective sklearn split
+`random_state` equals the manifest's `split_seed` (42). A benchmark case's
+`random_seed` remains recorded as provenance and is not added as an offset.
+
 - hard interception: an invalid initial LLM plan is detected and prevented from
   training;
 - hard repair: an invalid initial plan is replaced by a valid deterministic
