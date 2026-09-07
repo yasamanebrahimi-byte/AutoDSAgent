@@ -12,6 +12,7 @@ from app.validation import (
 )
 from evaluation.ablation import _paired_comparison
 from evaluation.benchmarks import BenchmarkCase
+from evaluation.confirmatory import validate_confirmatory_completeness
 from evaluation.empirical_reference import evaluate_plan_cv
 
 
@@ -80,6 +81,55 @@ def test_deterministic_only_row_uses_one_coherent_deterministic_plan(tmp_path):
     assert row["agent_initial_validation"]["status"] == row["final_validation"]["status"] == "passed"
     assert row["hard_validation_status"] == "passed"
     assert row["paper_holdout_delta"] == 0.0
+
+
+def test_strict_live_deterministic_failure_is_not_a_completed_unit(monkeypatch):
+    def fail_deterministic_recommendation(*args, **kwargs):
+        raise RuntimeError("forced deterministic recommender failure")
+
+    monkeypatch.setattr(
+        runner,
+        "deterministic_recommendation",
+        fail_deterministic_recommendation,
+    )
+    config = runner.EvaluationConfig(
+        require_live=True,
+        gate_mode="selective",
+        planner_model="gpt-5.6-luna",
+        reconciler_model="gpt-5.6-luna",
+        provider="openai",
+        repository_commit="test-commit",
+    )
+
+    def planner(context):
+        return runner._fallback_modeling_plan(
+            context["training_profile"],
+            context["question"],
+            context["target_column"],
+            context["task_type"],
+        )
+
+    row = runner._run_trial(
+        _classification_case(),
+        None,
+        0,
+        config,
+        plan_factory=planner,
+        reconciliation_factory=None,
+        agents=runner.OpenAIAgents(api_key="test", model="gpt-5.6-luna"),
+        reconciler_agents=runner.OpenAIAgents(api_key="test", model="gpt-5.6-luna"),
+        empirical_reference_cache={},
+    )
+
+    assert row["agent_request_status"] == "mock"
+    assert row["agent_request_error"] is None
+    assert row["deterministic_failure"] == (
+        "RuntimeError: forced deterministic recommender failure"
+    )
+    assert row["failure_reason"] == row["deterministic_failure"]
+    assert row["trial_status"] == "failed"
+    with pytest.raises(ValueError, match="Confirmatory matrix incomplete"):
+        validate_confirmatory_completeness([row], [row])
 
 
 def test_primary_planner_is_called_before_deterministic_recommendation(tmp_path, monkeypatch):

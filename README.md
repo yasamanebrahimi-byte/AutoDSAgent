@@ -161,10 +161,12 @@ outcomes are not part of the normal publication-readiness workflow.
 `paper_confirmatory_v1.json` is retained as the historical pilot /
 pre-contract-fix protocol. Its artifacts remain interpretable with their
 recorded source provenance and are excluded from v2 confirmatory claims.
-`paper_confirmatory_v2.json` is the definitive contract-aware protocol. It is
-draft while result-affecting implementation is under review, then is frozen
-only after the canonical experiment-code SHA is computed and recorded. The v2
-planner receives the complete executable modeling/preprocessing contract and
+`paper_confirmatory_v2.json` is the active definitive contract-aware protocol;
+the checked-in manifest is frozen with its current canonical experiment-code
+SHA and source implementation commit recorded. Historical or development
+manifests may remain draft/unfrozen, but that generic workflow state does not
+mean that the active v2 confirmatory manifest is unfrozen. The v2 planner
+receives the complete executable modeling/preprocessing contract and
 training-only feasibility, but not deterministic recommendations, scores,
 holdout results, or empirical-probe evidence. Hard validation remains an
 independent fail-closed check.

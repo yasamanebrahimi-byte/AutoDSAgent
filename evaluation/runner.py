@@ -1321,7 +1321,11 @@ def _run_trial(
         "reconcile_on_any_disagreement": config.gate_mode == "always_reconcile",
         "direct_probe_selection_enabled": config.gate_mode == "probe_direct",
         "abstention_enabled": config.gate_mode in {"selective", "probe_first", "probe_direct", "full"},
-        "trial_status": "failed" if config.require_live and gate_error else "completed",
+        "trial_status": (
+            "failed"
+            if config.require_live and (gate_error or deterministic_failure)
+            else "completed"
+        ),
         "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "split_seed": experimental_split_seed,
         "split_random_state": split_seed,
