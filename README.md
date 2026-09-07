@@ -156,16 +156,34 @@ The optional frozen AMLB/OpenML external evaluation suite is documented in [exte
 Development and confirmatory evaluation are separate. Live API smoke tests
 must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
-outcomes are not part of the normal publication-readiness workflow. The checked-
-in configuration snapshot is intentionally draft/unfrozen (`status: "draft"`)
-after the current result-affecting changes. It must pass independent review
-before the explicit freeze step. Set it to `"frozen"` only after reviewing the
-manifest, models, seeds, repetitions, and other experiment settings. Then pass it explicitly with
-`--confirmatory-config` to enable runtime validation and manifest hashing:
-[`evaluation/configs/paper_confirmatory_v1.json`](evaluation/configs/paper_confirmatory_v1.json)
-before launching a strict-live external run. Strict confirmatory execution
-refuses a draft manifest; the final freeze is intentionally not part of this
-pre-freeze engineering state.
+outcomes are not part of the normal publication-readiness workflow.
+
+`paper_confirmatory_v1.json` is retained as the historical pilot /
+pre-contract-fix protocol. Its artifacts remain interpretable with their
+recorded source provenance and are excluded from v2 confirmatory claims.
+`paper_confirmatory_v2.json` is the definitive contract-aware protocol. It is
+draft while result-affecting implementation is under review, then is frozen
+only after the canonical experiment-code SHA is computed and recorded. The v2
+planner receives the complete executable modeling/preprocessing contract and
+training-only feasibility, but not deterministic recommendations, scores,
+holdout results, or empirical-probe evidence. Hard validation remains an
+independent fail-closed check.
+
+For the Linux VM, use the checked-in runner after the v2 freeze:
+
+```bash
+export OPENAI_API_KEY="your-key"
+scripts/run_paper_confirmatory_v2.sh
+```
+
+The runner requires a clean tree, a frozen v2 manifest and matching experiment
+code SHA, uses Python 3.12, prefetches and verifies the 40-task benchmark, and
+fails closed on fallback rows or an incomplete 2520-unit matrix. Strict resume
+uses the exact frozen manifest SHA, code SHA, prompt schema, contract digest,
+benchmark identity, and persisted run configuration; mismatches are rejected
+before artifacts are modified. The root run configuration records
+Python/platform, package versions, Git commit, experiment-code SHA, manifest
+SHA, and benchmark-manifest SHA.
 
 Confirmatory paper-primary estimates are reported separately for each declared
 model condition (currently Luna, Sol, and Terra). Repetitions remain nested
@@ -194,9 +212,14 @@ confirmatory validity.
 
 The freeze sequence is: finalize result-affecting code/configuration -> compute
 the experiment code SHA-256 -> insert it as
-`expected_experiment_code_sha256` -> set the manifest to `frozen` -> commit the
-freeze -> validate. Committing the frozen manifest does not change the code
-hash; changing any included result-affecting file does.
+`expected_experiment_code_sha256` -> set the v2 manifest to `frozen` -> commit
+the freeze -> validate. Committing the frozen manifest does not change the code
+hash; changing any included result-affecting file does. Reporting distinguishes
+hard interception (invalid initial plan prevented from training), hard repair
+(valid deterministic replacement), and soft intervention (a valid plan changed
+after a valid family disagreement). The scope remains selective intervention
+for LLM-based supervised tabular ML planning within this fixed supported
+model/preprocessing search space, not a universal AutoML oracle.
 
 ## License
 

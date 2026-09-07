@@ -1,0 +1,346 @@
+{
+  "manifest_schema_version": "confirmatory-manifest-v1",
+  "status": "draft",
+  "strict_live_required": true,
+  "primary_model_condition_reporting": "separate",
+  "cross_model_condition_aggregation": "descriptive_only",
+  "experiment_name": "selective-intervention-reliability",
+  "experiment_config_version": "paper-confirmatory-v2",
+  "expected_experiment_code_sha256": null,
+  "source_git_commit": null,
+  "code_hash_convention": "The experiment code SHA-256 covers app/, evaluation/ (except this manifest), and pyproject.toml. It is the confirmatory validity identity; source_git_commit is provenance only.",
+  "freeze_rule": "Finalize result-affecting code/configuration, compute the canonical experiment code SHA-256, insert it here, set status to frozen, commit the freeze, then validate before inspecting external live outcomes.",
+  "research_scope": "LLM-based model-family and preprocessing planning for supervised tabular classification/regression under selective deterministic validation",
+  "result_schema_version": "holdout-metrics-v2",
+  "gate_objective_version": "intervention-quality-v1",
+  "deterministic_policy": {
+    "version": "4",
+    "configuration_sha256": "9a450828f27dcce86b005f0c21d0271ca08a0b19e6dd8a802e047ec39effcc90",
+    "enable_regression_interaction_diagnostics": true,
+    "enable_classification_boundary_diagnostics": true,
+    "high_correlation_threshold": 0.8,
+    "severe_correlation_threshold": 0.9,
+    "low_sample_feature_ratio": 3,
+    "moderate_sample_feature_ratio": 8,
+    "healthy_sample_feature_ratio": 20,
+    "high_effective_features": 100,
+    "very_high_effective_features": 300,
+    "low_effective_features": 20,
+    "moderate_missing_fraction": 0.1,
+    "high_missing_fraction": 0.25,
+    "widespread_missing_feature_fraction": 0.4,
+    "nonlinear_moderate_threshold": 0.15,
+    "nonlinear_high_threshold": 0.35,
+    "classification_boundary_moderate_threshold": 0.1,
+    "classification_boundary_high_threshold": 0.2,
+    "interaction_moderate_threshold": 0.18,
+    "interaction_high_threshold": 0.38,
+    "interaction_strong_pair_threshold": 0.3,
+    "interaction_report_threshold": 0.1,
+    "regression_weak_association_threshold": 0.2,
+    "classification_weak_association_threshold": 0.2,
+    "structural_complexity_moderate_threshold": 0.3,
+    "structural_complexity_high_threshold": 0.6,
+    "structural_complexity_weights": {
+      "mixed": 0.15,
+      "categorical": 0.15,
+      "nonlinear_fraction": 0.2,
+      "nonlinearity_strength": 0.25,
+      "heterogeneity": 0.15,
+      "weak_marginal": 0.1,
+      "boundary": 0.35,
+      "interaction": 0.2
+    },
+    "compatibility_points_source": "app.deterministic_policy.DEFAULT_COMPATIBILITY_POINTS at the recorded git commit"
+  },
+  "empirical_probe_policy": {
+    "policy_version": "v1",
+    "configuration_sha256": "47abad31a9d781a69d993bf6b9a062baf7c90528c7319b6c73d393ebaafc4e12",
+    "enabled": true,
+    "cv_folds": 3,
+    "minimum_rows": 12,
+    "max_rows": null,
+    "max_configs_per_family": 1,
+    "tie_relative_threshold": 0.02,
+    "moderate_relative_threshold": 0.1,
+    "strong_relative_threshold": 0.2,
+    "variability_tie_multiplier": 0.5,
+    "variability_weak_multiplier": 0.5,
+    "minimum_consistent_win_rate": 0.6666666666666666
+  },
+  "prompts": {
+    "planner_schema_version": "2026-09-06.contract-aware-modeling.v2",
+    "reconciliation_prompt_version": "2026-09-04.blinded-canonical-proposals.v1-empirical-probe",
+    "reconciliation_mode": "blinded_evidence_comparison",
+    "execution_contract_schema_version": "execution-contract-v1"
+  },
+  "generation_settings": {
+    "temperature": null,
+    "top_p": null,
+    "seed": null,
+    "reasoning_effort": "medium"
+  },
+  "model_conditions": [
+    {
+      "condition_id": "gpt56_luna",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-luna",
+      "reconciler_model": "gpt-5.6-luna",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": [
+        "rep_001",
+        "rep_002",
+        "rep_003"
+      ],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "condition_id": "gpt56_sol",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-sol",
+      "reconciler_model": "gpt-5.6-sol",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": [
+        "rep_001",
+        "rep_002",
+        "rep_003"
+      ],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    },
+    {
+      "condition_id": "gpt56_terra",
+      "provider": "openai",
+      "planner_model": "gpt-5.6-terra",
+      "reconciler_model": "gpt-5.6-terra",
+      "llm_repetitions": 3,
+      "llm_repetition_ids": [
+        "rep_001",
+        "rep_002",
+        "rep_003"
+      ],
+      "generation_settings": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "reasoning_effort": "medium"
+      }
+    }
+  ],
+  "modeling": {
+    "requested_model": "gpt-5.6-luna",
+    "planner_model": "gpt-5.6-luna",
+    "reconciler_model": "gpt-5.6-luna",
+    "single_model_fields_semantics": "Deprecated aliases for the first model condition; confirmatory execution ignores them and uses model_conditions exclusively.",
+    "candidate_model_families": [
+      "linear",
+      "regularized_linear",
+      "tree_ensemble",
+      "boosted_tree"
+    ],
+    "preprocessing_option_space": [
+      "one_hot/categorical_unknown_handling=ignore",
+      "ordinal/categorical_unknown_handling=use_encoded_value",
+      "none/categorical_unknown_handling=ignore"
+    ]
+  },
+  "holdout": {
+    "fraction": 0.2,
+    "classification_neutral_tolerance": 0.02,
+    "regression_neutral_tolerance": 0.02,
+    "classification_tolerance_units": "absolute macro-F1 points",
+    "regression_tolerance_units": "relative RMSE improvement",
+    "rmse_epsilon": 1e-12,
+    "primary_delta": "classification=final_macro_f1-initial_macro_f1; regression=(initial_rmse-final_rmse)/max(abs(initial_rmse),rmse_epsilon)"
+  },
+  "splits_and_repetitions": {
+    "split_seeds": [
+      42
+    ],
+    "llm_repetitions": 3,
+    "llm_repetition_ids": [
+      "rep_001",
+      "rep_002",
+      "rep_003"
+    ]
+  },
+  "statistics": {
+    "independent_unit": "dataset/task",
+    "primary_estimate": "dataset-macro",
+    "secondary_estimate": "trial-weighted",
+    "bootstrap_method": "dataset_cluster_bootstrap_percentile",
+    "bootstrap_replicates": 10000,
+    "confidence_level": 0.95,
+    "bootstrap_seed": 20260824
+  },
+  "external_benchmark": {
+    "manifest_version": "1.0.0",
+    "classification_suite": 271,
+    "regression_suite": 269,
+    "task_count": 40,
+    "classification_count": 22,
+    "regression_count": 18,
+    "manifest_sha256": "41fdd46568d26bc8f6c6d18ff08687736c573bf44d0a3e9f4c65ccbec288c04e",
+    "task_ids": [
+      359983,
+      359979,
+      168868,
+      146818,
+      359982,
+      359967,
+      359955,
+      359960,
+      359968,
+      359992,
+      168757,
+      359964,
+      359954,
+      359970,
+      359966,
+      359962,
+      190137,
+      359971,
+      168350,
+      359956,
+      168784,
+      359974,
+      359944,
+      359938,
+      359942,
+      233211,
+      359936,
+      359952,
+      359951,
+      359949,
+      233215,
+      360945,
+      167210,
+      359941,
+      359930,
+      359931,
+      359932,
+      359933,
+      359934,
+      359935
+    ],
+    "tranches": {
+      "core": [
+        359983,
+        359979,
+        146818,
+        359982,
+        359955,
+        359968,
+        359992,
+        168757,
+        359964,
+        359954,
+        359970,
+        359962,
+        190137,
+        359971,
+        168350,
+        359956,
+        168784,
+        359944,
+        359938,
+        359942,
+        359936,
+        359952,
+        359949,
+        360945,
+        167210,
+        359930,
+        359931,
+        359932,
+        359933,
+        359935
+      ],
+      "stress": [
+        168868,
+        359967,
+        359960,
+        359966,
+        359974,
+        233211,
+        359951,
+        233215,
+        359941,
+        359934
+      ]
+    },
+    "selection_record": "docs/external_benchmark_selection.md"
+  },
+  "ablations": {
+    "schema_version": "modeling-gate-ablation-v1",
+    "primary": [
+      "llm_only",
+      "hard_validation_only",
+      "deterministic_only",
+      "always_reconcile",
+      "probe_direct",
+      "full"
+    ],
+    "secondary": [
+      "llm_with_diagnostics"
+    ],
+    "definitions_source": "evaluation.ablation.ablation_presets"
+  },
+  "secondary_analyses": {
+    "diagnostics_vs_llm_only": {
+      "first_ablation": "llm_with_diagnostics",
+      "comparator": "llm_only",
+      "role": "secondary_information_asymmetry_control",
+      "estimand": "initial_planner_holdout_performance",
+      "validity_estimand": "paired_initial_plan_validity",
+      "aggregation": "dataset_macro",
+      "model_condition_reporting": "separate",
+      "cross_model_aggregation": "descriptive_only"
+    }
+  },
+  "prohibited_after_freeze": [
+    "policy tuning based on external performance",
+    "threshold tuning based on external performance",
+    "prompt tuning based on external performance",
+    "candidate-family changes based on external performance",
+    "reconciliation changes based on external performance",
+    "benchmark membership changes based on external performance"
+  ],
+  "confirmatory_protocol_role": "definitive contract-aware protocol; v1 is retained as historical pilot/pre-contract-fix provenance",
+  "planner_information_boundary": {
+    "exposed": [
+      "complete executable modeling/preprocessing contract",
+      "training-only dataset feasibility",
+      "frozen target/task context",
+      "training-only profile"
+    ],
+    "hidden": [
+      "deterministic recommended model family",
+      "deterministic compatibility scores and rankings",
+      "holdout results",
+      "empirical reference rankings",
+      "empirical probe outcomes"
+    ]
+  },
+  "provenance_requirements": {
+    "root_run_configuration": [
+      "python_version",
+      "platform",
+      "package_versions",
+      "git_commit",
+      "experiment_code_sha256",
+      "confirmatory_manifest_sha256",
+      "benchmark_manifest_sha256"
+    ]
+  },
+  "expected_complete_matrix_units": 2520
+}

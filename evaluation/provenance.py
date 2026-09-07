@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import platform
 import sys
 from pathlib import Path
@@ -60,4 +61,13 @@ def environment_provenance(
         payload["source_git_commit"] = repository_commit()
     if manifest is not None:
         payload["confirmatory_manifest_sha256"] = manifest_sha256(manifest)
+        loaded_manifest = (
+            manifest
+            if isinstance(manifest, Mapping)
+            else json.loads(Path(manifest).read_text(encoding="utf-8"))
+        )
+        if isinstance(loaded_manifest, Mapping) and loaded_manifest.get("external_benchmark"):
+            from evaluation.external_benchmarks import external_benchmark_manifest_sha256
+
+            payload["benchmark_manifest_sha256"] = external_benchmark_manifest_sha256()
     return payload

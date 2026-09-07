@@ -21,7 +21,7 @@ from evaluation.runner import _proposal_cache_key, run_evaluation
 from evaluation.benchmarks import BenchmarkCase
 
 
-MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_confirmatory_v1.json"
+MANIFEST_PATH = Path(__file__).parents[1] / "evaluation" / "configs" / "paper_confirmatory_v2.json"
 
 
 def _case() -> BenchmarkCase:

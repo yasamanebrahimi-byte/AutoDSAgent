@@ -12,7 +12,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from math import ceil, isfinite
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,33 @@ MIN_TEST_SIZE = 0.10
 MAX_TEST_SIZE = 0.50
 MAX_CATEGORICAL_CARDINALITY = 80
 MAX_CV_FOLDS = 5
+
+
+EXECUTION_CONTRACT_SCHEMA_VERSION = "execution-contract-v1"
+_MODEL_FAMILY_ORDER = (
+    "linear",
+    "regularized_linear",
+    "tree_ensemble",
+    "boosted_tree",
+)
+_MODEL_FAMILY_SEMANTICS = {
+    "linear": {
+        "implementation": "sklearn LogisticRegression(penalty=None) for classification; LinearRegression for regression",
+        "meaning": "Unregularized linear decision or response model.",
+    },
+    "regularized_linear": {
+        "implementation": "sklearn LogisticRegression(C=0.5, l1_ratio=0.0) for classification; Ridge(alpha=1.0) for regression",
+        "meaning": "Linear decision or response model with the repository's fixed regularization.",
+    },
+    "tree_ensemble": {
+        "implementation": "sklearn RandomForestClassifier/RandomForestRegressor(n_estimators=80)",
+        "meaning": "Bagged randomized decision-tree ensemble.",
+    },
+    "boosted_tree": {
+        "implementation": "sklearn HistGradientBoostingClassifier/HistGradientBoostingRegressor(max_iter=80)",
+        "meaning": "Histogram-based gradient-boosted decision-tree ensemble.",
+    },
+}
 
 
 @dataclass
@@ -939,6 +966,140 @@ def validate_training_plan(
         )
 
     return result
+
+
+def build_execution_contract(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    task_type: str,
+    *,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    """Describe the executable modeling contract for a training-only frame.
+
+    This is a view of the same deterministic validation machinery used at the
+    gate.  It intentionally contains structural feasibility and compatibility
+    rules, but no deterministic model-family scores, recommendation, holdout
+    values, probe evidence, or empirical reference.
+    """
+
+    family_contracts: dict[str, dict[str, Any]] = {}
+    shared_evidence: dict[str, Any] | None = None
+    for method in _MODEL_FAMILY_ORDER:
+        validation = validate_training_plan(
+            dataframe,
+            target_column,
+            task_type,
+            method,
+            test_size=test_size,
+            random_state=random_state,
+            training_only=True,
+        )
+        requirements = validation.preprocessing_requirements
+        if requirements is None:  # pragma: no cover - defensive failure path
+            raise InvariantViolation(
+                f"Unable to derive preprocessing requirements for {method!r}."
+            )
+        evidence = dict(requirements.evidence)
+        if shared_evidence is None:
+            shared_evidence = evidence
+        family_contracts[method] = {
+            **_MODEL_FAMILY_SEMANTICS[method],
+            "required_preprocessing": list(requirements.required_steps),
+            "optional_preprocessing": list(requirements.optional_steps),
+            "prohibited_preprocessing": list(requirements.prohibited_steps),
+            "irrelevant_preprocessing": list(requirements.irrelevant_steps),
+            "compatible_contract_for_observed_schema": requirements.expected_contract.model_dump(mode="json"),
+            "executable_for_dataset": validation.status == "passed",
+            "hard_validation_checks": [
+                check.as_dict()
+                for check in validation.checks
+                if check.severity == "error"
+            ],
+            "blocking_validation_codes": [
+                check.code for check in validation.blocking_failed_checks
+            ],
+        }
+
+    evidence = shared_evidence or {}
+    numeric_features = list(evidence.get("numeric_features", []))
+    categorical_features = list(evidence.get("categorical_features", []))
+    estimated_one_hot = int(evidence.get("estimated_one_hot_features", 0))
+    max_one_hot = int(evidence.get("max_one_hot_features", 0))
+    contract = {
+        "schema_version": EXECUTION_CONTRACT_SCHEMA_VERSION,
+        "scope": "frozen_training_partition_only",
+        "holdout_used": False,
+        "model_families": {
+            method: family_contracts[method] for method in _MODEL_FAMILY_ORDER
+        },
+        "hard_constraints": {
+            "supported_task_types": ["classification", "regression"],
+            "supported_model_families": list(_MODEL_FAMILY_ORDER),
+            "preprocessing_contract_fields": {
+                "numeric_imputation": ["none", "median"],
+                "categorical_imputation": ["none", "most_frequent"],
+                "numeric_scaling": ["none", "standard"],
+                "categorical_encoding": ["none", "one_hot", "ordinal"],
+                "categorical_unknown_handling": ["ignore", "use_encoded_value"],
+                "identifier_handling": ["exclude", "retain"],
+                "high_cardinality_handling": ["exclude", "retain"],
+                "unsupported_text_handling": ["exclude", "retain"],
+                "datetime_handling": ["exclude", "retain"],
+                "infinity_handling": ["replace_with_missing", "reject"],
+                "fit_inside_pipeline": [True],
+            },
+            "encoding_compatibility_pairs": [
+                {"categorical_encoding": "one_hot", "categorical_unknown_handling": "ignore"},
+                {"categorical_encoding": "ordinal", "categorical_unknown_handling": "use_encoded_value"},
+                {"categorical_encoding": "none", "categorical_unknown_handling": "ignore"},
+            ],
+            "conditional_rules": [
+                "linear and regularized_linear require standard numeric scaling when usable numeric features are present",
+                "usable categorical features require one_hot or ordinal encoding; none is not executable for them",
+                "categorical unknown values must use ignore or use_encoded_value",
+                "boosted_tree with usable categorical features requires ordinal encoding with use_encoded_value",
+                "observed numeric or categorical missing values require the corresponding supported imputation",
+                "observed numeric infinities require replace_with_missing",
+                "direct target copies, identifier-like, constant or all-null, high-cardinality categorical, unsupported text, and unsupported datetime features must be excluded",
+                "all learned imputation, scaling, and encoding must be fitted inside the training pipeline",
+                "one_hot is executable only when the estimated encoded width does not exceed max_one_hot_features",
+                "the target is immutable context and must not appear in the feature matrix",
+            ],
+        },
+        "dataset_feasibility": {
+            "training_rows": int(len(dataframe)),
+            "has_numeric_features": bool(numeric_features),
+            "has_categorical_features": bool(categorical_features),
+            "numeric_feature_count": len(numeric_features),
+            "categorical_feature_count": len(categorical_features),
+            "estimated_one_hot_features": estimated_one_hot,
+            "max_one_hot_features": max_one_hot,
+            "one_hot_feasible": estimated_one_hot <= max_one_hot,
+            "numeric_missing_values": int(evidence.get("numeric_missing_values", 0)),
+            "categorical_missing_values": int(evidence.get("categorical_missing_values", 0)),
+            "infinity_values": int(evidence.get("infinity_values", 0)),
+            "identifier_features": list(evidence.get("identifier_features", [])),
+            "high_cardinality_features": list(evidence.get("high_cardinality_features", [])),
+            "unsupported_text_features": list(evidence.get("unsupported_text_features", [])),
+            "datetime_features": list(evidence.get("datetime_features", [])),
+            "excluded_features": list(evidence.get("excluded_features", [])),
+            "model_family_executable": {
+                method: family_contracts[method]["executable_for_dataset"]
+                for method in _MODEL_FAMILY_ORDER
+            },
+        },
+    }
+    return contract
+
+
+def execution_contract_digest(contract: Mapping[str, Any]) -> str:
+    """Return the stable identity of the planner-visible execution contract."""
+
+    return hashlib.sha256(
+        json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
 
 
 def prepare_validated_frame(dataframe: pd.DataFrame, result: ValidationResult) -> pd.DataFrame:

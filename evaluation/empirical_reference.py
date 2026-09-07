@@ -7,6 +7,7 @@ decision.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Sequence
 
 import numpy as np
@@ -286,6 +287,7 @@ def evaluate_holdout_plan(
             ("model", _estimator(task_type, method, random_state)),
         ]
     )
+    fit_started = time.perf_counter()
     try:
         pipeline.fit(X_train, y_train)
         predictions = pipeline.predict(X_holdout)
@@ -295,6 +297,7 @@ def evaluate_holdout_plan(
             "holdout_metrics": {},
             "validation": validation.as_dict(),
             "error": f"{type(exc).__name__}: {exc}",
+            "fit_wall_clock_seconds": time.perf_counter() - fit_started,
         }
     return {
         "status": "evaluated",
@@ -302,5 +305,6 @@ def evaluate_holdout_plan(
         "train_rows": int(len(X_train)),
         "holdout_rows": int(len(X_holdout)),
         "holdout_used": "final_evaluation_only",
+        "fit_wall_clock_seconds": time.perf_counter() - fit_started,
         "validation": validation.as_dict(),
     }

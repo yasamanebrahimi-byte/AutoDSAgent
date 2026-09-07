@@ -6,6 +6,7 @@ import json
 import shutil
 import hashlib
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,12 @@ from pydantic import BaseModel
 from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
-from app.llm import LLMUnavailable, PROMPT_SCHEMA_VERSION, OpenAIAgents
+from app.llm import (
+    LEGACY_PROMPT_SCHEMA_VERSION,
+    LLMUnavailable,
+    PROMPT_SCHEMA_VERSION,
+    OpenAIAgents,
+)
 from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
 from app.pipeline import (
     _fallback_modeling_plan,
@@ -30,6 +36,8 @@ from app.schemas import ModelingPlan, ModelingResolution, DeterministicRecommend
 from app.validation import (
     FrozenSplit,
     InvariantViolation,
+    build_execution_contract,
+    execution_contract_digest,
     freeze_supervised_split,
     training_profile_frame,
     validate_training_plan,
@@ -123,6 +131,8 @@ class EvaluationConfig:
     llm_repetition_ids: tuple[str, ...] | None = None
     planner_evidence_mode: str = "training_profile_only"
     analysis_stratum: str = "secondary"
+    experiment_config_version: str = EXPERIMENT_CONFIG_VERSION
+    confirmatory_config_snapshot: str = CONFIRMATORY_CONFIG_SNAPSHOT
 
     def __post_init__(self) -> None:
         if self.planner_model is None:
@@ -348,6 +358,7 @@ def _choose_source(
     context: dict[str, Any],
     training_profile: dict[str, Any],
     planner_diagnostics: dict[str, Any] | None,
+    execution_contract: dict[str, Any] | None,
     case: BenchmarkCase,
     warnings: list[str],
     require_live: bool = False,
@@ -378,6 +389,8 @@ def _choose_source(
             case.target_column,
             case.expected_task_type,
             deterministic_structural_diagnostics=planner_diagnostics,
+            execution_contract=execution_contract,
+            prompt_schema_version=config.prompt_schema_version,
         )
         if require_live:
             agents.assert_effective_model(expected_model=config.planner_model)
@@ -433,6 +446,7 @@ def _proposal_cache_key(
     generation_settings: dict[str, Any] | None = None,
     evidence_mode: str = "training_profile_only",
     planner_diagnostics: dict[str, Any] | None = None,
+    execution_contract: dict[str, Any] | None = None,
     training_profile: dict[str, Any],
 ) -> str:
     """Identify only the evidence that is legal for the initial proposal."""
@@ -458,6 +472,8 @@ def _proposal_cache_key(
             json.dumps(_jsonable(planner_diagnostics), sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         if planner_diagnostics is not None else None,
+        "execution_contract_digest": execution_contract_digest(execution_contract)
+        if execution_contract is not None else None,
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -527,6 +543,7 @@ def _run_trial(
     requested_split_seed: int | None = None,
     proposal_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    trial_started = time.perf_counter()
     # Repetitions are stochastic LLM repeats over identical evidence.  The
     # split seed is therefore a property of the case/experiment, not of the
     # repetition number.
@@ -567,6 +584,18 @@ def _run_trial(
         split=split,
     )
     training_profile = profile_dataframe(training_frame)
+    execution_contract = build_execution_contract(
+        training_frame,
+        case.target_column,
+        case.expected_task_type,
+        test_size=config.test_size,
+        random_state=split_seed,
+    )
+    planner_execution_contract = (
+        execution_contract
+        if config.prompt_schema_version != LEGACY_PROMPT_SCHEMA_VERSION
+        else None
+    )
     warnings: list[str] = []
     deterministic: DeterministicRecommendation | None = None
     deterministic_failure: str | None = None
@@ -611,6 +640,11 @@ def _run_trial(
         "task_type": case.expected_task_type,
         "question": case.question,
         "training_profile": training_profile,
+        "execution_contract": planner_execution_contract,
+        "execution_contract_digest": (
+            execution_contract_digest(planner_execution_contract)
+            if planner_execution_contract is not None else None
+        ),
         "model_condition_id": config.model_condition_id,
         "provider": config.provider,
         "llm_repetition_id": repetition_id,
@@ -643,6 +677,11 @@ def _run_trial(
         "benchmark_target_constraint": case.target_column,
         "benchmark_task_constraint": case.expected_task_type,
         "training_profile": training_profile,
+        "execution_contract": planner_execution_contract,
+        "execution_contract_digest": (
+            execution_contract_digest(planner_execution_contract)
+            if planner_execution_contract is not None else None
+        ),
         "planner_evidence_mode": config.planner_evidence_mode,
         "planner_structural_diagnostics_exposed": planner_diagnostics is not None,
         "planner_structural_diagnostics": planner_diagnostics,
@@ -651,6 +690,11 @@ def _run_trial(
         "empirical_reference_included": False,
         "previous_repetitions_included": False,
         "planner_prompt_schema_version": config.prompt_schema_version,
+        "execution_contract_schema_version": (
+            "execution-contract-v1"
+            if config.prompt_schema_version != LEGACY_PROMPT_SCHEMA_VERSION
+            else None
+        ),
         "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "prompt_schema_version": config.prompt_schema_version,
         "prompt_schema_version_semantics": "deprecated alias for planner_prompt_schema_version; not an independent schema",
@@ -668,6 +712,7 @@ def _run_trial(
         generation_settings=config.generation_settings,
         evidence_mode=config.planner_evidence_mode,
         planner_diagnostics=planner_diagnostics,
+        execution_contract=planner_execution_contract,
         training_profile=training_profile,
     )
     proposal_cache_hit = False
@@ -714,6 +759,7 @@ def _run_trial(
             plan_factory=plan_factory,
             context=context,
             training_profile=training_profile,
+            execution_contract=planner_execution_contract,
             planner_diagnostics=planner_diagnostics,
             case=case,
             warnings=warnings,
@@ -795,6 +841,10 @@ def _run_trial(
             "generation_settings": _jsonable(config.generation_settings),
             "planner_evidence_mode": config.planner_evidence_mode,
             "planner_structural_diagnostics": planner_diagnostics,
+            "execution_contract_digest": (
+                execution_contract_digest(planner_execution_contract)
+                if planner_execution_contract is not None else None
+            ),
             "api_provenance": _jsonable(planner_api_provenance),
         }
 
@@ -953,7 +1003,8 @@ def _run_trial(
         expected_target=case.target_column,
         expected_task=case.expected_task_type,
     )
-    unsafe_plan_intercepted = initial_validation.status == "failed" and not proceeded_unchanged
+    initial_hard_invalid = initial_validation.status == "failed"
+    unsafe_plan_intercepted = initial_hard_invalid and not proceeded_unchanged
     # A soft intervention is a changed final plan resulting from an actual
     # challenge. Hard validation/repair remains a separate evaluation path.
     soft_decision = (gate_result or {}).get("soft_challenge_decision") or (
@@ -965,6 +1016,14 @@ def _run_trial(
         and not proceeded_unchanged
         and not unsafe_plan_intercepted
     )
+    deterministic_plan_final = bool(
+        final_valid
+        and deterministic is not None
+        and final_fields["method"] == deterministic.recommended_method
+        and final_fields["preprocessing"]
+        == deterministic.preprocessing.model_dump(mode="json")
+    )
+    hard_repair_occurred = initial_hard_invalid and deterministic_plan_final
     hard_artifact = (gate_result or {}).get("hard_validation") or {}
     challenger_hard_status = (
         (hard_artifact.get("deterministic_challenger") or {}).get("status")
@@ -1251,7 +1310,7 @@ def _run_trial(
         "planner_model_effective": planner_effective_model,
         "reconciler_model_effective": reconciler_effective_model,
         "repository_commit": config.repository_commit,
-        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_version": config.experiment_config_version,
         "require_live": config.require_live,
         "benchmark_suite_version": (
             case.benchmark_suite_version
@@ -1282,6 +1341,13 @@ def _run_trial(
         "planner_evidence_mode": config.planner_evidence_mode,
         "planner_structural_diagnostics_exposed": planner_diagnostics is not None,
         "planner_structural_diagnostics": planner_diagnostics,
+        "execution_contract_schema_version": (
+            planner_execution_contract or {}
+        ).get("schema_version"),
+        "execution_contract_digest": (
+            execution_contract_digest(planner_execution_contract)
+            if planner_execution_contract is not None else None
+        ),
         "planner_api_provenance": planner_api_provenance,
         "reconciler_api_provenance": reconciler_api_provenance,
         "planner_prompt_schema_version": config.prompt_schema_version,
@@ -1419,7 +1485,8 @@ def _run_trial(
         "proceeded_unchanged": proceeded_unchanged,
         "gate_changed_initial_plan": final_valid and not proceeded_unchanged,
         "intervention_occurred": intervention_occurred,
-        "hard_repair_occurred": unsafe_plan_intercepted,
+        "hard_repair_occurred": hard_repair_occurred,
+        "hard_interception_occurred": unsafe_plan_intercepted,
         "soft_intervention_occurred": soft_intervention_occurred,
         "final_selection_source": final_selection_source,
         "deterministic_validation_intervened": unsafe_plan_intercepted,
@@ -1427,7 +1494,7 @@ def _run_trial(
             (gate_result or {}).get("hard_validation", {}).get("intervention_required")
             or unsafe_plan_intercepted
         ),
-        "initial_hard_invalid": initial_validation.status == "failed",
+        "initial_hard_invalid": initial_hard_invalid,
         "final_hard_invalid": final_valid is False,
         "empirical_best_method": reference.get("best_method"),
         "empirical_reference_method": reference.get("best_method"),
@@ -1557,6 +1624,53 @@ def _run_trial(
         "warnings": warnings,
         "fallback_row": agent_source == "offline_fallback" or reconciliation_agent_source == "offline_fallback",
         "empirical_reference_cache_key": cache_key,
+        "planner_wall_clock_latency_seconds": (
+            planner_api_provenance.get("wall_clock_seconds")
+            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            else None
+        ),
+        "planner_input_tokens": (
+            planner_api_provenance.get("input_tokens")
+            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            else None
+        ),
+        "planner_output_tokens": (
+            planner_api_provenance.get("output_tokens")
+            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            else None
+        ),
+        "reconciler_wall_clock_latency_seconds": (
+            reconciler_api_provenance.get("wall_clock_seconds")
+            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            else None
+        ),
+        "reconciler_input_tokens": (
+            reconciler_api_provenance.get("input_tokens")
+            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            else None
+        ),
+        "reconciler_output_tokens": (
+            reconciler_api_provenance.get("output_tokens")
+            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            else None
+        ),
+        "planner_call_count": int(agent_source == "openai" and not proposal_cache_hit),
+        "reconciliation_call_count": int(
+            reconciliation_agent_source == "openai"
+        ),
+        "empirical_probe_wall_clock_seconds": (
+            (gate_result or {}).get("empirical_probe", {}).get("wall_clock_seconds")
+            if (gate_result or {}).get("empirical_probe") is not None
+            else None
+        ),
+        "empirical_probe_fit_count": int(
+            ((gate_result or {}).get("empirical_probe") or {}).get("fit_count", 0) or 0
+        ),
+        "final_model_training_wall_clock_seconds": (
+            (gated_holdout or {}).get("fit_wall_clock_seconds")
+            if final_valid else None
+        ),
+        "total_trial_wall_clock_seconds": time.perf_counter() - trial_started,
     }
     record.update(case.provenance())
     return _jsonable(record)
@@ -1658,7 +1772,7 @@ def _failed_trial_record(
         "planner_model_effective": config.planner_model,
         "reconciler_model_effective": config.reconciler_model,
         "repository_commit": config.repository_commit,
-        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_version": config.experiment_config_version,
         "require_live": config.require_live,
         "benchmark_suite_version": case.benchmark_suite_version or "local-2",
         "agent_request_status": "failed",
@@ -1727,6 +1841,19 @@ def _failed_trial_record(
         "fallback_row": False,
         "reconciliation_api_call_made": False,
         "reconciliation_request_failed": False,
+        "hard_interception_occurred": False,
+        "planner_wall_clock_latency_seconds": None,
+        "planner_input_tokens": None,
+        "planner_output_tokens": None,
+        "reconciler_wall_clock_latency_seconds": None,
+        "reconciler_input_tokens": None,
+        "reconciler_output_tokens": None,
+        "planner_call_count": 0,
+        "reconciliation_call_count": 0,
+        "empirical_probe_wall_clock_seconds": None,
+        "empirical_probe_fit_count": 0,
+        "final_model_training_wall_clock_seconds": None,
+        "total_trial_wall_clock_seconds": None,
         **case.provenance(),
     }
 
@@ -1853,6 +1980,25 @@ def run_evaluation(
         )
     else:
         planner_evidence_mode = "training_profile_only"
+    selected_manifest_for_runtime = (
+        load_confirmatory_manifest(confirmatory_config_path)
+        if confirmatory_config_path is not None else None
+    )
+    selected_prompt_schema_version = (
+        str((selected_manifest_for_runtime.get("prompts") or {}).get("planner_schema_version"))
+        if selected_manifest_for_runtime is not None
+        else PROMPT_SCHEMA_VERSION
+    )
+    selected_experiment_config_version = (
+        str(selected_manifest_for_runtime.get("experiment_config_version"))
+        if selected_manifest_for_runtime is not None
+        else EXPERIMENT_CONFIG_VERSION
+    )
+    selected_confirmatory_snapshot = (
+        Path(confirmatory_config_path).as_posix()
+        if confirmatory_config_path is not None
+        else CONFIRMATORY_CONFIG_SNAPSHOT
+    )
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
     if require_live and (modeling_plan_factory is not None or reconciliation_factory is not None):
@@ -1877,7 +2023,7 @@ def run_evaluation(
         gate_mode=gate_mode,
         order_swap=order_swap,
         empirical_probe_enabled=empirical_probe_enabled,
-        prompt_schema_version=PROMPT_SCHEMA_VERSION,
+        prompt_schema_version=selected_prompt_schema_version,
         split_seeds=selected_split_seeds,
         require_live=require_live,
         soft_challenge_strategy=soft_challenge_strategy,
@@ -1891,6 +2037,8 @@ def run_evaluation(
         llm_repetition_ids=tuple(str(value) for value in llm_repetition_ids) if llm_repetition_ids is not None else None,
         planner_evidence_mode=planner_evidence_mode,
         analysis_stratum=(spec_values or {}).get("analysis_role", "secondary"),
+        experiment_config_version=selected_experiment_config_version,
+        confirmatory_config_snapshot=selected_confirmatory_snapshot,
     )
     if cases is not None:
         selected_cases = list(cases)
@@ -2044,7 +2192,7 @@ def run_evaluation(
                 "confidence_level": DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
-            experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+            experiment_config_version=config.experiment_config_version,
             expected_experiment_code_sha256=experiment_code_sha256(),
             source_git_commit=repository_commit(),
             model_conditions=declared_conditions,
@@ -2067,8 +2215,8 @@ def run_evaluation(
     )
     stable_config = {
         "config_version": "2026-09-04.evaluation.v5-paper-metrics",
-        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
-        "confirmatory_config_snapshot": CONFIRMATORY_CONFIG_SNAPSHOT,
+        "experiment_config_version": config.experiment_config_version,
+        "confirmatory_config_snapshot": config.confirmatory_config_snapshot,
         "confirmatory_mode": confirmatory_metadata is not None,
         "legacy_offline_condition_projection": legacy_offline_condition_projection
         if confirmatory_config_path is not None else False,
@@ -2079,6 +2227,13 @@ def run_evaluation(
         "experiment_config_sha256": (
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None
+        ),
+        "confirmatory_manifest_sha256": (
+            confirmatory_metadata.get("experiment_config_sha256")
+            if confirmatory_metadata else None
+        ),
+        "benchmark_manifest_sha256": (
+            external_benchmark_manifest_sha256() if config.suite == "external" else None
         ),
         "expected_experiment_code_sha256": (
             confirmatory_metadata.get("expected_experiment_code_sha256")
@@ -2428,7 +2583,7 @@ def run_evaluation(
             str(Path(confirmatory_config_path).resolve())
             if confirmatory_config_path is not None else None
         ),
-        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_version": config.experiment_config_version,
         "experiment_config_sha256": (
             confirmatory_metadata.get("experiment_config_sha256")
             if confirmatory_metadata else None

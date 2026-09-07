@@ -219,8 +219,15 @@ def test_draft_manifest_is_not_accepted_as_confirmatory():
 def test_checked_in_manifest_is_validated_without_substituting_a_runtime_hash():
     manifest = load_confirmatory_manifest(MANIFEST_PATH)
     if manifest.get("status") == "frozen":
-        assert manifest["expected_experiment_code_sha256"] == experiment_code_sha256()
-        validate_confirmatory_manifest(manifest, _runtime(manifest))
+        if manifest["expected_experiment_code_sha256"] == experiment_code_sha256():
+            validate_confirmatory_manifest(manifest, _runtime(manifest))
+        else:
+            # v1 is intentionally retained as historical provenance after
+            # v2 result-affecting code changes; rerunning it requires its
+            # recorded source checkout rather than silently using v2 code.
+            assert manifest["source_git_commit"]
+            with pytest.raises(ValueError, match="SHA-256 mismatch"):
+                validate_confirmatory_manifest(manifest, _runtime(manifest))
     else:
         assert manifest.get("expected_experiment_code_sha256") is None
         validate_confirmatory_preflight(manifest)

@@ -19,6 +19,10 @@ CONFIRMATORY_MANIFEST_SCHEMA_VERSION = "confirmatory-manifest-v1"
 CONFIRMATORY_EXPERIMENT_NAME = "selective-intervention-reliability"
 EXPERIMENT_CODE_PATHS = ("app", "evaluation", "pyproject.toml")
 CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.json"
+CONFIRMATORY_MANIFEST_RELATIVE_PATHS = (
+    "evaluation/configs/paper_confirmatory_v1.json",
+    "evaluation/configs/paper_confirmatory_v2.json",
+)
 CONFIRMATORY_SPLIT_SEEDS = (42,)
 CONFIRMATORY_REPETITIONS = 3
 CONFIRMATORY_REPETITION_IDS = ("rep_001", "rep_002", "rep_003")
@@ -101,7 +105,7 @@ def experiment_code_sha256(repository_root: str | Path | None = None) -> str:
             continue
         if path.suffix.lower() in _EXCLUDED_FILE_SUFFIXES:
             continue
-        if relative == CONFIRMATORY_MANIFEST_RELATIVE_PATH:
+        if relative in CONFIRMATORY_MANIFEST_RELATIVE_PATHS:
             continue
         included.append((relative, path))
     for relative, path in sorted(included, key=lambda item: item[0]):
@@ -381,7 +385,8 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
     try:
         from app.deterministic_policy import DeterministicPolicy
         from app.empirical_challenge_probe import EmpiricalProbePolicy
-        from app.llm import PROMPT_SCHEMA_VERSION
+        from app.llm import LEGACY_PROMPT_SCHEMA_VERSION, PROMPT_SCHEMA_VERSION
+        from app.validation import EXECUTION_CONTRACT_SCHEMA_VERSION
         from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
         from evaluation.external_benchmarks import (
             AMLB_CLASSIFICATION_SUITE_ID,
@@ -401,10 +406,17 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
         if probe.get("configuration_sha256") != config_sha256(empirical_probe_config()):
             mismatches.append("empirical-probe policy configuration hash differs from the runtime policy")
         prompts = loaded.get("prompts") or {}
-        if prompts.get("planner_schema_version") != PROMPT_SCHEMA_VERSION:
+        if prompts.get("planner_schema_version") not in {
+            LEGACY_PROMPT_SCHEMA_VERSION,
+            PROMPT_SCHEMA_VERSION,
+        }:
             mismatches.append("planner prompt/schema version differs from the runtime prompt")
         if prompts.get("reconciliation_prompt_version") != BLINDED_RECONCILIATION_PROMPT_VERSION:
             mismatches.append("reconciliation prompt/schema version differs from the runtime prompt")
+        if prompts.get("planner_schema_version") == PROMPT_SCHEMA_VERSION and prompts.get(
+            "execution_contract_schema_version"
+        ) != EXECUTION_CONTRACT_SCHEMA_VERSION:
+            mismatches.append("execution-contract schema version differs from the runtime contract")
 
         holdout = loaded.get("holdout") or {}
         if holdout.get("fraction") != 0.2:

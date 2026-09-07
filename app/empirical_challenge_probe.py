@@ -9,6 +9,7 @@ frame and it never returns a final modeling decision.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Mapping
 
 import numpy as np
@@ -281,7 +282,7 @@ def _evidence_strength(
     return "weak"
 
 
-def run_pairwise_model_probe(
+def _run_pairwise_model_probe(
     training_frame: pd.DataFrame,
     target_column: str,
     task_type: TaskType,
@@ -496,6 +497,31 @@ def run_pairwise_model_probe(
             error=f"{type(exc).__name__}: {exc}",
             training_rows=len(training_frame),
         )
+
+
+def run_pairwise_model_probe(
+    training_frame: pd.DataFrame,
+    target_column: str,
+    task_type: TaskType,
+    proposal_a: Any,
+    proposal_b: Any,
+    instrument: bool = False,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run the unchanged probe, optionally attaching passive instrumentation."""
+
+    started = time.perf_counter()
+    result = _run_pairwise_model_probe(
+        training_frame,
+        target_column,
+        task_type,
+        proposal_a,
+        proposal_b,
+        **kwargs,
+    )
+    if instrument:
+        result["wall_clock_seconds"] = time.perf_counter() - started
+    return result
 
 
 # Descriptive alias for callers that use the terminology from the modeling gate.

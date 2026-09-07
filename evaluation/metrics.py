@@ -462,6 +462,26 @@ def _hard_intervention(record: dict[str, Any]) -> bool:
     return record.get("unsafe_plan_intercepted") is True
 
 
+def _hard_interception(record: dict[str, Any]) -> bool:
+    """Return the explicit v2 hard-interception signal with legacy fallback."""
+
+    if record.get("hard_interception_occurred") is not None:
+        return bool(record["hard_interception_occurred"])
+    return record.get("unsafe_plan_intercepted") is True
+
+
+def _hard_repair(record: dict[str, Any]) -> bool:
+    """Return only a valid deterministic replacement of an invalid initial plan."""
+
+    if record.get("hard_repair_occurred") is not None:
+        return bool(record["hard_repair_occurred"])
+    return bool(
+        record.get("agent_initial_valid") is False
+        and record.get("final_valid") is True
+        and record.get("final_selection_source") == "deterministic"
+    )
+
+
 def _final_hard_invalid(record: dict[str, Any]) -> bool:
     if record.get("final_hard_invalid") is not None:
         return bool(record["final_hard_invalid"])
@@ -1727,6 +1747,11 @@ def summarize_trials(
                 sum(record.get("unsafe_plan_intercepted") is True for record in valid_records),
                 sum(record.get("agent_initial_valid") is False for record in valid_records),
             ),
+            "hard_interception_count": sum(_hard_interception(record) for record in valid_records),
+            "hard_repair_count": sum(_hard_repair(record) for record in valid_records),
+            "soft_intervention_count": sum(
+                _intervention_occurred(record) for record in valid_records
+            ),
             "final_invalid_count": sum(record.get("final_valid") is False for record in valid_records),
             "final_invalid_rate": _rate(sum(record.get("final_valid") is False for record in valid_records), len(valid_records)),
             "deterministic_validation_intervention_count": sum(
@@ -2288,6 +2313,11 @@ def summarize_trials(
         "unnecessary_intervention_count": overall_selective["unnecessary_intervention_count"],
         "unsafe_plan_interception_count": len(intercepted),
         "unsafe_plan_interception_rate": _rate(len(intercepted), len(initial_invalid)),
+        "hard_interception_count": sum(_hard_interception(record) for record in completed),
+        "hard_repair_count": sum(_hard_repair(record) for record in completed),
+        "soft_intervention_count": sum(
+            _intervention_occurred(record) for record in completed
+        ),
         "validation_interception_count": len(intentionally_unsafe_intercepted),
         "validation_interception_rate": _rate(len(intentionally_unsafe_intercepted), len(intentionally_unsafe)),
         "final_invalid_rate": _rate(sum(record.get("final_valid") is False for record in completed), len(completed)),

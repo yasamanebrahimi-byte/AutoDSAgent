@@ -54,6 +54,7 @@ from app.validation import (
     FrozenSplit,
     InvariantViolation,
     ValidationResult,
+    build_execution_contract,
     freeze_supervised_split,
     prepare_validated_frame,
     training_partition_frame,
@@ -310,9 +311,18 @@ def run_analysis(
             split=split,
         )
         planning_profile = profile_dataframe(planning_frame)
+        execution_contract = build_execution_contract(
+            planning_frame,
+            established_target,
+            established_task,
+            test_size=test_size,
+            random_state=random_state,
+        )
         write_json(run_dir / "planning_profile.json", planning_profile)
+        write_json(run_dir / "execution_contract.json", execution_contract)
         decision_payload["split_frozen_after_formulation_gate"] = True
         decision_payload["split_contract"] = split.as_dict()
+        decision_payload["modeling_execution_contract"] = execution_contract
         modeling_plan = _call_or_fallback(
             "modeling",
             lambda: agents.modeling_plan(
@@ -320,6 +330,7 @@ def run_analysis(
                 question,
                 established_target,
                 established_task,
+                execution_contract=execution_contract,
             ),
             lambda: _fallback_modeling_plan(
                 planning_profile,
@@ -852,6 +863,7 @@ def _validate_modeling_gate(
                         modeling_plan.recommended_method: agent_hard_validation,
                         deterministic.recommended_method: challenger_hard_validation,
                     },
+                    instrument=True,
                 )
             except Exception as exc:  # advisory evidence fails closed to abstention
                 empirical_probe = {
@@ -1052,6 +1064,7 @@ def _validate_modeling_gate(
                         modeling_plan.recommended_method: agent_hard_validation,
                         deterministic.recommended_method: challenger_hard_validation,
                     },
+                    instrument=True,
                 )
                 blinded_reconciliation = build_blinded_reconciliation(
                     reconciliation_profile,

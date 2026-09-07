@@ -885,6 +885,13 @@ def run_ablation_study(
     frozen_conditions: list[dict[str, Any]] | None = None
     if confirmatory_config_path is not None:
         manifest = load_confirmatory_manifest(confirmatory_config_path)
+        manifest_prompt_schema_version = str(
+            (manifest.get("prompts") or {}).get("planner_schema_version")
+        )
+        manifest_experiment_config_version = str(
+            manifest.get("experiment_config_version")
+        )
+        manifest_snapshot = Path(confirmatory_config_path).as_posix()
         frozen_conditions = model_conditions(manifest)
         # In strict mode the frozen manifest is the sole experiment design
         # source.  Runtime flags cannot narrow, add, or replace its matrix.
@@ -921,7 +928,7 @@ def run_ablation_study(
             deterministic_policy_sha256=config_sha256(deterministic_policy_config()),
             empirical_probe_policy_version=EmpiricalProbePolicy().policy_version,
             empirical_probe_policy_sha256=config_sha256(empirical_probe_config()),
-            planner_prompt_schema_version=PROMPT_SCHEMA_VERSION,
+            planner_prompt_schema_version=manifest_prompt_schema_version,
             reconciler_prompt_schema_version=BLINDED_RECONCILIATION_PROMPT_VERSION,
             candidate_model_families=[
                 "linear", "regularized_linear", "tree_ensemble", "boosted_tree"
@@ -956,7 +963,7 @@ def run_ablation_study(
                 "confidence_level": DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
                 "seed": DEFAULT_BOOTSTRAP_SEED,
             },
-            experiment_config_version=EXPERIMENT_CONFIG_VERSION,
+            experiment_config_version=manifest_experiment_config_version,
             expected_experiment_code_sha256=experiment_code_sha256(),
             source_git_commit=current_repository_commit(),
             model_conditions=frozen_conditions,
@@ -994,7 +1001,11 @@ def run_ablation_study(
 
     root_config = {
         "experiment_freeze_metadata_version": EXPERIMENT_FREEZE_METADATA_VERSION,
-        "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+        "experiment_config_version": (
+            manifest_experiment_config_version
+            if confirmatory_metadata is not None
+            else EXPERIMENT_CONFIG_VERSION
+        ),
         "repository_commit": repository_commit(),
         "ablation_schema_version": ABLATION_SCHEMA_VERSION,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1051,12 +1062,16 @@ def run_ablation_study(
             case.openml_task_id for case in selected_cases
             if case.openml_task_id is not None
         ],
-        "planner_prompt_schema_version": PROMPT_SCHEMA_VERSION,
+        "planner_prompt_schema_version": (
+            manifest_prompt_schema_version
+            if confirmatory_metadata is not None
+            else PROMPT_SCHEMA_VERSION
+        ),
         "reconciler_prompt_schema_version": BLINDED_RECONCILIATION_PROMPT_VERSION,
         "deterministic_policy_version": DeterministicPolicy().version,
         "deterministic_policy": {
             "version": DeterministicPolicy().version,
-            "parameters": "captured in evaluation/configs/paper_confirmatory_v1.json",
+            "parameters": f"captured in {manifest_snapshot}" if confirmatory_metadata is not None else "captured in the selected development configuration",
         },
         "empirical_probe_policy_version": EmpiricalProbePolicy().policy_version,
         "empirical_probe_policy": EmpiricalProbePolicy().as_dict(),
@@ -1076,13 +1091,19 @@ def run_ablation_study(
             "bootstrap_confidence_level": 0.95,
             "bootstrap_seed": 20260824,
         },
-        "confirmatory_config_snapshot": "evaluation/configs/paper_confirmatory_v1.json",
+        "confirmatory_config_snapshot": (
+            manifest_snapshot
+            if confirmatory_metadata is not None
+            else "evaluation/configs/paper_confirmatory_v1.json"
+        ),
         "confirmatory_mode": confirmatory_metadata is not None,
         "confirmatory_config_status": (
             confirmatory_metadata["status"] if confirmatory_metadata else "not_selected"
         ),
         "experiment_config_path": str(Path(confirmatory_config_path).resolve()) if confirmatory_config_path else None,
         "experiment_config_sha256": confirmatory_metadata.get("experiment_config_sha256") if confirmatory_metadata else None,
+        "confirmatory_manifest_sha256": confirmatory_metadata.get("experiment_config_sha256") if confirmatory_metadata else None,
+        "benchmark_manifest_sha256": external_benchmark_manifest_sha256() if suite == "external" else None,
         "expected_experiment_code_sha256": confirmatory_metadata.get("expected_experiment_code_sha256") if confirmatory_metadata else None,
         "source_git_commit": confirmatory_metadata.get("source_git_commit") if confirmatory_metadata else repository_commit(),
         "frozen_manifest_path": (
