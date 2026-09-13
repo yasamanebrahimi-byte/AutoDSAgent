@@ -11,6 +11,8 @@ from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
 from evaluation.empirical_reference import evaluate_empirical_reference
 from evaluation.metrics import regret, summarize_trials
 from evaluation.perturbations import default_perturbations
+import evaluation.metrics as metrics_module
+import evaluation.runner as runner_module
 from evaluation.runner import run_evaluation
 
 
@@ -300,6 +302,55 @@ def test_offline_wine_smoke_writes_required_artifacts(tmp_path: Path):
     for filename in ("config.json", "trials.jsonl", "summary.json", "summary.md"):
         assert (output_dir / filename).is_file()
     assert "not a universal optimum" in (output_dir / "summary.md").read_text(encoding="utf-8")
+
+
+def test_run_evaluation_skips_checkpoint_bootstrap_but_computes_final_ci(
+    tmp_path: Path, monkeypatch
+):
+    summary_calls = []
+    checkpoint_summaries = []
+    bootstrap_calls = []
+    original_summarize_trials = runner_module.summarize_trials
+
+    def fake_cluster_bootstrap_ci(data, statistic_fn, cluster_col, **kwargs):
+        del data, statistic_fn
+        bootstrap_calls.append((cluster_col, kwargs))
+        return {
+            "lower": None,
+            "upper": None,
+            "ci_low": None,
+            "ci_high": None,
+            "support": 1,
+            "n_clusters": 1,
+            "n_bootstrap": 10_000,
+            "confidence_level": 0.95,
+            "uncertainty_method": "dataset_cluster_bootstrap_percentile",
+            "cluster_column": cluster_col,
+            "stable": False,
+            "status": "unavailable",
+        }
+
+    def summarize_trials_spy(trials, **kwargs):
+        before = len(bootstrap_calls)
+        summary_calls.append(dict(kwargs))
+        result = original_summarize_trials(trials, **kwargs)
+        if kwargs["compute_confidence_intervals"] is False:
+            checkpoint_summaries.append(result)
+        summary_calls[-1]["bootstrap_call_count"] = len(bootstrap_calls) - before
+        return result
+
+    monkeypatch.setattr(metrics_module, "cluster_bootstrap_ci", fake_cluster_bootstrap_ci)
+    monkeypatch.setattr(runner_module, "summarize_trials", summarize_trials_spy)
+
+    run_evaluation(tmp_path / "evaluation", cases=[_case(_classification_frame(), "ci_checkpoint")], offline=True)
+
+    assert [call["compute_confidence_intervals"] for call in summary_calls] == [False, True]
+    assert summary_calls[0]["bootstrap_call_count"] == 0
+    assert summary_calls[1]["bootstrap_call_count"] > 0
+    assert checkpoint_summaries[0]["dataset_macro_gate_health"]["confidence_intervals"] == {}
+    assert checkpoint_summaries[0]["paper_metrics_by_task"]["classification"][
+        "dataset_macro_confidence_intervals"
+    ] == {}
 
 
 def test_perturbations_are_seeded_and_repeatable():

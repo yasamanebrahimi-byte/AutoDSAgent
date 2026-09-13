@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+import evaluation.metrics as metrics_module
 from evaluation.ablation import _paired_comparison
 from evaluation.metrics import (
+    DEFAULT_BOOTSTRAP_REPLICATES,
     HOLDOUT_METRIC_SCHEMA_VERSION,
     HOLDOUT_RMSE_EPSILON,
     classify_holdout_intervention_outcome,
@@ -224,6 +226,39 @@ def test_summary_exposes_versioned_paper_fields_and_marks_strict_failures():
     assert summary["paper_holdout_delta_mean"] == pytest.approx(0.10)
     assert summary["harm_rate"] == pytest.approx(0.0)
     assert "dataset_macro_confidence_intervals" in summary["paper_metrics_by_task"]["classification"]
+
+
+def test_summarize_trials_default_computes_dataset_cluster_confidence_intervals():
+    summary = summarize_trials([_holdout_record("single", "classification", 0.60, 0.70)])
+
+    dataset_ci = summary["dataset_macro_gate_health"]["confidence_intervals"]
+    assert dataset_ci["mean_paper_holdout_delta"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
+    assert (
+        summary["paper_metrics_by_task"]["classification"]
+        ["dataset_macro_confidence_intervals"]["mean_paper_holdout_delta"]["n_bootstrap"]
+        == DEFAULT_BOOTSTRAP_REPLICATES
+    )
+
+
+def test_summarize_trials_can_skip_all_bootstrap_confidence_intervals(monkeypatch):
+    records = [
+        _holdout_record("first", "classification", 0.60, 0.70),
+        _holdout_record("second", "classification", 0.70, 0.60),
+    ]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("bootstrap CI machinery must not run for checkpoint summaries")
+
+    monkeypatch.setattr(metrics_module, "_dataset_macro_ci", fail_if_called)
+    monkeypatch.setattr(metrics_module, "cluster_bootstrap_ci", fail_if_called)
+
+    summary = summarize_trials(records, compute_confidence_intervals=False)
+
+    assert summary["dataset_macro_gate_health"]["confidence_intervals"] == {}
+    assert summary["dataset_macro_paper_holdout_delta_ci"] == {}
+    assert summary["regret_reduction_ci"] == {}
+    assert summary["paper_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"] == {}
+    assert summary["dataset_macro_paper_holdout_delta_mean"] == pytest.approx(0.0)
 
 
 def test_historical_classification_delta_is_read_without_reusing_regression_units():

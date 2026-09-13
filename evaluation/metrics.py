@@ -1452,6 +1452,7 @@ def summarize_trials(
     trials: list[dict[str, Any]],
     *,
     thresholds: dict[str, float] | None = None,
+    compute_confidence_intervals: bool = True,
     utility_weights: GateUtilityWeights | dict[str, float] | None = None,
     include_model_condition_breakdown: bool = True,
 ) -> dict[str, Any]:
@@ -1529,6 +1530,7 @@ def summarize_trials(
             holdout_tolerance=holdout_tolerances,
             catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
             weights=weights,
+            include_confidence_intervals=compute_confidence_intervals,
         )
         improvements = _paired_improvements(paired)
         holdout_improvements = _holdout_improvements(paired)
@@ -1894,6 +1896,7 @@ def summarize_trials(
         catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
         weights=weights,
         holdout_tolerances=holdout_tolerances,
+        include_confidence_intervals=compute_confidence_intervals,
     )
     # Preserve the complete gate-health schema (including event-conditioned
     # diagnostics) while replacing its headline scalar estimates with the
@@ -1919,14 +1922,18 @@ def summarize_trials(
         "abstention_preservation_rate", "mean_paper_holdout_delta", "median_paper_holdout_delta",
         "intervention_precision_excluding_neutral",
     )
-    dataset_macro_cis = {
-        metric: _dataset_macro_ci(
-            completed, metric, tolerance=neutral_tolerance,
-            catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
-            weights=weights, holdout_tolerances=holdout_tolerances,
-        )
-        for metric in macro_ci_metrics
-    }
+    dataset_macro_cis = (
+        {
+            metric: _dataset_macro_ci(
+                completed, metric, tolerance=neutral_tolerance,
+                catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+                weights=weights, holdout_tolerances=holdout_tolerances,
+            )
+            for metric in macro_ci_metrics
+        }
+        if compute_confidence_intervals
+        else {}
+    )
     dataset_gate_health["confidence_intervals"] = dataset_macro_cis
     dataset_gate_health["point_estimate_semantics"] = "equal-weighted mean across eligible benchmark_case datasets/tasks"
     dataset_gate_health["uncertainty_method"] = "dataset_cluster_bootstrap_percentile"
@@ -1959,25 +1966,30 @@ def summarize_trials(
             catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
             weights=weights,
             holdout_tolerances=holdout_tolerances,
+            include_confidence_intervals=compute_confidence_intervals,
         )
-        task_macro_ci = {
-            metric: _dataset_macro_ci(
-                task_records,
-                metric,
-                tolerance=neutral_tolerance,
-                catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
-                weights=weights,
-                holdout_tolerances=holdout_tolerances,
-            )
-            for metric in (
-                "beneficial_intervention_rate",
-                "harmful_intervention_rate",
-                "neutral_intervention_rate",
-                "intervention_precision",
-                "harm_rate",
-                "mean_paper_holdout_delta",
-            )
-        }
+        task_macro_ci = (
+            {
+                metric: _dataset_macro_ci(
+                    task_records,
+                    metric,
+                    tolerance=neutral_tolerance,
+                    catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+                    weights=weights,
+                    holdout_tolerances=holdout_tolerances,
+                )
+                for metric in (
+                    "beneficial_intervention_rate",
+                    "harmful_intervention_rate",
+                    "neutral_intervention_rate",
+                    "intervention_precision",
+                    "harm_rate",
+                    "mean_paper_holdout_delta",
+                )
+            }
+            if compute_confidence_intervals
+            else {}
+        )
         paper_task_summaries[task] = {
             "task_type": task,
             "dataset_macro": {
@@ -2258,7 +2270,9 @@ def summarize_trials(
         "dataset_macro_holdout_intervention_metrics": dataset_holdout,
         "dataset_macro_paper_holdout_delta_mean": dataset_holdout.get("mean_paper_holdout_delta"),
         "dataset_macro_paper_holdout_delta_median": dataset_holdout.get("median_paper_holdout_delta"),
-        "dataset_macro_paper_holdout_delta_ci": dataset_macro_cis.get("mean_paper_holdout_delta"),
+        "dataset_macro_paper_holdout_delta_ci": dataset_macro_cis.get(
+            "mean_paper_holdout_delta", {}
+        ),
         "challenge_recall": dataset_gate_health["challenge_recall"],
         "rescue_recall": dataset_gate_health["challenge_recall"],
         # These are event-conditioned quantities; retain their event-weighted
@@ -2285,7 +2299,9 @@ def summarize_trials(
         "gain_concentration": dataset_gate_health["gain_concentration"],
         "mean_regret_reduction": dataset_gate_health["mean_regret_reduction"],
         "median_regret_reduction": dataset_gate_health["median_regret_reduction"],
-        "regret_reduction_ci": dataset_gate_health["confidence_intervals"]["mean_regret_reduction"],
+        "regret_reduction_ci": dataset_gate_health["confidence_intervals"].get(
+            "mean_regret_reduction", {}
+        ),
         "initial_catastrophic_count": dataset_gate_health["initial_catastrophic_count"],
         "final_catastrophic_count": dataset_gate_health["final_catastrophic_count"],
         "catastrophic_prevented_count": dataset_gate_health["catastrophic_prevented_count"],
@@ -2431,6 +2447,7 @@ def summarize_trials(
                 [row for row in completed if str(row.get("model_condition_id", "default")) == condition_id],
                 thresholds=thresholds,
                 utility_weights=weights,
+                compute_confidence_intervals=compute_confidence_intervals,
                 include_model_condition_breakdown=False,
             )
             for condition_id in condition_ids

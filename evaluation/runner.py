@@ -2594,11 +2594,16 @@ def run_evaluation(
                             cached_pair_request_status = trial.get("agent_request_status")
                             cached_pair_request_error = trial.get("agent_request_error")
                             cached_pair_api_provenance = trial.get("planner_api_provenance")
+                        checkpoint_summary = summarize_trials(
+                            trials,
+                            thresholds=config.thresholds,
+                            compute_confidence_intervals=False,
+                        )
                         _write_outputs(
                             output_path,
                             config_payload,
                             trials,
-                            summarize_trials(trials, thresholds=config.thresholds),
+                            checkpoint_summary,
                             empirical_reference_cache,
                         )
                         if proposal_cache_file is not None:
@@ -2609,7 +2614,11 @@ def run_evaluation(
                                 json.dumps(empirical_reference_cache, indent=2, sort_keys=True),
                                 encoding="utf-8",
                             )
-    summary = summarize_trials(trials, thresholds=config.thresholds)
+    summary = summarize_trials(
+        trials,
+        thresholds=config.thresholds,
+        compute_confidence_intervals=True,
+    )
     confirmatory_valid = None
     if confirmatory_metadata is not None:
         confirmatory_valid = bool(
