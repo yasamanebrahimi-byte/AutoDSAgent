@@ -554,6 +554,14 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     monkeypatch.setattr(ablation, "validate_confirmatory_manifest", lambda *_args: metadata)
     monkeypatch.setattr(runner, "validate_confirmatory_manifest", lambda *_args: metadata)
     calls: list[dict] = []
+    combined_summary_calls: list[dict] = []
+    original_summarize_trials = ablation.summarize_trials
+
+    def summarize_trials_spy(trials, **kwargs):
+        combined_summary_calls.append({"trial_count": len(trials), **kwargs})
+        return original_summarize_trials(trials, **kwargs)
+
+    monkeypatch.setattr(ablation, "summarize_trials", summarize_trials_spy)
 
     def factory(context):
         calls.append(context)
@@ -614,6 +622,7 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
         "Combined Cross-Model Descriptive Audit"
     )
     assert "`llm_with_diagnostics` vs `llm_only`" in markdown
+    assert "(CI `{}`)" in markdown
     assert "secondary information-asymmetry analysis" in markdown
     assert result["summary"]["model_condition_reporting"]["combined_summary_role"].startswith(
         "descriptive audit total"
@@ -634,6 +643,22 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     assert len({row["initial_proposal_cache_key"] for row in persisted}) == 16
     assert all(row["initial_proposal_cache_hit"] for row in persisted if row["ablation_name"] == "full")
     assert result["summary"]["confirmatory_matrix"]["complete"] is True
+    assert len(combined_summary_calls) == 3
+    assert all(call["compute_confidence_intervals"] is False for call in combined_summary_calls)
+    assert all(
+        summary["dataset_macro_gate_health"]["confidence_intervals"] == {}
+        and summary["by_model_condition"]
+        and all(
+            condition_summary["dataset_macro_gate_health"]["confidence_intervals"] == {}
+            for condition_summary in summary["by_model_condition"].values()
+        )
+        for summary in result["summary"]["summaries"].values()
+    )
+    assert all(call["trial_count"] == 8 for call in combined_summary_calls)
+    for comparison in result["summary"]["descriptive_combined_paired_comparisons"]["comparisons"]:
+        assert comparison["paired_holdout_delta_ci"] == {}
+        assert comparison["paired_regret_difference_ci"] == {}
+        assert comparison["trial_weighted_paired_regret_difference_ci"] == {}
 
     expected = []
     for condition_id in ("model_a", "model_b"):

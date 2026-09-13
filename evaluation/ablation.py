@@ -329,6 +329,7 @@ def _paired_comparison(
     tolerance: float | dict[str, float] = 1e-12,
     *,
     comparison_estimand: str | None = None,
+    compute_confidence_intervals: bool = True,
 ) -> dict[str, Any]:
     if comparison_estimand is None:
         comparison_estimand = (
@@ -421,18 +422,24 @@ def _paired_comparison(
     # One row per dataset is intentional: the clustered bootstrap below is
     # therefore a bootstrap of the dataset-level paired effects, not of
     # individual split/repetition rows.
-    holdout_difference_ci = cluster_bootstrap_ci(
-        dataset_effects,
-        lambda sample: mean(row["difference"] for row in sample) if sample else None,
-        "benchmark_case",
-    )
+    if compute_confidence_intervals:
+        holdout_difference_ci = cluster_bootstrap_ci(
+            dataset_effects,
+            lambda sample: mean(row["difference"] for row in sample) if sample else None,
+            "benchmark_case",
+        )
+    else:
+        holdout_difference_ci = {}
     trial_weighted_mean = mean(holdout_differences) if holdout_differences else None
     trial_weighted_median = median(holdout_differences) if holdout_differences else None
-    diagnostic_difference_ci = cluster_bootstrap_ci(
-        diagnostic_rows,
-        lambda sample: mean(row["difference"] for row in sample) if sample else None,
-        "benchmark_case",
-    )
+    if compute_confidence_intervals:
+        diagnostic_difference_ci = cluster_bootstrap_ci(
+            diagnostic_rows,
+            lambda sample: mean(row["difference"] for row in sample) if sample else None,
+            "benchmark_case",
+        )
+    else:
+        diagnostic_difference_ci = {}
     result = {
         "first": first,
         "second": second,
@@ -1343,7 +1350,11 @@ def run_ablation_study(
             condition_results[condition_id] = result
             combined_rows.extend(result["trials"])
         results[spec.name] = {
-            "summary": summarize_trials(combined_rows, thresholds=thresholds),
+            "summary": summarize_trials(
+                combined_rows,
+                thresholds=thresholds,
+                compute_confidence_intervals=False,
+            ),
             "trials": combined_rows,
             "condition_results": condition_results,
         }
@@ -1363,6 +1374,7 @@ def run_ablation_study(
                 if frozenset((first, second)) == FINAL_PLAN_PERFORMANCE_PAIR
                 else "intervention_effect"
             ),
+            compute_confidence_intervals=False,
             tolerance={
                 "classification": holdout_neutral_tolerance(
                     "classification", {**DEFAULT_THRESHOLDS, **(thresholds or {})}
@@ -1429,6 +1441,7 @@ def run_ablation_study(
                     else "intervention_effect"
                 ),
                 tolerance=pair_tolerance,
+                compute_confidence_intervals=True,
             )
             for first, second in pairs
             if first in primary_rows_by_name and second in primary_rows_by_name

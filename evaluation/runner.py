@@ -2598,6 +2598,7 @@ def run_evaluation(
                             trials,
                             thresholds=config.thresholds,
                             compute_confidence_intervals=False,
+                            include_model_condition_breakdown=False,
                         )
                         _write_outputs(
                             output_path,
@@ -2618,6 +2619,7 @@ def run_evaluation(
         trials,
         thresholds=config.thresholds,
         compute_confidence_intervals=True,
+        include_model_condition_breakdown=False,
     )
     confirmatory_valid = None
     if confirmatory_metadata is not None:

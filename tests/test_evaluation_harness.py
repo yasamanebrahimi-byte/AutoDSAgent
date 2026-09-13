@@ -342,11 +342,27 @@ def test_run_evaluation_skips_checkpoint_bootstrap_but_computes_final_ci(
     monkeypatch.setattr(metrics_module, "cluster_bootstrap_ci", fake_cluster_bootstrap_ci)
     monkeypatch.setattr(runner_module, "summarize_trials", summarize_trials_spy)
 
-    run_evaluation(tmp_path / "evaluation", cases=[_case(_classification_frame(), "ci_checkpoint")], offline=True)
+    result = run_evaluation(
+        tmp_path / "evaluation",
+        cases=[_case(_classification_frame(), "ci_checkpoint")],
+        offline=True,
+    )
 
     assert [call["compute_confidence_intervals"] for call in summary_calls] == [False, True]
+    assert [call["include_model_condition_breakdown"] for call in summary_calls] == [False, False]
     assert summary_calls[0]["bootstrap_call_count"] == 0
     assert summary_calls[1]["bootstrap_call_count"] > 0
+    assert "by_model_condition" not in result["summary"]
+    bootstrap_count_before_reference = len(bootstrap_calls)
+    original_summarize_trials(
+        result["trials"],
+        compute_confidence_intervals=True,
+        include_model_condition_breakdown=False,
+    )
+    direct_single_condition_bootstrap_count = (
+        len(bootstrap_calls) - bootstrap_count_before_reference
+    )
+    assert summary_calls[1]["bootstrap_call_count"] == direct_single_condition_bootstrap_count
     assert checkpoint_summaries[0]["dataset_macro_gate_health"]["confidence_intervals"] == {}
     assert checkpoint_summaries[0]["paper_metrics_by_task"]["classification"][
         "dataset_macro_confidence_intervals"

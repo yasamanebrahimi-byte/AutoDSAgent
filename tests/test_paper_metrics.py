@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import evaluation.ablation as ablation_module
 import evaluation.metrics as metrics_module
 from evaluation.ablation import _paired_comparison
 from evaluation.metrics import (
@@ -182,6 +183,73 @@ def test_ablation_pairing_is_dataset_macro_with_unequal_repetitions():
     )
     assert result["paired_holdout_delta_ci"] == expected_ci
     assert [item["paired_trial_count"] for item in result["paired_holdout_dataset_effects"]] == [9, 1]
+
+
+def test_descriptive_paired_comparison_skips_bootstrap_but_preserves_point_estimates(
+    monkeypatch,
+):
+    base = {
+        "trial_status": "completed",
+        "benchmark_case": "paired",
+        "task_type": "classification",
+        "perturbation_id": "clean",
+        "split_seed": 42,
+        "trial": 0,
+        "evaluation_variant": "standard",
+        "paper_holdout_delta": 0.10,
+        "gated_normalized_regret": 0.40,
+        "final_holdout_metric": 0.70,
+    }
+    rows = {
+        "first": [base],
+        "second": [{**base, "paper_holdout_delta": -0.10, "gated_normalized_regret": 0.00}],
+    }
+    primary = _paired_comparison(rows, "first", "second")
+    assert primary["paired_holdout_delta_ci"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
+    assert primary["paired_regret_difference_ci"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
+
+    bootstrap_calls = []
+
+    def fake_cluster_bootstrap_ci(*args, **kwargs):
+        bootstrap_calls.append((args, kwargs))
+        raise AssertionError("descriptive paired comparisons must not bootstrap")
+
+    monkeypatch.setattr(ablation_module, "cluster_bootstrap_ci", fake_cluster_bootstrap_ci)
+    descriptive = _paired_comparison(
+        rows,
+        "first",
+        "second",
+        compute_confidence_intervals=False,
+    )
+
+    assert bootstrap_calls == []
+    for key in (
+        "paired_units",
+        "n_paired_datasets",
+        "first_better",
+        "second_better",
+        "tied",
+        "mean_paired_holdout_delta_difference_first_advantage",
+        "mean_paired_regret_difference_first_advantage",
+    ):
+        assert descriptive[key] == primary[key]
+    assert descriptive["paired_holdout_delta_ci"] == {}
+    assert descriptive["paired_regret_difference_ci"] == {}
+    assert descriptive["trial_weighted_paired_regret_difference_ci"] == {}
+    descriptive_final = _paired_comparison(
+        rows,
+        "first",
+        "second",
+        comparison_estimand="final_plan_holdout_performance",
+        compute_confidence_intervals=False,
+    )
+    assert descriptive_final["paired_final_holdout_performance_ci"] == {}
+    assert descriptive_final["paired_holdout_delta_ci"] is None
+    assert set(descriptive) >= {
+        "paired_holdout_delta_ci",
+        "paired_regret_difference_ci",
+        "trial_weighted_paired_regret_difference_ci",
+    }
 
 
 def test_ablation_pairing_win_tie_loss_is_dataset_level():
