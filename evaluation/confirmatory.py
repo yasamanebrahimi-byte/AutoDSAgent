@@ -22,6 +22,7 @@ CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.
 CONFIRMATORY_MANIFEST_RELATIVE_PATHS = (
     "evaluation/configs/paper_confirmatory_v1.json",
     "evaluation/configs/paper_confirmatory_v2.json",
+    "evaluation/configs/paper_confirmatory_v3.json",
 )
 CONFIRMATORY_SPLIT_SEEDS = (42,)
 CONFIRMATORY_REPETITIONS = 3
