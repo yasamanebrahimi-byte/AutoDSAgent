@@ -330,6 +330,85 @@ def test_summarize_trials_can_skip_all_bootstrap_confidence_intervals(monkeypatc
     assert summary["dataset_macro_paper_holdout_delta_mean"] == pytest.approx(0.0)
 
 
+def test_dataset_macro_multi_ci_matches_single_metric_path():
+    def record(
+        dataset: str,
+        task_type: str,
+        initial_regret: float,
+        final_regret: float,
+        initial_holdout: float,
+        final_holdout: float,
+        trial: int,
+    ) -> dict:
+        return {
+            "benchmark_case": dataset,
+            "task_type": task_type,
+            "trial_status": "completed",
+            "agreement_status": "disagreement",
+            "method_disagreement": True,
+            "soft_challenge": {"status": "disagreement", "decision": "challenge"},
+            "agent_initial_valid": True,
+            "intervention_occurred": True,
+            "agent_normalized_regret": initial_regret,
+            "gated_normalized_regret": final_regret,
+            "initial_holdout_metric": initial_holdout,
+            "final_holdout_metric": final_holdout,
+            "holdout_metric_name": "macro_f1" if task_type == "classification" else "rmse",
+            "paper_holdout_delta": paper_holdout_delta(task_type, initial_holdout, final_holdout),
+            "trial": trial,
+        }
+
+    records = [
+        record("classification-a", "classification", 0.40, 0.10, 0.60, 0.70, 0),
+        record("classification-a", "classification", 0.10, 0.20, 0.70, 0.65, 1),
+        record("regression-b", "regression", 0.30, 0.00, 100.0, 90.0, 0),
+        record("regression-b", "regression", 0.50, 0.80, 100.0, 110.0, 1),
+    ]
+    metrics = (
+        "beneficial_intervention_rate",
+        "harmful_intervention_rate",
+        "mean_paper_holdout_delta",
+        "mean_regret_reduction",
+    )
+    tolerance = 0.03
+    catastrophic_threshold = 0.60
+    weights = metrics_module.DEFAULT_GATE_UTILITY_WEIGHTS
+    holdout_tolerances = {"classification": 0.02, "regression": 0.05}
+
+    single_metric_results = {
+        metric: metrics_module._dataset_macro_ci(
+            records,
+            metric,
+            tolerance=tolerance,
+            catastrophic_threshold=catastrophic_threshold,
+            weights=weights,
+            holdout_tolerances=holdout_tolerances,
+        )
+        for metric in metrics
+    }
+    multi_metric_results = metrics_module._dataset_macro_multi_ci(
+        records,
+        metrics,
+        tolerance=tolerance,
+        catastrophic_threshold=catastrophic_threshold,
+        weights=weights,
+        holdout_tolerances=holdout_tolerances,
+    )
+
+    for metric in metrics:
+        single = single_metric_results[metric]
+        multi = multi_metric_results[metric]
+        assert multi["status"] == single["status"]
+        assert multi["n_clusters"] == single["n_clusters"]
+        assert multi["n_bootstrap"] == single["n_bootstrap"]
+        for bound in ("lower", "upper", "ci_low", "ci_high"):
+            assert (single[bound] is None) == (multi[bound] is None)
+            if single[bound] is None:
+                assert multi[bound] is None
+            else:
+                assert multi[bound] == pytest.approx(single[bound])
+
+
 def test_final_dataset_macro_cis_use_one_batched_pass_per_population(monkeypatch):
     records = [
         _holdout_record("classification-a", "classification", 0.60, 0.70),
