@@ -1,4 +1,12 @@
-from evaluation.statistics import cluster_bootstrap_ci, sample_clusters
+import pytest
+
+import evaluation.statistics as statistics_module
+from evaluation.statistics import (
+    cluster_bootstrap_ci,
+    cluster_bootstrap_multi_ci,
+    cluster_bootstrap_multi_distribution,
+    sample_clusters,
+)
 from evaluation.metrics import DEFAULT_GATE_UTILITY_WEIGHTS, _dataset_macro_health
 
 
@@ -56,6 +64,108 @@ def test_one_cluster_ci_is_explicitly_unavailable():
     )
     assert result["status"] == "unavailable"
     assert result["lower"] is None and result["upper"] is None
+
+
+def test_batched_cluster_bootstrap_matches_single_metric_bootstrap():
+    data = _rows()
+
+    def mean(rows):
+        return sum(row["value"] for row in rows) / len(rows)
+
+    def max_value(rows):
+        return max(row["value"] for row in rows)
+
+    statistic_fns = {
+        "mean": mean,
+        "max": max_value,
+        "missing": lambda rows: None,
+        "non_finite": lambda rows: float("nan"),
+    }
+    old = {
+        metric: cluster_bootstrap_ci(
+            data,
+            statistic_fn,
+            "dataset",
+            n_bootstrap=200,
+            confidence_level=0.90,
+            random_state=19,
+        )
+        for metric, statistic_fn in statistic_fns.items()
+    }
+    new = cluster_bootstrap_multi_ci(
+        data,
+        statistic_fns,
+        "dataset",
+        n_bootstrap=200,
+        confidence_level=0.90,
+        random_state=19,
+    )
+
+    for metric in statistic_fns:
+        assert new[metric]["n_clusters"] == old[metric]["n_clusters"]
+        assert new[metric]["n_bootstrap"] == old[metric]["n_bootstrap"]
+        assert new[metric]["status"] == old[metric]["status"]
+        assert new[metric]["lower"] == pytest.approx(old[metric]["lower"])
+        assert new[metric]["upper"] == pytest.approx(old[metric]["upper"])
+
+
+def test_batched_cluster_bootstrap_shares_each_sample_across_metrics(monkeypatch):
+    data = _rows()
+    sampled = []
+    calls = {"mean": 0, "max": 0}
+    original_sample_clusters = statistics_module.sample_clusters
+
+    def sample_spy(data, cluster_col, sampled_clusters):
+        sampled.append(tuple(sampled_clusters))
+        return original_sample_clusters(data, cluster_col, sampled_clusters)
+
+    def mean(rows):
+        calls["mean"] += 1
+        return sum(row["value"] for row in rows) / len(rows)
+
+    def max_value(rows):
+        calls["max"] += 1
+        return max(row["value"] for row in rows)
+
+    monkeypatch.setattr(statistics_module, "sample_clusters", sample_spy)
+    distributions, n_clusters = cluster_bootstrap_multi_distribution(
+        data,
+        {"mean": mean, "max": max_value},
+        "dataset",
+        n_bootstrap=17,
+        random_state=23,
+    )
+
+    assert n_clusters == 3
+    assert len(sampled) == 17
+    assert calls == {"mean": 17, "max": 17}
+    assert len(distributions["mean"]) == 17
+    assert len(distributions["max"]) == 17
+
+
+def test_batched_cluster_bootstrap_matches_single_metric_one_cluster_behavior():
+    data = [{"dataset": "A", "value": 1}, {"dataset": "A", "value": 2}]
+    statistic_fns = {"value": lambda rows: 1.0, "missing": lambda rows: None}
+    result = cluster_bootstrap_multi_ci(data, statistic_fns, "dataset", n_bootstrap=100)
+
+    for metric, statistic_fn in statistic_fns.items():
+        assert result[metric] == cluster_bootstrap_ci(
+            data, statistic_fn, "dataset", n_bootstrap=100
+        )
+
+
+def test_batched_cluster_bootstrap_validates_confidence_level_and_reproduces():
+    with pytest.raises(ValueError, match="confidence_level"):
+        cluster_bootstrap_multi_ci(_rows(), {"value": lambda rows: 1.0}, "dataset", confidence_level=1.0)
+
+    statistic_fns = {"value": lambda rows: sum(row["value"] for row in rows) / len(rows)}
+    first = cluster_bootstrap_multi_ci(
+        _rows(), statistic_fns, "dataset", n_bootstrap=100, random_state=31
+    )
+    second = cluster_bootstrap_multi_ci(
+        _rows(), statistic_fns, "dataset", n_bootstrap=100, random_state=31
+    )
+    assert first == second
 
 
 def test_dataset_macro_health_equalizes_unequal_trial_counts():

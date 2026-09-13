@@ -92,6 +92,42 @@ def cluster_bootstrap_distribution(
     return estimates, n_clusters
 
 
+def cluster_bootstrap_multi_distribution(
+    data: Any,
+    statistic_fns: dict[str, Callable[[Any], float | None]],
+    cluster_col: str,
+    *,
+    n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
+    random_state: int = DEFAULT_BOOTSTRAP_SEED,
+) -> tuple[dict[str, list[float]], int]:
+    """Return several statistic distributions from shared cluster draws.
+
+    The bootstrap draws and clustered samples are shared across all statistic
+    functions. This preserves the single-metric bootstrap sequence while
+    avoiding repeated sampling when several metrics use the same population.
+    """
+
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be positive")
+    if hasattr(data, "loc") and hasattr(data, "columns"):
+        clusters = list(data[cluster_col].dropna().unique())
+    else:
+        clusters = list(dict.fromkeys(row.get(cluster_col) for row in data if row.get(cluster_col) is not None))
+    n_clusters = len(clusters)
+    distributions = {metric: [] for metric in statistic_fns}
+    if n_clusters < 2:
+        return distributions, n_clusters
+
+    rng = np.random.default_rng(random_state)
+    for sampled_indices in rng.integers(0, n_clusters, size=(n_bootstrap, n_clusters)):
+        replicate = sample_clusters(data, cluster_col, [clusters[i] for i in sampled_indices])
+        for metric, statistic_fn in statistic_fns.items():
+            value = statistic_fn(replicate)
+            if value is not None and math.isfinite(float(value)):
+                distributions[metric].append(float(value))
+    return distributions, n_clusters
+
+
 def cluster_bootstrap_ci(
     data: Any,
     statistic_fn: Callable[[Any], float | None],
@@ -122,6 +158,45 @@ def cluster_bootstrap_ci(
         low, high = np.quantile(estimates, [alpha, 1.0 - alpha])
         result.update(lower=float(low), upper=float(high), ci_low=float(low), ci_high=float(high))
     return result
+
+
+def cluster_bootstrap_multi_ci(
+    data: Any,
+    statistic_fns: dict[str, Callable[[Any], float | None]],
+    cluster_col: str,
+    *,
+    n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
+    confidence_level: float = DEFAULT_BOOTSTRAP_CONFIDENCE_LEVEL,
+    random_state: int = DEFAULT_BOOTSTRAP_SEED,
+) -> dict[str, dict[str, Any]]:
+    """Compute percentile CIs for several statistics from shared draws."""
+
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1")
+    distributions, n_clusters = cluster_bootstrap_multi_distribution(
+        data,
+        statistic_fns,
+        cluster_col,
+        n_bootstrap=n_bootstrap,
+        random_state=random_state,
+    )
+    results: dict[str, dict[str, Any]] = {}
+    for metric, estimates in distributions.items():
+        result: dict[str, Any] = {
+            "lower": None, "upper": None, "ci_low": None, "ci_high": None,
+            "support": n_clusters, "n_clusters": n_clusters,
+            "n_bootstrap": n_bootstrap, "confidence_level": confidence_level,
+            "uncertainty_method": "dataset_cluster_bootstrap_percentile",
+            "cluster_column": cluster_col,
+            "stable": n_clusters >= 20,
+            "status": "unavailable" if n_clusters < 2 or not estimates else "ok",
+        }
+        if estimates:
+            alpha = (1.0 - confidence_level) / 2.0
+            low, high = np.quantile(estimates, [alpha, 1.0 - alpha])
+            result.update(lower=float(low), upper=float(high), ci_low=float(low), ci_high=float(high))
+        results[metric] = result
+    return results
 
 
 def paired_cluster_bootstrap_difference(

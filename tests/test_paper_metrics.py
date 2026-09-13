@@ -319,6 +319,7 @@ def test_summarize_trials_can_skip_all_bootstrap_confidence_intervals(monkeypatc
 
     monkeypatch.setattr(metrics_module, "_dataset_macro_ci", fail_if_called)
     monkeypatch.setattr(metrics_module, "cluster_bootstrap_ci", fail_if_called)
+    monkeypatch.setattr(metrics_module, "cluster_bootstrap_multi_ci", fail_if_called)
 
     summary = summarize_trials(records, compute_confidence_intervals=False)
 
@@ -327,6 +328,67 @@ def test_summarize_trials_can_skip_all_bootstrap_confidence_intervals(monkeypatc
     assert summary["regret_reduction_ci"] == {}
     assert summary["paper_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"] == {}
     assert summary["dataset_macro_paper_holdout_delta_mean"] == pytest.approx(0.0)
+
+
+def test_final_dataset_macro_cis_use_one_batched_pass_per_population(monkeypatch):
+    records = [
+        _holdout_record("classification-a", "classification", 0.60, 0.70),
+        _holdout_record("classification-b", "classification", 0.70, 0.60),
+        _holdout_record("regression-a", "regression", 100.0, 90.0),
+        _holdout_record("regression-b", "regression", 100.0, 110.0),
+    ]
+    batched_calls = []
+    single_metric_calls = []
+    original_multi_ci = metrics_module.cluster_bootstrap_multi_ci
+
+    def multi_ci_spy(data, statistic_fns, cluster_col, **kwargs):
+        batched_calls.append((len(data), tuple(statistic_fns), cluster_col))
+        return original_multi_ci(
+            data, statistic_fns, cluster_col, n_bootstrap=7, **kwargs
+        )
+
+    def single_ci_spy(*args, **kwargs):
+        single_metric_calls.append((args, kwargs))
+        return {
+            "lower": None,
+            "upper": None,
+            "ci_low": None,
+            "ci_high": None,
+            "support": 0,
+            "n_clusters": 0,
+            "n_bootstrap": 10_000,
+            "confidence_level": 0.95,
+            "uncertainty_method": "dataset_cluster_bootstrap_percentile",
+            "cluster_column": "benchmark_case",
+            "stable": False,
+            "status": "unavailable",
+        }
+
+    def fail_if_old_dataset_macro_ci(*args, **kwargs):
+        raise AssertionError("final dataset-macro CIs must use the batched helper")
+
+    monkeypatch.setattr(metrics_module, "cluster_bootstrap_multi_ci", multi_ci_spy)
+    monkeypatch.setattr(metrics_module, "cluster_bootstrap_ci", single_ci_spy)
+    monkeypatch.setattr(metrics_module, "_dataset_macro_ci", fail_if_old_dataset_macro_ci)
+
+    summary = summarize_trials(records, include_model_condition_breakdown=False)
+
+    assert len(batched_calls) == 3
+    assert [len(call[1]) for call in batched_calls] == [23, 6, 6]
+    assert all(call[2] == "benchmark_case" for call in batched_calls)
+    assert single_metric_calls  # Existing paired/holdout summaries remain unchanged.
+    assert set(summary["dataset_macro_gate_health"]["confidence_intervals"]) >= {
+        "mean_regret_reduction",
+        "mean_paper_holdout_delta",
+    }
+    assert set(summary["paper_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"]) == {
+        "beneficial_intervention_rate",
+        "harmful_intervention_rate",
+        "neutral_intervention_rate",
+        "intervention_precision",
+        "harm_rate",
+        "mean_paper_holdout_delta",
+    }
 
 
 def test_historical_classification_delta_is_read_without_reusing_regression_units():

@@ -12,6 +12,7 @@ from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_REPLICATES,
     DEFAULT_BOOTSTRAP_SEED,
     cluster_bootstrap_ci,
+    cluster_bootstrap_multi_ci,
     resolve_cluster_key,
 )
 
@@ -1342,6 +1343,43 @@ def _dataset_macro_ci(
     return cluster_bootstrap_ci(records, statistic, "benchmark_case")
 
 
+def _dataset_macro_multi_ci(
+    records: list[dict[str, Any]], metrics: tuple[str, ...], *, tolerance: float,
+    catastrophic_threshold: float, weights: GateUtilityWeights,
+    holdout_tolerances: dict[str, float] | float | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Compute dataset-macro CIs from one shared bootstrap pass.
+
+    The cache is scoped to the current call and keyed by sample identity. All
+    metric callbacks receive the same replicate object, so one health summary
+    serves every requested metric for that draw.
+    """
+
+    cached_sample: Any = None
+    cached_health: dict[str, Any] | None = None
+
+    def health_for(sample: Any) -> dict[str, Any]:
+        nonlocal cached_sample, cached_health
+        if sample is not cached_sample:
+            cached_sample = sample
+            cached_health = _dataset_macro_health(
+                sample,
+                tolerance=tolerance,
+                catastrophic_threshold=catastrophic_threshold,
+                weights=weights,
+                holdout_tolerances=holdout_tolerances,
+                include_confidence_intervals=False,
+            )
+        assert cached_health is not None
+        return cached_health
+
+    statistic_fns = {
+        metric: (lambda sample, metric=metric: health_for(sample).get(metric))
+        for metric in metrics
+    }
+    return cluster_bootstrap_multi_ci(records, statistic_fns, "benchmark_case")
+
+
 def summarize_gate_health(
     records: list[dict[str, Any]],
     *,
@@ -1923,14 +1961,14 @@ def summarize_trials(
         "intervention_precision_excluding_neutral",
     )
     dataset_macro_cis = (
-        {
-            metric: _dataset_macro_ci(
-                completed, metric, tolerance=neutral_tolerance,
-                catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
-                weights=weights, holdout_tolerances=holdout_tolerances,
-            )
-            for metric in macro_ci_metrics
-        }
+        _dataset_macro_multi_ci(
+            completed,
+            macro_ci_metrics,
+            tolerance=neutral_tolerance,
+            catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+            weights=weights,
+            holdout_tolerances=holdout_tolerances,
+        )
         if compute_confidence_intervals
         else {}
     )
@@ -1969,24 +2007,21 @@ def summarize_trials(
             include_confidence_intervals=compute_confidence_intervals,
         )
         task_macro_ci = (
-            {
-                metric: _dataset_macro_ci(
-                    task_records,
-                    metric,
-                    tolerance=neutral_tolerance,
-                    catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
-                    weights=weights,
-                    holdout_tolerances=holdout_tolerances,
-                )
-                for metric in (
+            _dataset_macro_multi_ci(
+                task_records,
+                (
                     "beneficial_intervention_rate",
                     "harmful_intervention_rate",
                     "neutral_intervention_rate",
                     "intervention_precision",
                     "harm_rate",
                     "mean_paper_holdout_delta",
-                )
-            }
+                ),
+                tolerance=neutral_tolerance,
+                catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
+                weights=weights,
+                holdout_tolerances=holdout_tolerances,
+            )
             if compute_confidence_intervals
             else {}
         )
