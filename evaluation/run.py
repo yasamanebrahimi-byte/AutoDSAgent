@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 from evaluation.runner import run_evaluation
 
@@ -27,7 +28,8 @@ def main() -> None:
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split-seed", action="append", dest="split_seeds", type=int)
-    parser.add_argument("--model", default="gpt-4.1-mini")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=("openai", "google"), default="openai")
     parser.add_argument(
         "--planner-model",
         help="Model used for the initial modeling proposal; defaults to --model.",
@@ -62,7 +64,7 @@ def main() -> None:
     parser.add_argument("--case", action="append", dest="cases", help="Benchmark case name; repeatable.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use the documented offline fallback.")
-    mode.add_argument("--live", action="store_true", help="Request live OpenAI trials; use local/synthetic cases for development smoke tests.")
+    mode.add_argument("--live", action="store_true", help="Request live provider trials; use local/synthetic cases for development smoke tests.")
     parser.add_argument("--resume", action="store_true", help="Resume missing trial IDs from an existing compatible output bundle.")
     parser.add_argument(
         "--require-live",
@@ -79,12 +81,18 @@ def main() -> None:
         help="Add the small deterministic data-quality scenario suite.",
     )
     args = parser.parse_args()
+    default_model = (
+        os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        if args.provider == "openai"
+        else os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    )
     result = run_evaluation(
         args.output,
         repetitions=args.repetitions,
         seed=args.seed,
         split_seeds=args.split_seeds or [args.seed],
-        model=args.model,
+        model=args.model or default_model,
+        provider=args.provider,
         planner_model=args.planner_model,
         reconciler_model=args.reconciler_model,
         offline=args.offline,

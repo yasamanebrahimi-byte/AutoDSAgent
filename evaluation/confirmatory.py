@@ -22,6 +22,7 @@ CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.
 CONFIRMATORY_MANIFEST_RELATIVE_PATHS = (
     "evaluation/configs/paper_confirmatory_v1.json",
     "evaluation/configs/paper_confirmatory_v2.json",
+    "evaluation/configs/paper_cross_provider_replication_v1.json",
 )
 CONFIRMATORY_SPLIT_SEEDS = (42,)
 CONFIRMATORY_REPETITIONS = 3
@@ -362,11 +363,13 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
     declared_providers = {condition["provider"] for condition in conditions}
     if not declared_providers:
         mismatches.append("model_conditions must declare at least one provider")
-    # The current executor is OpenAI-specific, but the manifest schema keeps
-    # provider metadata explicit so future provider conditions do not require a
-    # redesign of the experiment matrix.
-    if any(provider != "openai" for provider in declared_providers):
-        mismatches.append("the current confirmatory executor supports provider='openai' only")
+    from app.llm import SUPPORTED_LLM_PROVIDERS
+
+    unsupported_providers = sorted(declared_providers - SUPPORTED_LLM_PROVIDERS)
+    if unsupported_providers:
+        mismatches.append(
+            "unsupported confirmatory provider(s): " + ", ".join(unsupported_providers)
+        )
     repetitions = loaded.get("splits_and_repetitions") or {}
     if repetitions.get("split_seeds") != list(CONFIRMATORY_SPLIT_SEEDS):
         mismatches.append(f"split_seeds must be {list(CONFIRMATORY_SPLIT_SEEDS)!r}")
@@ -385,7 +388,11 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
     try:
         from app.deterministic_policy import DeterministicPolicy
         from app.empirical_challenge_probe import EmpiricalProbePolicy
-        from app.llm import LEGACY_PROMPT_SCHEMA_VERSION, PROMPT_SCHEMA_VERSION
+        from app.llm import (
+            LEGACY_PROMPT_SCHEMA_VERSION,
+            PROMPT_SCHEMA_VERSION,
+            validate_generation_settings,
+        )
         from app.validation import EXECUTION_CONTRACT_SCHEMA_VERSION
         from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
         from evaluation.external_benchmarks import (
@@ -417,6 +424,23 @@ def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
             "execution_contract_schema_version"
         ) != EXECUTION_CONTRACT_SCHEMA_VERSION:
             mismatches.append("execution-contract schema version differs from the runtime contract")
+
+        for condition in conditions:
+            try:
+                validate_generation_settings(
+                    condition["provider"],
+                    condition["planner_model"],
+                    condition.get("generation_settings"),
+                )
+                validate_generation_settings(
+                    condition["provider"],
+                    condition["reconciler_model"],
+                    condition.get("generation_settings"),
+                )
+            except ValueError as exc:
+                mismatches.append(
+                    f"model condition {condition['condition_id']!r} has invalid generation settings: {exc}"
+                )
 
         holdout = loaded.get("holdout") or {}
         if holdout.get("fraction") != 0.2:

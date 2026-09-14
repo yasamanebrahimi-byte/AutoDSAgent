@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -207,25 +208,52 @@ def _read_trials(path: Path) -> list[dict[str, Any]]:
 def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[str, Any]:
     summary = result["summary"]
     health = summary.get("gate_health", {})
+    def successful_live(row: dict[str, Any]) -> bool:
+        return row.get("agent_source") == str(row.get("provider") or "openai")
+
+    provider_names = sorted({str(row.get("provider") or "openai") for row in result.get("trials", [])})
     live = {
         "requested_live_trials": sum(bool(row.get("requested_live_trial")) for row in result.get("trials", [])),
+        "successful_initial_live_calls": sum(
+            bool(row.get("initial_modeling_call_made")) and successful_live(row)
+            for row in result.get("trials", [])
+        ),
         "successful_initial_openai_calls": sum(
             bool(row.get("initial_modeling_call_made")) and row.get("agent_source") == "openai"
             for row in result.get("trials", [])
         ),
+        "successful_initial_calls_by_provider": {
+            provider: sum(
+                bool(row.get("initial_modeling_call_made")) and successful_live(row)
+                for row in result.get("trials", [])
+                if str(row.get("provider") or "openai") == provider
+            )
+            for provider in provider_names
+        },
         "failed_initial_openai_calls": sum(
             bool(row.get("requested_live_trial")) and row.get("agent_request_status") == "failed"
             for row in result.get("trials", [])
         ),
+        "failed_initial_live_calls": sum(
+            bool(row.get("requested_live_trial"))
+            and row.get("agent_request_status") == "failed"
+            for row in result.get("trials", [])
+        ),
         "successful_reconciliation_calls": sum(
             bool(row.get("reconciliation_api_call_made")) for row in result.get("trials", [])
+        ),
+        "successful_reconciliation_live_calls": sum(
+            bool(row.get("reconciliation_api_call_made"))
+            and str(row.get("reconciliation_agent_source") or "")
+            == str(row.get("provider") or "openai")
+            for row in result.get("trials", [])
         ),
         "failed_reconciliation_calls": sum(
             bool(row.get("reconciliation_request_failed")) for row in result.get("trials", [])
         ),
         "fallback_rows": sum(bool(row.get("fallback_row")) for row in result.get("trials", [])),
         "planner_live_success": sum(
-            bool(row.get("requested_live_trial")) and row.get("agent_source") == "openai"
+            bool(row.get("requested_live_trial")) and successful_live(row)
             for row in result.get("trials", [])
         ),
         "reconciler_live_success": sum(
@@ -901,7 +929,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
             "analysis_role", "secondary"
         )
         lines.append(
-            f"| {role} / descriptive-only | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_openai_calls']} | {api['successful_reconciliation_calls']} | {probe} |"
+            f"| {role} / descriptive-only | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_live_calls']} | {api['successful_reconciliation_live_calls']} | {probe} |"
         )
     lines.extend(["", "### Combined Cross-Model Descriptive Paired Comparisons", ""])
     for item in payload.get("descriptive_combined_paired_comparisons", {}).get("comparisons", []):
@@ -920,7 +948,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
     for name, row in payload["central_by_ablation"].items():
         api = row["api_usage"]
         lines.append(
-            f"- `{name}`: requested `{api['requested_live_trials']}`, initial failures `{api['failed_initial_openai_calls']}`, reconciliation failures `{api['failed_reconciliation_calls']}`, fallback rows `{api['fallback_rows']}`."
+            f"- `{name}`: requested `{api['requested_live_trials']}`, initial failures `{api['failed_initial_live_calls']}`, reconciliation failures `{api['failed_reconciliation_calls']}`, fallback rows `{api['fallback_rows']}`."
         )
     lines.extend([
         "",
@@ -938,6 +966,7 @@ def run_ablation_study(
     split_seeds: Sequence[int] = (42,),
     repetitions: int = 1,
     model: str = "gpt-4.1-mini",
+    provider: str = "openai",
     planner_model: str | None = None,
     reconciler_model: str | None = None,
     offline: bool = False,
@@ -1143,10 +1172,16 @@ def run_ablation_study(
             for condition in (frozen_conditions or [{"condition_id": "default", "llm_repetitions": repetitions}])
         },
         "model": model,
+        "provider": (
+            sorted({str(condition.get("provider", provider)) for condition in frozen_conditions})
+            if frozen_conditions is not None
+            else provider
+        ),
         "planner_model": resolved_planner_model,
         "reconciler_model": resolved_reconciler_model,
         "model_conditions": frozen_conditions or [{
             "condition_id": "default",
+            "provider": provider,
             "planner_model": resolved_planner_model,
             "reconciler_model": resolved_reconciler_model,
             "llm_repetitions": repetitions,
@@ -1263,6 +1298,7 @@ def run_ablation_study(
             "llm_repetitions",
             "selected_ablations",
             "require_live",
+            "provider",
             "suite",
             "tier",
             "planner_model",
@@ -1325,7 +1361,7 @@ def run_ablation_study(
                 model=condition["planner_model"],
                 planner_model=condition["planner_model"],
                 reconciler_model=condition["reconciler_model"],
-                provider=str(condition.get("provider", "openai")),
+                provider=str(condition.get("provider", provider)),
                 offline=offline,
                 require_live=require_live,
                 include_perturbations=include_perturbations,
@@ -1594,7 +1630,8 @@ def main() -> None:
     parser.add_argument("--split-seed", action="append", dest="split_seeds")
     parser.add_argument("--split-seeds", action="append", dest="split_seeds_alias")
     parser.add_argument("--repetitions", type=int, default=1)
-    parser.add_argument("--model", default="gpt-4.1-mini")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=("openai", "google"), default="openai")
     parser.add_argument("--planner-model")
     parser.add_argument("--reconciler-model")
     parser.add_argument("--suite", choices=("local", "external"), default="local")
@@ -1610,11 +1647,17 @@ def main() -> None:
         help="Opt into a frozen external confirmatory manifest; development runs omit this flag.",
     )
     args = parser.parse_args()
+    default_model = (
+        os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        if args.provider == "openai"
+        else os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    )
     result = run_ablation_study(
         args.output,
         split_seeds=_parse_split_seeds((args.split_seeds or []) + (args.split_seeds_alias or [])),
         repetitions=args.repetitions,
-        model=args.model,
+        model=args.model or default_model,
+        provider=args.provider,
         planner_model=args.planner_model,
         reconciler_model=args.reconciler_model,
         ablations=args.ablations,

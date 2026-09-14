@@ -18,7 +18,7 @@ from app.deterministic import (
     profile_dataframe,
     transform_cleaning,
 )
-from app.llm import OpenAIAgents
+from app.llm import BaseAgents, OpenAIAgents, build_agents, redact_error
 from app.modeling import fit_selected_model
 from app.empirical_challenge_probe import (
     EmpiricalProbePolicy,
@@ -65,6 +65,27 @@ from app.validation import (
 )
 
 
+_DEFAULT_OPENAI_AGENTS = OpenAIAgents
+
+
+def _build_pipeline_agents(
+    *, provider: str, api_key: str | None, model: str
+) -> BaseAgents:
+    """Build agents through the factory, retaining the legacy test seam."""
+
+    if provider == "openai" and OpenAIAgents is not _DEFAULT_OPENAI_AGENTS:
+        agents = OpenAIAgents(api_key=api_key, model=model)
+    else:
+        agents = build_agents(provider=provider, api_key=api_key, model=model)
+    # Keep lightweight injected test doubles compatible with the provider
+    # metadata expected by the pipeline.
+    if not hasattr(agents, "provider"):
+        agents.provider = provider
+    if not hasattr(agents, "api_key"):
+        agents.api_key = api_key
+    return agents
+
+
 def run_analysis(
     dataset_path: str | Path,
     question: str,
@@ -72,6 +93,7 @@ def run_analysis(
     output_dir: str | Path = "runs",
     api_key: str | None = None,
     model: str = "gpt-4.1-mini",
+    provider: str = "openai",
     offline: bool = False,
     random_state: int = 42,
     test_size: float = 0.2,
@@ -93,7 +115,7 @@ def run_analysis(
     for child in ["data", "plots", "model"]:
         (run_dir / child).mkdir(parents=True, exist_ok=True)
 
-    agents = OpenAIAgents(api_key=api_key, model=model)
+    agents = _build_pipeline_agents(provider=provider, api_key=api_key, model=model)
     warnings: list[str] = []
     agent_sources: dict[str, str] = {}
     formulation_agent: FormulationPlan | None = None
@@ -186,6 +208,8 @@ def run_analysis(
             warnings,
             agent_sources,
             offline=offline,
+            provider=agents.provider,
+            extra_secrets=(agents.api_key,) if agents.api_key else (),
         )
         if target_column and formulation_agent.target_column != target_column:
             # The external proposal is retained in the warning, but the
@@ -257,6 +281,8 @@ def run_analysis(
                 warnings,
                 agent_sources,
                 offline=offline,
+                provider=agents.provider,
+                extra_secrets=(agents.api_key,) if agents.api_key else (),
             )
             established_target = formulation_resolution.selected_target_column
             established_task = formulation_resolution.selected_task_type
@@ -341,6 +367,8 @@ def run_analysis(
             warnings,
             agent_sources,
             offline=offline,
+            provider=agents.provider,
+            extra_secrets=(agents.api_key,) if agents.api_key else (),
         )
         deterministic = _deterministic_recommendation_or_fail(
             planning_frame,
@@ -389,6 +417,8 @@ def run_analysis(
             warnings,
             agent_sources,
             offline=offline,
+            provider=agents.provider,
+            extra_secrets=(agents.api_key,) if agents.api_key else (),
         )
         row_position_column = "__autods_row_position__"
         if row_position_column in dataframe.columns:
@@ -516,6 +546,8 @@ def run_analysis(
             warnings,
             agent_sources,
             offline=offline,
+            provider=agents.provider,
+            extra_secrets=(agents.api_key,) if agents.api_key else (),
         )
         write_json(
             run_dir / "eda.json",
@@ -571,6 +603,8 @@ def run_analysis(
             warnings,
             agent_sources,
             offline=offline,
+            provider=agents.provider,
+            extra_secrets=(agents.api_key,) if agents.api_key else (),
         )
         artifact_names = [
             "profile.json",
@@ -618,7 +652,8 @@ def run_analysis(
             "dataset": str(dataset_path),
             "question": question,
             "api_model": agents.model,
-            "api_used": any(source == "openai" for source in agent_sources.values()),
+            "provider": agents.provider,
+            "api_used": any(source == agents.provider for source in agent_sources.values()),
             "agent_sources": agent_sources,
             "warnings": warnings,
             "validation_status": validation["status"],
@@ -653,7 +688,7 @@ def run_analysis(
         decision_payload["failure"] = {
             "code": getattr(exc, "code", "validation_failed"),
             "error_type": type(exc).__name__,
-            "message": str(exc),
+            "message": redact_error(exc, (agents.api_key,) if agents.api_key else ()),
             "check_codes": [check.code for check in exc.result.failed_checks]
             if exc.result is not None
             else [],
@@ -677,7 +712,8 @@ def run_analysis(
                 "dataset": str(dataset_path),
                 "validation_status": "failed",
                 "failure": decision_payload["failure"],
-                "api_used": any(source == "openai" for source in agent_sources.values()),
+                "provider": agents.provider,
+                "api_used": any(source == agents.provider for source in agent_sources.values()),
                 "deterministic_policy_version": deterministic.policy_version if deterministic else None,
                 "gate_completed_before_training": False,
                 "formulation_gate_status": decision_payload["formulation_gate_status"],
@@ -693,7 +729,7 @@ def run_analysis(
 
 
 def _validate_modeling_gate(
-    agents: OpenAIAgents,
+    agents: BaseAgents,
     profile: dict[str, Any],
     question: str,
     modeling_plan: ModelingPlan,
@@ -727,6 +763,10 @@ def _validate_modeling_gate(
     The returned artifact records the independent proposals, safety checks,
     selective decision, and final approved plan in separate sections.
     """
+    # Direct callers may still provide the pre-provider test double, which did
+    # not expose provider metadata.  Preserve its historical OpenAI identity.
+    agent_provider = getattr(agents, "provider", "openai")
+    agent_api_key = getattr(agents, "api_key", None)
     records = [
         record
         for record in reconciliation_profile.get("column_details", [])
@@ -1139,6 +1179,8 @@ def _validate_modeling_gate(
                 warnings,
                 agent_sources,
                 offline=offline,
+                provider=agent_provider,
+                extra_secrets=(agent_api_key,) if agent_api_key else (),
                 strict_live=strict_live,
             )
             if blinded_reconciliation is not None:
@@ -1532,6 +1574,8 @@ def _call_or_fallback(
     warnings: list[str],
     agent_sources: dict[str, str],
     offline: bool,
+    provider: str = "openai",
+    extra_secrets: tuple[str, ...] = (),
     strict_live: bool = False,
 ) -> Any:
     if offline:
@@ -1543,10 +1587,10 @@ def _call_or_fallback(
         if strict_live:
             agent_sources[name] = "failed"
             raise
-        warnings.append(f"{name} agent fallback used: {exc}")
+        warnings.append(f"{name} agent fallback used: {redact_error(exc, extra_secrets)}")
         agent_sources[name] = "offline_fallback"
         return fallback()
-    agent_sources[name] = "openai"
+    agent_sources[name] = provider
     return value
 
 

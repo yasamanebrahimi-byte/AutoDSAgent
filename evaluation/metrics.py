@@ -1494,7 +1494,7 @@ def summarize_trials(
     utility_weights: GateUtilityWeights | dict[str, float] | None = None,
     include_model_condition_breakdown: bool = True,
 ) -> dict[str, Any]:
-    """Aggregate rows while keeping operational and OpenAI-only views separate."""
+    """Aggregate rows while keeping operational and provider-specific views separate."""
 
     configured = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     neutral_tolerance = float(
@@ -1513,6 +1513,11 @@ def summarize_trials(
     total = len(trials)
     failed = [record for record in trials if record.get("trial_status") == "failed"]
     completed = [record for record in trials if record.get("trial_status") != "failed"]
+    def successful_live_provider_call(record: dict[str, Any]) -> bool:
+        provider = str(record.get("provider") or "openai")
+        return record.get("agent_source") == provider
+
+    live_provider_trials = [record for record in completed if successful_live_provider_call(record)]
     openai = [record for record in completed if record.get("agent_source") == "openai"]
     clean = [record for record in trials if record.get("perturbation_id", "clean") == "clean"]
     deterministic_available = [
@@ -1919,8 +1924,13 @@ def summarize_trials(
     }
     for case, item in by_dataset.items():
         dataset_openai = [record for record in openai if record.get("benchmark_case") == case]
+        dataset_live_provider = [
+            record for record in live_provider_trials if record.get("benchmark_case") == case
+        ]
         item["openai_trial_count"] = len(dataset_openai)
         item["openai_only"] = aggregate_for(dataset_openai)
+        item["live_provider_trial_count"] = len(dataset_live_provider)
+        item["live_provider_only"] = aggregate_for(dataset_live_provider)
     by_task = {
         task: aggregate_for([record for record in completed if record.get("task_type") == task])
         for task in ("classification", "regression")
@@ -2122,6 +2132,21 @@ def summarize_trials(
         "perturbation_trial_count": total - len(clean),
         "requested_live_trials": sum(bool(record.get("requested_live_trial")) for record in trials),
         "successful_openai_trials": sum(record.get("agent_source") == "openai" for record in trials),
+        "successful_initial_live_calls": sum(
+            bool(record.get("initial_modeling_call_made"))
+            and successful_live_provider_call(record)
+            for record in trials
+        ),
+        "successful_live_provider_trials": len(live_provider_trials),
+        "successful_initial_live_calls_by_provider": {
+            provider: sum(
+                bool(record.get("initial_modeling_call_made"))
+                and successful_live_provider_call(record)
+                for record in trials
+                if str(record.get("provider") or "openai") == provider
+            )
+            for provider in sorted({str(record.get("provider") or "openai") for record in trials})
+        },
         "offline_fallback_trials": sum(record.get("agent_source") == "offline_fallback" for record in trials),
         "failed_trials": len(failed),
         "live_request_failed_trials": sum(record.get("live_request_failed") is True for record in trials),
@@ -2129,7 +2154,13 @@ def summarize_trials(
         "live_required": any(bool(record.get("require_live")) for record in trials),
         "fallback_rows": sum(bool(record.get("fallback_row")) for record in trials),
         "planner_live_success": sum(
-            bool(record.get("requested_live_trial")) and record.get("agent_source") == "openai"
+            bool(record.get("requested_live_trial")) and successful_live_provider_call(record)
+            for record in trials
+        ),
+        "successful_reconciliation_live_calls": sum(
+            bool(record.get("reconciliation_api_call_made"))
+            and str(record.get("reconciliation_agent_source") or "")
+            == str(record.get("provider") or "openai")
             for record in trials
         ),
         "reconciler_live_success": sum(
@@ -2146,7 +2177,7 @@ def summarize_trials(
                 or bool(record.get("fallback_row"))
                 or (
                     bool(record.get("requested_live_trial"))
-                    and record.get("agent_source") not in {"openai"}
+                    and not successful_live_provider_call(record)
                 )
             )
             for record in trials
@@ -2470,6 +2501,12 @@ def summarize_trials(
         "stability_by_dataset": {
             case: _stability([record for record in openai if record.get("benchmark_case") == case])
             for case in sorted({str(record.get("benchmark_case")) for record in openai})
+        },
+        "live_provider_stability_by_dataset": {
+            case: _stability(
+                [record for record in live_provider_trials if record.get("benchmark_case") == case]
+            )
+            for case in sorted({str(record.get("benchmark_case")) for record in live_provider_trials})
         },
         "source_counts": source_counts,
     }

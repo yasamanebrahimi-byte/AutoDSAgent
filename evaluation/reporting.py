@@ -69,6 +69,8 @@ def render_summary_markdown(
     """Render only from saved rows and summary values; no LLM prose is used."""
 
     openai_trials = [record for record in trials if record.get("agent_source") == "openai"]
+    requested_providers = config.get("provider", "openai")
+    provider_label = ", ".join(str(item) for item in requested_providers) if isinstance(requested_providers, list) else str(requested_providers)
     openai_only = summary.get("openai_only", {})
     openai_pair = summary.get("openai_only_paired_stats", {})
     outcomes = summary.get("gating_outcome_counts", {})
@@ -87,7 +89,7 @@ def render_summary_markdown(
         f"- Repetitions per benchmark/scenario: **{config.get('repetitions', 'n/a')}**.",
         f"- Base seed: **{config.get('seed', 'n/a')}**; holdout fraction: **{config.get('test_size', 'n/a')}**.",
         f"- Benchmark suite: `{config.get('suite', 'local')}`; tier: `{config.get('tier')}`.",
-        f"- Planner model: `{config.get('planner_model_requested', config.get('agent_model_requested', 'n/a'))}`; reconciler model: `{config.get('reconciler_model_requested', config.get('agent_model_requested', 'n/a'))}`; planner prompt schema: `{config.get('planner_prompt_schema_version', config.get('prompt_schema_version', 'n/a'))}`; reconciler prompt schema: `{config.get('reconciler_prompt_schema_version', 'n/a')}`.",
+        f"- Provider: `{provider_label}`; planner model: `{config.get('planner_model_requested', config.get('agent_model_requested', 'n/a'))}`; reconciler model: `{config.get('reconciler_model_requested', config.get('agent_model_requested', 'n/a'))}`; planner prompt schema: `{config.get('planner_prompt_schema_version', config.get('prompt_schema_version', 'n/a'))}`; reconciler prompt schema: `{config.get('reconciler_prompt_schema_version', 'n/a')}`.",
         f"- Gate objective version: `{config.get('gate_objective_version', summary.get('gate_objective_version', 'n/a'))}`; training/reference neutrality tolerance: `{summary.get('thresholds', {}).get('neutral_tolerance', 'n/a')}`; holdout tolerances: classification `{summary.get('thresholds', {}).get('classification_holdout_neutral_tolerance', 'n/a')}` macro-F1 points, regression `{summary.get('thresholds', {}).get('regression_holdout_neutral_tolerance', 'n/a')}` relative RMSE; catastrophic threshold: `{summary.get('thresholds', {}).get('catastrophic_regret_threshold', 'n/a')}`.",
         f"- Repository commit: `{config.get('repository_commit') or 'unavailable'}`.",
         "- Each repetition keeps the case, frozen train/holdout membership, and training-only profile fixed; repetition IDs are aligned slots for balanced analysis, not shared-seed stochastic matches across separate planner calls.",
@@ -100,6 +102,7 @@ def render_summary_markdown(
         "| Trial category | Count |",
         "|---|---:|",
         f"| Requested live trials | {summary.get('requested_live_trials', 0)} |",
+        f"| Successful requested-provider live calls | {summary.get('successful_initial_live_calls', summary.get('planner_live_success', 0))} |",
         f"| Successful OpenAI trials | {summary.get('successful_openai_trials', 0)} |",
         f"| Offline fallback trials | {summary.get('offline_fallback_trials', 0)} |",
         f"| Failed trials | {summary.get('failed_trials', 0)} |",
@@ -109,9 +112,10 @@ def render_summary_markdown(
         f"| Fallback rows | {summary.get('fallback_rows', 0)} |",
         f"| Planner live successes | {summary.get('planner_live_success', summary.get('successful_openai_trials', 0))} |",
         f"| Reconciler live successes | {summary.get('reconciler_live_success', 0)} |",
+        f"| Successful reconciliation live calls | {summary.get('successful_reconciliation_live_calls', 0)} |",
         f"| Strict-live validity | {summary.get('strict_live_valid', True)} |",
         "",
-        "Claims about LLM behavior below use `agent_source == \"openai\"` only.",
+        "Claims about successful live LLM behavior below use `agent_source` equal to the requested provider; legacy OpenAI-only diagnostics are labeled separately.",
         "",
         "## Gate Health",
         "",
@@ -146,10 +150,10 @@ f"| Within-model-condition paper holdout delta | {_number(summary.get('dataset_m
             "- External results are evaluation-only and must not be used for policy calibration or threshold/prompt tuning.",
             "",
         ]
-    stability = summary.get("stability_by_dataset", {})
+    stability = summary.get("live_provider_stability_by_dataset") or summary.get("stability_by_dataset", {})
     if stability:
         rows.extend([
-            "| Dataset | OpenAI trials | Unique initial methods | Modal method | Modal frequency | Pairwise consistency |",
+            "| Dataset | Live-provider trials | Unique initial methods | Modal method | Modal frequency | Pairwise consistency |",
             "|---|---:|---:|---|---:|---:|",
         ])
         for dataset, item in stability.items():
@@ -157,7 +161,7 @@ f"| Within-model-condition paper holdout delta | {_number(summary.get('dataset_m
                 f"| {dataset} | {item.get('trial_count', 0)} | {item.get('unique_initial_methods_selected', 0)} | {item.get('modal_method', 'n/a')} | {_percent(item.get('modal_method_rate'))} | {_percent(item.get('pairwise_consistency'))} |"
             )
     else:
-        rows.append("No successful OpenAI trials were recorded, so live decision stability is not estimable.")
+        rows.append("No successful requested-provider trials were recorded, so live decision stability is not estimable.")
     model_summaries = summary.get("by_model_condition", {})
     if model_summaries:
         rows.extend([
@@ -231,10 +235,10 @@ f"| Within-model-condition paper holdout delta | {_number(summary.get('dataset_m
         "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|",
     ])
     for dataset, item in summary.get("by_dataset", {}).items():
-        live_item = item.get("openai_only") or item
+        live_item = item.get("live_provider_only") or item.get("openai_only") or item
         item_outcomes = live_item.get("gating_outcome_counts", {})
         rows.append(
-            f"| {dataset} | {item.get('openai_trial_count', 0)} | {live_item.get('challenges', 0)} | {live_item.get('abstentions', 0)} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('neutral', item_outcomes.get('tie', 0))} | {_percent(live_item.get('intervention_precision'))} | {_percent(live_item.get('harmful_intervention_rate'))} | {_number(live_item.get('mean_regret_reduction'))} | {live_item.get('catastrophic_prevented_count', 0)} / {live_item.get('catastrophic_introduced_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} -> {_percent(live_item.get('gated_empirical_reference_match_rate'))} |"
+            f"| {dataset} | {item.get('live_provider_trial_count', item.get('openai_trial_count', 0))} | {live_item.get('challenges', 0)} | {live_item.get('abstentions', 0)} | {item_outcomes.get('improved', 0)} / {item_outcomes.get('worsened', 0)} / {item_outcomes.get('neutral', item_outcomes.get('tie', 0))} | {_percent(live_item.get('intervention_precision'))} | {_percent(live_item.get('harmful_intervention_rate'))} | {_number(live_item.get('mean_regret_reduction'))} | {live_item.get('catastrophic_prevented_count', 0)} / {live_item.get('catastrophic_introduced_count', 0)} | {_percent(live_item.get('agent_empirical_reference_match_rate'))} -> {_percent(live_item.get('gated_empirical_reference_match_rate'))} |"
         )
     rows.extend([
         "",

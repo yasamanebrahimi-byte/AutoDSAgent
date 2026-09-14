@@ -18,6 +18,7 @@ _MATERIAL_PACKAGES = (
     "pandas",
     "scikit-learn",
     "openai",
+    "google-genai",
     "openml",
     "pydantic",
     "joblib",

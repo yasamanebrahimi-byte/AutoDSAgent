@@ -1,6 +1,6 @@
 # AutoDS Agent
 
-AutoDS Agent is an auditable workflow for classification and regression on tabular CSV data. It combines optional OpenAI agent suggestions with deterministic validation, preprocessing, model training, and reporting.
+AutoDS Agent is an auditable workflow for classification and regression on tabular CSV data. It combines optional provider-backed agent suggestions with deterministic validation, preprocessing, model training, and reporting.
 
 The repository also contains a narrower research evaluation. Its paper-facing
 claim concerns LLM-based model-family/preprocessing planning for supervised
@@ -53,8 +53,8 @@ are initial untouched-holdout planner quality and paired initial-plan validity,
 not intervention delta; results remain separate by model condition and
 secondary to the selective-intervention estimand.
 
-The confirmatory matrix is declared in the manifest and currently contains only
-GPT-5.6 Luna, Sol, and Terra. Each condition has three LLM repetitions
+The historical OpenAI confirmatory matrix is declared in its manifest and
+contains GPT-5.6 Luna, Sol, and Terra. Each condition has three LLM repetitions
 (`rep_001`–`rep_003`) and split seed `42`:
 
 | Condition | Snapshot |
@@ -76,10 +76,18 @@ bootstrap. The 40-task OpenML/AMLB panel
 is a frozen, predeclared evaluation panel, not a statistically random sample
 of AMLB tasks.
 
-## Requirements
+The new draft cross-provider replication is declared separately in
+`evaluation/configs/paper_cross_provider_replication_v1.json`. It has two
+Google Gemini conditions (`gemini-3.8-flash` and `gemini-3.5-flash-lite`), the
+same three repetitions, and the same 40-task/seven-arm design, for 1,680
+planned matrix units. It is intentionally not frozen or externally executed.
+
+## Provider support
 
 - Python 3.11+
-- An OpenAI API key for API-backed runs; offline runs need no key
+- OpenAI API-backed runs use `OPENAI_API_KEY`.
+- Google Gemini API-backed runs use `GEMINI_API_KEY`, with optional `GOOGLE_API_KEY` fallback.
+- Offline runs need no provider key.
 
 ## Install
 
@@ -134,6 +142,19 @@ $env:OPENAI_API_KEY = "your-key"
 
 Omit `--offline` to use the API. Set `OPENAI_MODEL` or pass `--model` to choose the model. Never commit API keys.
 
+To select Gemini from the product workflow, use `--provider google`:
+
+```bash
+export GEMINI_API_KEY="your-key"
+python -m app \
+  --provider google \
+  --model gemini-3.8-flash \
+  --data path/to/data.csv \
+  --target target_column \
+  --question "What should we predict from these features?" \
+  --output-dir runs
+```
+
 Each run creates a folder under `runs/` containing the final report and reproducible artifacts. The most useful files are:
 
 - `report.md` — results and interpretation
@@ -158,20 +179,26 @@ must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
 outcomes are not part of the normal publication-readiness workflow.
 
-`paper_confirmatory_v1.json` is retained as the historical pilot /
-pre-contract-fix protocol. Its artifacts remain interpretable with their
-recorded source provenance and are excluded from v2 confirmatory claims.
-`paper_confirmatory_v2.json` is the active definitive contract-aware protocol;
-the checked-in manifest is frozen with its current canonical experiment-code
-SHA and source implementation commit recorded. Historical or development
-manifests may remain draft/unfrozen, but that generic workflow state does not
-mean that the active v2 confirmatory manifest is unfrozen. The v2 planner
+The new `cross-provider replication`, which uses Gemini 3.8 Flash and Gemini
+3.5 Flash-Lite, remains separate from the historical OpenAI confirmatory
+baseline. This checkout does not contain a `paper_confirmatory_v3.json` or a
+matching v3 result bundle; the checked-in
+`evaluation/configs/paper_cross_provider_replication_v1.json` is a new draft
+manifest until its result-affecting code is finalized, hashed, frozen, and
+committed. It preserves the 40-task panel, split/holdout protocol, prompts,
+challenger, arbitration policy, ablations, and statistical design; only the
+declared provider/model conditions differ.
+
+`paper_confirmatory_v1.json` remains historical pilot provenance and
+`paper_confirmatory_v2.json` remains the prior contract-aware protocol. Neither
+should be described as the current completed v3 experiment. The planner
 receives the complete executable modeling/preprocessing contract and
 training-only feasibility, but not deterministic recommendations, scores,
 holdout results, or empirical-probe evidence. Hard validation remains an
 independent fail-closed check.
 
-For the Linux VM, use the checked-in runner after the v2 freeze:
+For the historical OpenAI v2 protocol on the Linux VM, use the checked-in
+runner after the v2 freeze:
 
 ```bash
 export OPENAI_API_KEY="your-key"
@@ -187,8 +214,8 @@ before artifacts are modified. The root run configuration records
 Python/platform, package versions, Git commit, experiment-code SHA, manifest
 SHA, and benchmark-manifest SHA.
 
-Confirmatory paper-primary estimates are reported separately for each declared
-model condition (currently Luna, Sol, and Terra). Repetitions remain nested
+Historical OpenAI paper-primary estimates are reported separately for each
+declared model condition (Luna, Sol, and Terra). Repetitions remain nested
 within dataset/task, and dataset/task is the independent statistical unit.
 Any cross-model aggregate or paired comparison is explicitly descriptive and
 audit-only. `llm_with_diagnostics` remains a secondary information-asymmetry
@@ -212,16 +239,22 @@ excluded because its expected hash would otherwise hash itself. A Git commit
 may be recorded as `source_git_commit` for provenance, but it is not used for
 confirmatory validity.
 
-The freeze sequence is: finalize result-affecting code/configuration -> compute
-the experiment code SHA-256 -> insert it as
-`expected_experiment_code_sha256` -> set the v2 manifest to `frozen` -> commit
-the freeze -> validate. Committing the frozen manifest does not change the code
-hash; changing any included result-affecting file does. Reporting distinguishes
+For the existing historical OpenAI v2 protocol, the freeze sequence is:
+finalize result-affecting code/configuration -> compute the experiment code
+SHA-256 -> insert it as `expected_experiment_code_sha256` -> set the v2 manifest
+to `frozen` -> commit the freeze -> validate. Committing the frozen manifest
+does not change the code hash; changing any included result-affecting file does.
+Reporting distinguishes
 hard interception (invalid initial plan prevented from training), hard repair
 (valid deterministic replacement), and soft intervention (a valid plan changed
 after a valid family disagreement). The scope remains selective intervention
 for LLM-based supervised tabular ML planning within this fixed supported
 model/preprocessing search space, not a universal AutoML oracle.
+
+For the Gemini replication, use the same sequence with
+`paper_cross_provider_replication_v1.json`, then run the local-only smoke path
+documented in [`docs/gemini_smoke.md`](docs/gemini_smoke.md). Do not run the
+external benchmark until the new manifest is frozen and reviewed.
 
 ## License
 

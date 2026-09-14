@@ -19,10 +19,14 @@ from app.deterministic import deterministic_recommendation, profile_dataframe
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from app.deterministic_policy import DeterministicPolicy
 from app.llm import (
+    BaseAgents,
+    SUPPORTED_LLM_PROVIDERS,
     LEGACY_PROMPT_SCHEMA_VERSION,
     LLMUnavailable,
+    OpenAIAgents,  # noqa: F401 - legacy import path for downstream callers
     PROMPT_SCHEMA_VERSION,
-    OpenAIAgents,
+    build_agents,
+    redact_error,
 )
 from app.reconciliation import BLINDED_RECONCILIATION_PROMPT_VERSION
 from app.pipeline import (
@@ -161,9 +165,11 @@ class EvaluationConfig:
             "training_only_structural_diagnostics",
         }:
             raise ValueError("Unsupported planner_evidence_mode.")
-        if self.provider != "openai":
+        provider = str(self.provider).strip().lower()
+        object.__setattr__(self, "provider", provider)
+        if provider not in SUPPORTED_LLM_PROVIDERS:
             raise ValueError(
-                "The current executor supports provider='openai'; other providers remain manifest-compatible but are not executable yet."
+                f"Unsupported LLM provider {self.provider!r}; expected one of {sorted(SUPPORTED_LLM_PROVIDERS)}."
             )
 
 
@@ -171,11 +177,13 @@ class _EvaluationGateAgent:
     def __init__(
         self,
         *,
-        live_agents: OpenAIAgents | None,
+        live_agents: BaseAgents | None,
         reconciliation_factory: ModelingReconciliationFactory | None,
         context: dict[str, Any],
     ) -> None:
         self.live_agents = live_agents
+        self.provider = live_agents.provider if live_agents is not None else "openai"
+        self.api_key = live_agents.api_key if live_agents is not None else None
         self.reconciliation_factory = reconciliation_factory
         self.context = context
 
@@ -382,7 +390,7 @@ def _compute_deterministic_recommendation(
 def _choose_source(
     *,
     config: EvaluationConfig,
-    agents: OpenAIAgents,
+    agents: BaseAgents,
     plan_factory: ModelingPlanFactory | None,
     context: dict[str, Any],
     training_profile: dict[str, Any],
@@ -396,9 +404,11 @@ def _choose_source(
         return plan_factory(context), "mock", "mock", "mock", None
     if config.offline or not agents.available:
         if require_live and not config.offline and not agents.available:
-            raise LLMUnavailable("OPENAI_API_KEY is not configured for a required live trial.")
+            variables = " or ".join(getattr(agents, "api_key_env_vars", ("LLM_API_KEY",)))
+            raise LLMUnavailable(f"{variables} is not configured for a required live trial.")
         if not config.offline:
-            warnings.append("OPENAI_API_KEY is unavailable; this trial used the offline fallback.")
+            variables = " or ".join(getattr(agents, "api_key_env_vars", ("LLM_API_KEY",)))
+            warnings.append(f"{variables} is unavailable; this trial used the offline fallback.")
         return (
             _fallback_modeling_plan(
                 training_profile,
@@ -430,7 +440,7 @@ def _choose_source(
                 reasoning=modeling_plan.reasoning,
                 confidence=modeling_plan.confidence,
             ),
-            "openai",
+            config.provider,
             agents.model,
             "succeeded",
             None,
@@ -438,7 +448,10 @@ def _choose_source(
     except Exception as exc:
         if require_live:
             raise
-        warnings.append(f"modeling agent fallback used: {_redact_error(exc)}")
+        warnings.append(
+            f"modeling agent fallback used: "
+            f"{_redact_error(exc, (agents.api_key,) if agents.api_key else ())}"
+        )
         return (
             _fallback_modeling_plan(
                 training_profile,
@@ -449,7 +462,7 @@ def _choose_source(
             "offline_fallback",
             agents.model,
             "failed_fallback",
-            f"{type(exc).__name__}: {exc}",
+            _redact_error(exc, (agents.api_key,) if agents.api_key else ()),
         )
 
 
@@ -517,16 +530,10 @@ def _plan_from_cache_payload(payload: dict[str, Any]) -> ModelingPlan | None:
         return None
 
 
-def _redact_error(error: Exception) -> str:
+def _redact_error(error: Exception, extra_secrets: tuple[str, ...] = ()) -> str:
     """Keep provider errors useful without allowing credential serialization."""
 
-    message = f"{type(error).__name__}: {error}"
-    import os
-
-    secret = os.getenv("OPENAI_API_KEY")
-    if secret:
-        message = message.replace(secret, "[REDACTED]")
-    return message
+    return redact_error(error, extra_secrets)
 
 
 def _effective_model_from_provenance(
@@ -540,6 +547,16 @@ def _effective_model_from_provenance(
     if value is None:
         value = (provenance.get("response_metadata") or {}).get("model")
     return str(value) if value else None
+
+
+def _provenance_model_matches(
+    agents: BaseAgents, provenance: dict[str, Any] | None, expected_model: str
+) -> bool:
+    effective = _effective_model_from_provenance(provenance)
+    return bool(
+        effective
+        and agents._effective_model_matches(str(effective), str(expected_model))
+    )
 
 
 def _write_proposal_cache(path: Path, cache: dict[str, dict[str, Any]]) -> None:
@@ -557,8 +574,8 @@ def _run_trial(
     *,
     plan_factory: ModelingPlanFactory | None,
     reconciliation_factory: ModelingReconciliationFactory | None,
-    agents: OpenAIAgents,
-    reconciler_agents: OpenAIAgents,
+    agents: BaseAgents,
+    reconciler_agents: BaseAgents,
     empirical_reference_cache: dict[str, dict[str, Any]],
     variant: str = "standard",
     proposal_order: tuple[str, str] | None = None,
@@ -573,6 +590,7 @@ def _run_trial(
     proposal_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     trial_started = time.perf_counter()
+    live_source = config.provider
     # Repetitions are stochastic LLM repeats over identical evidence.  The
     # split seed is therefore a property of the case/experiment, not of the
     # repetition number.
@@ -750,7 +768,7 @@ def _run_trial(
     # This prevents a stale development cache from silently contaminating a
     # live-required result bundle.
     can_use_cached = cached_plan is not None and not (
-        config.require_live and (cached_proposal or {}).get("source") != "openai"
+        config.require_live and (cached_proposal or {}).get("source") != live_source
     )
     if config.gate_mode == "deterministic_only":
         if deterministic is not None:
@@ -783,8 +801,10 @@ def _run_trial(
         agent_request_error = None
         planner_api_provenance = (cached_proposal or {}).get("api_provenance")
         if config.require_live:
-            effective_model = _effective_model_from_provenance(planner_api_provenance)
-            if effective_model != str(config.planner_model):
+            if not _provenance_model_matches(
+                agents, planner_api_provenance, str(config.planner_model)
+            ):
+                effective_model = _effective_model_from_provenance(planner_api_provenance)
                 raise LLMUnavailable(
                     "Strict-live cached proposal has no matching effective planner model: "
                     f"expected {config.planner_model!r}, got {effective_model!r}."
@@ -804,9 +824,9 @@ def _run_trial(
         )
         planner_api_provenance = getattr(agents, "last_request_provenance", None)
     else:
-        if config.require_live and initial_source_override != "openai":
+        if config.require_live and initial_source_override != live_source:
             raise LLMUnavailable(
-                "Strict live order-swap trials may reuse only an OpenAI initial proposal."
+                f"Strict live order-swap trials may reuse only a {live_source} initial proposal."
             )
         plan = initial_plan_override
         agent_source = initial_source_override or "cached_order_swap"
@@ -814,9 +834,11 @@ def _run_trial(
         agent_request_status = initial_request_status_override or "cached"
         agent_request_error = initial_request_error_override
         planner_api_provenance = initial_api_provenance_override
-        if config.require_live and agent_source == "openai":
-            effective_model = _effective_model_from_provenance(planner_api_provenance)
-            if effective_model != str(config.planner_model):
+        if config.require_live and agent_source == live_source:
+            if not _provenance_model_matches(
+                agents, planner_api_provenance, str(config.planner_model)
+            ):
+                effective_model = _effective_model_from_provenance(planner_api_provenance)
                 raise LLMUnavailable(
                     "Strict-live reused proposal has no matching effective planner model: "
                     f"expected {config.planner_model!r}, got {effective_model!r}."
@@ -962,14 +984,14 @@ def _run_trial(
                     ),
                 )
                 reconciliation_invoked = gate_result.get("reconciliation") is not None
-                if reconciliation_invoked and gate_sources.get("modeling_reconciliation") == "openai":
+                if reconciliation_invoked and gate_sources.get("modeling_reconciliation") == live_source:
                     reconciler_api_provenance = getattr(
                         reconciler_agents, "last_request_provenance", None
                     )
                 if (
                     config.require_live
                     and reconciliation_invoked
-                    and gate_sources.get("modeling_reconciliation") == "openai"
+                    and gate_sources.get("modeling_reconciliation") == live_source
                 ):
                     reconciler_agents.assert_effective_model(
                         expected_model=config.reconciler_model
@@ -983,7 +1005,7 @@ def _run_trial(
                         reconciliation_agent_source = "mock"
                     elif config.offline:
                         reconciliation_agent_source = "offline_fallback"
-                    if reconciliation_agent_source != "openai":
+                    if reconciliation_agent_source != live_source:
                         reconciler_api_provenance = None
                 final_fields = {
                     "target": gate_result["selected_target_column"],
@@ -1292,12 +1314,12 @@ def _run_trial(
     planner_effective_model = (
         (planner_api_provenance or {}).get("model_effective")
         or ((planner_api_provenance or {}).get("response_metadata") or {}).get("model")
-        or (agents.model if agent_source in {"openai", "offline_fallback"} else agent_model)
+        or (agents.model if agent_source in {live_source, "offline_fallback"} else agent_model)
     )
     reconciler_effective_model = (
         (reconciler_api_provenance or {}).get("model_effective")
         or ((reconciler_api_provenance or {}).get("response_metadata") or {}).get("model")
-        or (reconciler_agents.model if reconciliation_agent_source in {"openai", "offline_fallback"} else config.reconciler_model)
+        or (reconciler_agents.model if reconciliation_agent_source in {live_source, "offline_fallback"} else config.reconciler_model)
     )
     record = {
         "benchmark_case": case.name,
@@ -1356,13 +1378,13 @@ def _run_trial(
         "agent_request_error": agent_request_error,
         "live_request_failed": agent_request_status == "failed_fallback",
         "api_status": (
-            "live_succeeded" if agent_source == "openai"
+            "live_succeeded" if agent_source == live_source
             else "offline" if agent_source == "offline_fallback"
             else "mock" if agent_source == "mock"
             else "not_requested"
         ),
         "fallback_status": (
-            "none" if agent_source in {"openai", "mock"}
+            "none" if agent_source in {live_source, "mock"}
             else agent_request_status or "offline"
         ),
         "initial_proposal_cache_key": proposal_key,
@@ -1450,7 +1472,7 @@ def _run_trial(
         "reconciliation_status": reconciliation_status,
         "reconciliation_api_call_made": bool(
             reconciliation_invoked
-            and reconciliation_agent_source == "openai"
+            and reconciliation_agent_source == live_source
         ),
         "reconciliation_request_failed": bool(
             reconciliation_invoked and reconciliation_status == "failed"
@@ -1668,37 +1690,37 @@ def _run_trial(
         "empirical_reference_cache_key": cache_key,
         "planner_wall_clock_latency_seconds": (
             planner_api_provenance.get("wall_clock_seconds")
-            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            if agent_source == live_source and not proposal_cache_hit and planner_api_provenance
             else None
         ),
         "planner_input_tokens": (
             planner_api_provenance.get("input_tokens")
-            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            if agent_source == live_source and not proposal_cache_hit and planner_api_provenance
             else None
         ),
         "planner_output_tokens": (
             planner_api_provenance.get("output_tokens")
-            if agent_source == "openai" and not proposal_cache_hit and planner_api_provenance
+            if agent_source == live_source and not proposal_cache_hit and planner_api_provenance
             else None
         ),
         "reconciler_wall_clock_latency_seconds": (
             reconciler_api_provenance.get("wall_clock_seconds")
-            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            if reconciliation_agent_source == live_source and reconciler_api_provenance
             else None
         ),
         "reconciler_input_tokens": (
             reconciler_api_provenance.get("input_tokens")
-            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            if reconciliation_agent_source == live_source and reconciler_api_provenance
             else None
         ),
         "reconciler_output_tokens": (
             reconciler_api_provenance.get("output_tokens")
-            if reconciliation_agent_source == "openai" and reconciler_api_provenance
+            if reconciliation_agent_source == live_source and reconciler_api_provenance
             else None
         ),
-        "planner_call_count": int(agent_source == "openai" and not proposal_cache_hit),
+        "planner_call_count": int(agent_source == live_source and not proposal_cache_hit),
         "reconciliation_call_count": int(
-            reconciliation_agent_source == "openai"
+            reconciliation_agent_source == live_source
         ),
         "empirical_probe_wall_clock_seconds": (
             (gate_result or {}).get("empirical_probe", {}).get("wall_clock_seconds")
@@ -2247,12 +2269,14 @@ def run_evaluation(
         confirmatory_metadata = validate_confirmatory_manifest(manifest, runtime_values)
     # Validate settings before constructing or using a client.  In strict mode
     # this is before any paid request can be attempted.
-    agents = OpenAIAgents(
+    agents = build_agents(
+        provider=config.provider,
         model=config.planner_model,
         generation_settings=config.generation_settings,
         respect_environment_model=confirmatory_metadata is None,
     )
-    reconciler_agents = OpenAIAgents(
+    reconciler_agents = build_agents(
+        provider=config.provider,
         model=config.reconciler_model,
         generation_settings=config.generation_settings,
         respect_environment_model=confirmatory_metadata is None,
@@ -2323,7 +2347,7 @@ def run_evaluation(
         "planner_structural_diagnostics_exposed": config.planner_evidence_mode == "training_only_structural_diagnostics",
         "planner_model_effective": agents.model,
         "reconciler_model_effective": reconciler_agents.model,
-        "agent_source_policy": "openai, offline_fallback, mock, or failed; source is persisted per trial",
+        "agent_source_policy": "requested provider (openai or google), offline_fallback, mock, or failed; source is persisted per trial",
         "gate_mode": config.gate_mode,
         "order_swap": config.order_swap,
         "empirical_probe_enabled": config.empirical_probe_enabled,

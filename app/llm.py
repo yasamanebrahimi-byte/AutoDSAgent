@@ -1,4 +1,4 @@
-"""OpenAI-backed specialist agents with strict structured outputs.
+"""Provider-neutral specialist agents with strict structured outputs.
 
 The API is optional at import time so deterministic/offline runs remain useful.
 When configured, every semantic decision is returned through a Pydantic schema
@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -41,28 +40,65 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class LLMUnavailable(RuntimeError):
-    """Raised when an OpenAI-backed agent cannot be used."""
+    """Raised when a configured LLM provider cannot be used."""
 
 
 class GenerationSettingsError(ValueError):
     """Raised when a frozen generation setting cannot be sent to a model."""
 
 
-def validate_generation_settings(model: str, settings: dict[str, Any] | None) -> dict[str, Any]:
-    """Validate and normalize settings for the Responses API.
+SUPPORTED_LLM_PROVIDERS = frozenset({"openai", "google"})
+
+
+def redact_error(error: Exception, extra_secrets: tuple[str, ...] = ()) -> str:
+    """Serialize provider errors without exposing configured credentials."""
+
+    message = f"{type(error).__name__}: {error}"
+    secrets = tuple(
+        value
+        for value in (
+            os.getenv("OPENAI_API_KEY"),
+            os.getenv("GEMINI_API_KEY"),
+            os.getenv("GOOGLE_API_KEY"),
+            *extra_secrets,
+        )
+        if value
+    )
+    for secret in secrets:
+        message = message.replace(secret, "[REDACTED]")
+    return message
+
+
+def validate_generation_settings(
+    provider: str,
+    model: str | dict[str, Any],
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate and normalize provider-neutral generation settings.
 
     ``None`` values intentionally mean provider default and are omitted from
-    the request.  The Responses API has no portable ``seed`` parameter, so a
-    frozen seed is rejected instead of being recorded and silently ignored.
+    the request.  The legacy two-argument form remains accepted for callers
+    that validated OpenAI settings before provider support was added.
     """
 
+    if settings is None and isinstance(model, dict):
+        # Backward-compatible form: validate_generation_settings(model, settings)
+        settings = model
+        model = provider
+        provider = "openai"
+    provider_name = str(provider).strip().lower()
+    if provider_name not in SUPPORTED_LLM_PROVIDERS:
+        raise GenerationSettingsError(
+            f"Unsupported LLM provider {provider!r}; expected one of {sorted(SUPPORTED_LLM_PROVIDERS)}."
+        )
     normalized = dict(settings or {})
-    supported = {"temperature", "top_p"}
+    supported = {"temperature", "top_p", "seed", "reasoning_effort"}
     model_name = str(model)
     lower_model = model_name.lower()
-    reasoning_model = lower_model.startswith(("o1", "o3", "o4", "gpt-5"))
-    if reasoning_model:
+    if provider_name == "openai" and lower_model.startswith(("o1", "o3", "o4", "gpt-5")):
         supported = {"reasoning_effort"}
+    elif provider_name == "openai":
+        supported = {"temperature", "top_p"}
     unknown = sorted(set(normalized) - {"temperature", "top_p", "seed", "reasoning_effort"})
     if unknown:
         raise GenerationSettingsError(
@@ -79,44 +115,67 @@ def validate_generation_settings(model: str, settings: dict[str, Any] | None) ->
             raise GenerationSettingsError("Generation setting 'temperature' must be between 0 and 2.")
         if key == "top_p" and (not isinstance(value, (int, float)) or not 0 <= float(value) <= 1):
             raise GenerationSettingsError("Generation setting 'top_p' must be between 0 and 1.")
+        if key == "seed" and (
+            provider_name == "openai"
+            or not isinstance(value, int)
+            or isinstance(value, bool)
+        ):
+            raise GenerationSettingsError(
+                f"Generation setting {key!r} is not supported for frozen model {model_name!r}."
+            )
         if key == "reasoning_effort" and (not isinstance(value, str) or not value.strip()):
             raise GenerationSettingsError("Generation setting 'reasoning_effort' must be a non-empty string.")
+        if key == "reasoning_effort" and provider_name == "google":
+            allowed_levels = {"minimal", "low", "medium", "high"}
+            if value.casefold() not in allowed_levels:
+                raise GenerationSettingsError(
+                    "Gemini reasoning_effort must map to one of minimal, low, medium, or high."
+                )
+            if "gemini-3.8-flash" in lower_model and value.casefold() == "minimal":
+                raise GenerationSettingsError(
+                    "Gemini 3.8 Flash does not support the minimal thinking level."
+                )
     return normalized
 
 
-@dataclass
-class OpenAIAgents:
-    """Focused modeling, cleaning, validation, EDA, and report agent roles."""
+class BaseAgents:
+    """Shared research-level agent behavior with provider-specific transport hooks."""
 
-    api_key: str | None = None
-    model: str = "gpt-4.1-mini"
-    generation_settings: dict[str, Any] | None = None
-    respect_environment_model: bool = True
+    provider: str = ""
+    api_key_env_vars: tuple[str, ...] = ()
+    model_env_var: str | None = None
 
-    def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.getenv("OPENAI_API_KEY")
-        if self.respect_environment_model:
-            self.model = os.getenv("OPENAI_MODEL", self.model)
-        self.generation_settings = validate_generation_settings(self.model, self.generation_settings)
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "gpt-4.1-mini",
+        generation_settings: dict[str, Any] | None = None,
+        respect_environment_model: bool = True,
+    ) -> None:
+        self.api_key = api_key or self._api_key_from_environment()
+        if respect_environment_model and self.model_env_var:
+            self.model = os.getenv(self.model_env_var, model)
+        else:
+            self.model = model
+        self.generation_settings = validate_generation_settings(
+            self.provider, self.model, generation_settings
+        )
         self._client: Any | None = None
         self.last_request_provenance: dict[str, Any] | None = None
+
+    def _api_key_from_environment(self) -> str | None:
+        for variable in self.api_key_env_vars:
+            value = os.getenv(variable)
+            if value:
+                return value
+        return None
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
 
     def _client_or_raise(self) -> Any:
-        if not self.api_key:
-            raise LLMUnavailable("OPENAI_API_KEY is not configured.")
-        if self._client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:  # pragma: no cover - environment-specific
-                raise LLMUnavailable(
-                    "The OpenAI package is not installed. Install the project dependencies."
-                ) from exc
-            self._client = OpenAI(api_key=self.api_key)
-        return self._client
+        raise NotImplementedError
 
     def _structured(
         self,
@@ -125,83 +184,7 @@ class OpenAIAgents:
         instructions: str,
         payload: dict[str, Any],
     ) -> T:
-        client = self._client_or_raise()
-        prompt = f"{instructions}\n\nINPUT JSON:\n{json.dumps(payload, default=str)}"
-        request: dict[str, Any] = {
-            "model": self.model,
-            "input": prompt,
-            "store": False,
-            "text_format": schema,
-        }
-        supplied_settings = {
-            key: value for key, value in (self.generation_settings or {}).items() if value is not None
-        }
-        if "temperature" in supplied_settings:
-            request["temperature"] = supplied_settings["temperature"]
-        if "top_p" in supplied_settings:
-            request["top_p"] = supplied_settings["top_p"]
-        if "reasoning_effort" in supplied_settings:
-            request["reasoning"] = {"effort": supplied_settings["reasoning_effort"]}
-        self.last_request_provenance = {
-            "provider": "openai",
-            "endpoint": "responses.parse",
-            "model_requested": self.model,
-            "generation_settings_requested": dict(self.generation_settings or {}),
-            "generation_settings_sent": {
-                **{
-                    key: value for key, value in supplied_settings.items()
-                    if key != "reasoning_effort"
-                },
-                **(
-                    {"reasoning": {"effort": supplied_settings["reasoning_effort"]}}
-                    if "reasoning_effort" in supplied_settings else {}
-                ),
-            },
-            "provider_default_settings": sorted(
-                key for key, value in (self.generation_settings or {}).items() if value is None
-            ),
-        }
-        started = time.perf_counter()
-        try:
-            response = client.responses.parse(**request)
-        except Exception:
-            self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
-            self.last_request_provenance["input_tokens"] = None
-            self.last_request_provenance["output_tokens"] = None
-            raise
-        self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
-        usage = getattr(response, "usage", None)
-        if isinstance(usage, dict):
-            input_tokens = usage.get("input_tokens")
-            output_tokens = usage.get("output_tokens")
-        else:
-            input_tokens = getattr(usage, "input_tokens", None)
-            output_tokens = getattr(usage, "output_tokens", None)
-        self.last_request_provenance["input_tokens"] = (
-            int(input_tokens) if input_tokens is not None else None
-        )
-        self.last_request_provenance["output_tokens"] = (
-            int(output_tokens) if output_tokens is not None else None
-        )
-        response_metadata = {
-            key: getattr(response, key)
-            for key in ("id", "model", "created_at")
-            if getattr(response, key, None) is not None
-        }
-        if response_metadata:
-            self.last_request_provenance["response_metadata"] = response_metadata
-            if response_metadata.get("model") is not None:
-                self.last_request_provenance["model_effective"] = response_metadata["model"]
-        parsed = getattr(response, "output_parsed", None)
-        if parsed is not None:
-            return parsed
-        output_text = getattr(response, "output_text", "")
-        if not output_text:
-            raise LLMUnavailable(f"The {schema_name} agent returned no structured output.")
-        try:
-            return schema.model_validate(json.loads(output_text))
-        except Exception as exc:
-            raise LLMUnavailable(f"The {schema_name} agent returned invalid structured output.") from exc
+        raise NotImplementedError
 
     def assert_effective_model(self, *, expected_model: str) -> str:
         """Fail closed when strict-live provenance resolves to another model."""
@@ -215,12 +198,15 @@ class OpenAIAgents:
             raise LLMUnavailable(
                 f"Strict-live request for {expected_model!r} returned no effective model identifier."
             )
-        if str(effective) != str(expected_model):
+        if not self._effective_model_matches(str(effective), str(expected_model)):
             raise LLMUnavailable(
                 "Strict-live model mismatch: requested "
                 f"{expected_model!r}, effective {effective!r}."
             )
         return str(effective)
+
+    def _effective_model_matches(self, effective: str, expected: str) -> bool:
+        return effective == expected
 
     def formulate_problem(
         self,
@@ -461,3 +447,303 @@ practical next steps. Every factual statement must be supported by the input
 summary.""",
             {"question": question, "computed_context": context},
         )
+
+
+def _usage_value(usage: Any, *names: str) -> Any:
+    if isinstance(usage, dict):
+        for name in names:
+            if usage.get(name) is not None:
+                return usage[name]
+        return None
+    for name in names:
+        value = getattr(usage, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _scalar_metadata(value: Any) -> Any:
+    """Keep response metadata JSON-safe without persisting provider objects."""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+class OpenAIAgents(BaseAgents):
+    """OpenAI transport for the shared specialist-agent behavior."""
+
+    provider = "openai"
+    api_key_env_vars = ("OPENAI_API_KEY",)
+    model_env_var = "OPENAI_MODEL"
+
+    def _client_or_raise(self) -> Any:
+        if not self.api_key:
+            raise LLMUnavailable("OPENAI_API_KEY is not configured.")
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # pragma: no cover - environment-specific
+                raise LLMUnavailable(
+                    "The OpenAI package is not installed. Install the project dependencies."
+                ) from exc
+            self._client = OpenAI(api_key=self.api_key)
+        return self._client
+
+    def _structured(
+        self,
+        schema_name: str,
+        schema: type[T],
+        instructions: str,
+        payload: dict[str, Any],
+    ) -> T:
+        client = self._client_or_raise()
+        prompt = f"{instructions}\n\nINPUT JSON:\n{json.dumps(payload, default=str)}"
+        request: dict[str, Any] = {
+            "model": self.model,
+            "input": prompt,
+            "store": False,
+            "text_format": schema,
+        }
+        supplied_settings = {
+            key: value for key, value in (self.generation_settings or {}).items() if value is not None
+        }
+        if "temperature" in supplied_settings:
+            request["temperature"] = supplied_settings["temperature"]
+        if "top_p" in supplied_settings:
+            request["top_p"] = supplied_settings["top_p"]
+        if "reasoning_effort" in supplied_settings:
+            request["reasoning"] = {"effort": supplied_settings["reasoning_effort"]}
+        self.last_request_provenance = {
+            "provider": self.provider,
+            "endpoint": "responses.parse",
+            "model_requested": self.model,
+            "generation_settings_requested": dict(self.generation_settings or {}),
+            "generation_settings_sent": {
+                **{
+                    key: value for key, value in supplied_settings.items()
+                    if key != "reasoning_effort"
+                },
+                **(
+                    {"reasoning": {"effort": supplied_settings["reasoning_effort"]}}
+                    if "reasoning_effort" in supplied_settings else {}
+                ),
+            },
+            "provider_default_settings": sorted(
+                key for key, value in (self.generation_settings or {}).items() if value is None
+            ),
+        }
+        started = time.perf_counter()
+        try:
+            response = client.responses.parse(**request)
+        except Exception:
+            self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
+            self.last_request_provenance["input_tokens"] = None
+            self.last_request_provenance["output_tokens"] = None
+            raise
+        self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
+        usage = getattr(response, "usage", None)
+        input_tokens = _usage_value(usage, "input_tokens")
+        output_tokens = _usage_value(usage, "output_tokens")
+        self.last_request_provenance["input_tokens"] = (
+            int(input_tokens) if input_tokens is not None else None
+        )
+        self.last_request_provenance["output_tokens"] = (
+            int(output_tokens) if output_tokens is not None else None
+        )
+        response_metadata = {
+            key: _scalar_metadata(getattr(response, key, None))
+            for key in ("id", "model", "created_at")
+            if getattr(response, key, None) is not None
+        }
+        if response_metadata:
+            self.last_request_provenance["response_metadata"] = response_metadata
+            if response_metadata.get("model") is not None:
+                self.last_request_provenance["model_effective"] = response_metadata["model"]
+        parsed = getattr(response, "output_parsed", None)
+        if parsed is not None:
+            return schema.model_validate(parsed)
+        output_text = getattr(response, "output_text", "")
+        if not output_text:
+            raise LLMUnavailable(f"The {schema_name} agent returned no structured output.")
+        try:
+            return schema.model_validate(json.loads(output_text))
+        except Exception as exc:
+            raise LLMUnavailable(f"The {schema_name} agent returned invalid structured output.") from exc
+
+
+class GeminiAgents(BaseAgents):
+    """Google Gemini transport using the current ``google-genai`` SDK."""
+
+    provider = "google"
+    api_key_env_vars = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    model_env_var = "GEMINI_MODEL"
+
+    def _client_or_raise(self) -> Any:
+        if not self.api_key:
+            raise LLMUnavailable(
+                "GEMINI_API_KEY or GOOGLE_API_KEY is not configured."
+            )
+        if self._client is None:
+            try:
+                from google import genai
+            except ImportError as exc:  # pragma: no cover - environment-specific
+                raise LLMUnavailable(
+                    "The google-genai package is not installed. Install the project dependencies."
+                ) from exc
+            self._client = genai.Client(api_key=self.api_key)
+        return self._client
+
+    def _structured(
+        self,
+        schema_name: str,
+        schema: type[T],
+        instructions: str,
+        payload: dict[str, Any],
+    ) -> T:
+        client = self._client_or_raise()
+        supplied_settings = {
+            key: value for key, value in (self.generation_settings or {}).items() if value is not None
+        }
+        config: dict[str, Any] = {
+            "system_instruction": instructions,
+            "response_mime_type": "application/json",
+            "response_schema": schema,
+        }
+        for key in ("temperature", "top_p", "seed"):
+            if key in supplied_settings:
+                config[key] = supplied_settings[key]
+        thinking_level = supplied_settings.get("reasoning_effort")
+        if thinking_level is not None:
+            config["thinking_config"] = {"thinking_level": thinking_level.casefold()}
+
+        self.last_request_provenance = {
+            "provider": self.provider,
+            "endpoint": "models.generate_content",
+            "api_surface": "google.genai.Client.models.generate_content",
+            "model_requested": self.model,
+            "generation_settings_requested": dict(self.generation_settings or {}),
+            "generation_settings_sent": {
+                key: value for key, value in supplied_settings.items()
+                if key != "reasoning_effort"
+            },
+            "provider_default_settings": sorted(
+                key for key, value in (self.generation_settings or {}).items() if value is None
+            ),
+        }
+        if thinking_level is not None:
+            self.last_request_provenance["generation_settings_sent"]["thinking_config"] = {
+                "thinking_level": thinking_level.casefold()
+            }
+            self.last_request_provenance["reasoning_effort_mapping"] = {
+                "reasoning_effort": thinking_level,
+                "thinking_level": thinking_level.casefold(),
+            }
+        started = time.perf_counter()
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=json.dumps(payload, default=str),
+                config=config,
+            )
+        except Exception as exc:
+            self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
+            self.last_request_provenance["input_tokens"] = None
+            self.last_request_provenance["output_tokens"] = None
+            self.last_request_provenance["thought_tokens"] = None
+            raise LLMUnavailable(
+                "Gemini structured request failed: "
+                f"{redact_error(exc, (self.api_key,) if self.api_key else ())}"
+            ) from exc
+        self.last_request_provenance["wall_clock_seconds"] = time.perf_counter() - started
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            usage = getattr(response, "usage", None)
+        input_tokens = _usage_value(usage, "prompt_token_count", "input_tokens")
+        output_tokens = _usage_value(usage, "candidates_token_count", "output_tokens")
+        thought_tokens = _usage_value(
+            usage, "thoughts_token_count", "thought_tokens", "total_thought_tokens"
+        )
+        self.last_request_provenance["input_tokens"] = (
+            int(input_tokens) if input_tokens is not None else None
+        )
+        self.last_request_provenance["output_tokens"] = (
+            int(output_tokens) if output_tokens is not None else None
+        )
+        self.last_request_provenance["thought_tokens"] = (
+            int(thought_tokens) if thought_tokens is not None else None
+        )
+        total_tokens = _usage_value(usage, "total_token_count", "total_tokens")
+        if total_tokens is not None:
+            self.last_request_provenance["total_tokens"] = int(total_tokens)
+
+        response_metadata = {}
+        for key in ("response_id", "id", "model_version", "model", "create_time", "created_at"):
+            value = getattr(response, key, None)
+            if value is not None:
+                response_metadata[key] = _scalar_metadata(value)
+        if response_metadata:
+            self.last_request_provenance["response_metadata"] = response_metadata
+            effective = response_metadata.get("model_version") or response_metadata.get("model")
+            if effective is not None:
+                self.last_request_provenance["model_effective"] = effective
+
+        parsed = getattr(response, "parsed", None)
+        if parsed is not None:
+            try:
+                return schema.model_validate(parsed)
+            except Exception as exc:
+                raise LLMUnavailable(
+                    f"The {schema_name} agent returned invalid structured output."
+                ) from exc
+        output_text = getattr(response, "text", None)
+        if not output_text:
+            output_text = getattr(response, "output_text", "")
+        if not output_text:
+            raise LLMUnavailable(f"The {schema_name} agent returned no structured output.")
+        try:
+            return schema.model_validate_json(output_text)
+        except Exception as exc:
+            raise LLMUnavailable(f"The {schema_name} agent returned invalid structured output.") from exc
+
+    def _effective_model_matches(self, effective: str, expected: str) -> bool:
+        normalized_effective = effective.removeprefix("models/")
+        normalized_expected = expected.removeprefix("models/")
+        if normalized_effective == normalized_expected:
+            return True
+        # Google may report an immutable numeric revision for an alias, such
+        # as gemini-3.8-flash-001.  Accept only that provider-resolved form.
+        suffix = normalized_effective.removeprefix(normalized_expected + "-")
+        return bool(
+            suffix
+            and normalized_effective.startswith(normalized_expected + "-")
+            and suffix.replace("-", "").isdigit()
+        )
+
+
+def build_agents(
+    *,
+    provider: str,
+    model: str,
+    generation_settings: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    **kwargs: Any,
+) -> BaseAgents:
+    """Build the configured provider while keeping evaluation code provider-neutral."""
+
+    provider_name = str(provider).strip().lower()
+    agent_type: type[BaseAgents]
+    if provider_name == "openai":
+        agent_type = OpenAIAgents
+    elif provider_name == "google":
+        agent_type = GeminiAgents
+    else:
+        raise ValueError(
+            f"Unsupported LLM provider {provider!r}; expected one of openai or google."
+        )
+    return agent_type(
+        api_key=api_key,
+        model=model,
+        generation_settings=generation_settings,
+        **kwargs,
+    )
