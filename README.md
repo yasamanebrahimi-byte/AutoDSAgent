@@ -179,15 +179,18 @@ must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
 outcomes are not part of the normal publication-readiness workflow.
 
-The new `cross-provider replication`, which uses Gemini 3.8 Flash and Gemini
-3.5 Flash-Lite, remains separate from the historical OpenAI confirmatory
-baseline. This checkout does not contain a `paper_confirmatory_v3.json` or a
-matching v3 result bundle; the checked-in
-`evaluation/configs/paper_cross_provider_replication_v1.json` is a new draft
-manifest until its result-affecting code is finalized, hashed, frozen, and
-committed. It preserves the 40-task panel, split/holdout protocol, prompts,
-challenger, arbitration policy, ablations, and statistical design; only the
-declared provider/model conditions differ.
+The completed OpenAI confirmatory study is defined by
+`evaluation/configs/paper_confirmatory_v3.json`, with committed results under
+`evaluation_results/external_ablation_live_v3/`. It covers GPT-5.6 Sol,
+GPT-5.6 Luna, and GPT-5.6 Terra. The Gemini replication is a separate
+cross-provider study and was not part of the historical v3 OpenAI run.
+
+The draft cross-provider replication is defined by
+`evaluation/configs/paper_cross_provider_replication_v1.json` and covers
+Gemini 3.8 Flash and Gemini 3.5 Flash-Lite. It remains draft / unfrozen / not
+yet externally executed. It preserves the 40-task panel, split/holdout
+protocol, prompts, challenger, arbitration policy, ablations, and statistical
+design; only the declared provider/model conditions differ.
 
 `paper_confirmatory_v1.json` remains historical pilot provenance and
 `paper_confirmatory_v2.json` remains the prior contract-aware protocol. Neither
@@ -232,7 +235,7 @@ by a completed retry, while conflicting duplicate completed trial IDs fail
 closed.
 
 The confirmatory code identity is a canonical SHA-256 over sorted relative
-paths and bytes in `app/`, `evaluation/` (excluding the confirmatory manifest),
+paths and bytes in `app/`, `evaluation/` (excluding the confirmatory manifests),
 and `pyproject.toml`. Git metadata, generated evaluation results, caches,
 `.git`, Python bytecode, and temporary files are excluded. The manifest is
 excluded because its expected hash would otherwise hash itself. A Git commit

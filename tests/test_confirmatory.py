@@ -442,6 +442,26 @@ def test_experiment_hash_manifest_freeze_is_self_reference_free(tmp_path: Path):
     assert experiment_code_sha256(tmp_path) == before
 
 
+def test_cross_provider_manifest_is_excluded_from_experiment_code_hash(tmp_path: Path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "evaluation" / "configs").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_bytes(b"[project]\nname='fixture'\n")
+    (tmp_path / "app" / "pipeline.py").write_bytes(b"PIPELINE = 1\n")
+    manifest_path = tmp_path / "evaluation" / "configs" / "paper_cross_provider_replication_v1.json"
+    manifest_path.write_text(
+        '{"status":"draft","expected_experiment_code_sha256":null}',
+        encoding="utf-8",
+    )
+
+    hash_a = experiment_code_sha256(tmp_path)
+    manifest_path.write_text(
+        '{"status":"draft","expected_experiment_code_sha256":"declared-later"}',
+        encoding="utf-8",
+    )
+
+    assert experiment_code_sha256(tmp_path) == hash_a
+
+
 def test_experiment_hash_detects_included_source_and_ignores_generated_files(tmp_path: Path):
     (tmp_path / "app").mkdir()
     (tmp_path / "evaluation" / "evaluation_results").mkdir(parents=True)
