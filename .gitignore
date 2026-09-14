@@ -17,7 +17,7 @@ __pycache__/
 evaluation_results/**
 !evaluation_results/**/
 !evaluation_results/**/config.json
-!evaluation_results/**/summary.md
+!evaluation_results/**/*.md
 
 # Optional OpenML cache; benchmark data must remain outside source control.
 .openml_cache/
