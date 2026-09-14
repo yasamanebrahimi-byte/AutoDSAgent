@@ -222,8 +222,11 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         # cross-provider rows.
         return str(row.get("provider") or legacy_provider or "openai").strip().lower()
 
+    def audit_source(row: dict[str, Any], field: str) -> str:
+        return str(row.get(field) or "").strip().lower()
+
     def successful_live(row: dict[str, Any]) -> bool:
-        return row.get("agent_source") == trial_provider(row)
+        return audit_source(row, "agent_source") == trial_provider(row)
 
     provider_names = sorted({trial_provider(row) for row in result.get("trials", [])})
     live = {
@@ -235,7 +238,7 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         "successful_initial_openai_calls": sum(
             bool(row.get("initial_modeling_call_made"))
             and trial_provider(row) == "openai"
-            and row.get("agent_source") == "openai"
+            and audit_source(row, "agent_source") == "openai"
             for row in result.get("trials", [])
         ),
         "successful_initial_calls_by_provider": {
@@ -262,8 +265,7 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         ),
         "successful_reconciliation_live_calls": sum(
             bool(row.get("reconciliation_api_call_made"))
-            and str(row.get("reconciliation_agent_source") or "")
-            == trial_provider(row)
+            and audit_source(row, "reconciliation_agent_source") == trial_provider(row)
             for row in result.get("trials", [])
         ),
         "failed_reconciliation_calls": sum(

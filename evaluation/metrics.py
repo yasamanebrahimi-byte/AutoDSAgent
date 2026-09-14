@@ -2011,8 +2011,13 @@ def summarize_trials(
                 include_confidence_intervals=False,
             )
     source_counts = {
-        source: sum(record.get("agent_source") == source for record in trials)
-        for source in sorted({str(record.get("agent_source")) for record in trials})
+        source: sum(
+            _normalized_provider(record.get("agent_source"), default="") == source
+            for record in trials
+        )
+        for source in sorted(
+            {_normalized_provider(record.get("agent_source"), default="") for record in trials}
+        )
     }
     paper_task_summaries: dict[str, Any] = {}
     for task in ("classification", "regression"):

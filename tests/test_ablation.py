@@ -515,6 +515,26 @@ def test_live_failure_audit_keeps_openai_counter_provider_specific():
     assert api_usage["failed_initial_openai_calls"] == 1
 
 
+def test_health_row_normalizes_cross_provider_audit_sources():
+    result = {
+        "summary": {},
+        "trials": [
+            {
+                "provider": " Google ",
+                "agent_source": " GOOGLE ",
+                "initial_modeling_call_made": True,
+                "requested_live_trial": True,
+            }
+        ],
+    }
+
+    api_usage = _health_row("llm_only", result, ablation_presets()["llm_only"])["api_usage"]
+
+    assert api_usage["successful_initial_live_calls"] == 1
+    assert api_usage["successful_initial_calls_by_provider"]["google"] == 1
+    assert api_usage["planner_live_success"] == 1
+
+
 def test_historical_openai_failure_bundle_keeps_legacy_default_provider():
     result = {
         "summary": {},

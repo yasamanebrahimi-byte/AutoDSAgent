@@ -254,10 +254,23 @@ after a valid family disagreement). The scope remains selective intervention
 for LLM-based supervised tabular ML planning within this fixed supported
 model/preprocessing search space, not a universal AutoML oracle.
 
-For the Gemini replication, use the same sequence with
-`paper_cross_provider_replication_v1.json`, then run the local-only smoke path
-documented in [`docs/gemini_smoke.md`](docs/gemini_smoke.md). Do not run the
-external benchmark until the new manifest is frozen and reviewed.
+For the Gemini replication, follow this sequence with
+`paper_cross_provider_replication_v1.json`:
+
+```text
+targeted tests
+→ live synthetic Gemini smoke
+→ fix any issues
+→ finalize code
+→ compute experiment-code hash
+→ freeze manifest
+→ commit/validate freeze
+→ external benchmark
+```
+
+The live synthetic Gemini smoke path is documented in
+[`docs/gemini_smoke.md`](docs/gemini_smoke.md). Do not run the external
+benchmark until the new manifest is frozen and reviewed.
 
 ## License
 
