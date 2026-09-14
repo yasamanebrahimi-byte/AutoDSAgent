@@ -15,6 +15,7 @@ from app.schemas import DeterministicRecommendation, ModelingPlan, ModelingResol
 from app.soft_challenge import decide_soft_challenge
 from evaluation.ablation import (
     PRIMARY_ABLATION_NAMES,
+    _health_row,
     _paired_initial_plan_validity,
     _paired_initial_planner_comparison,
     ablation_presets,
@@ -483,6 +484,46 @@ def test_strict_live_records_failure_without_fallback(tmp_path: Path, monkeypatc
     assert trial["agent_source"] == "failed"
     assert trial["agent_initial"] is None
     assert trial.get("fallback_row") is False
+
+
+def test_live_failure_audit_keeps_openai_counter_provider_specific():
+    result = {
+        "summary": {},
+        "config": {"provider": "google"},
+        "trials": [
+            {
+                "provider": "openai",
+                "requested_live_trial": True,
+                "agent_request_status": "failed",
+            },
+            {
+                "provider": "google",
+                "requested_live_trial": True,
+                "agent_request_status": "failed",
+            },
+            {
+                "provider": "google",
+                "requested_live_trial": False,
+                "agent_request_status": "failed",
+            },
+        ],
+    }
+
+    api_usage = _health_row("llm_only", result, ablation_presets()["llm_only"])["api_usage"]
+
+    assert api_usage["failed_initial_live_calls"] == 2
+    assert api_usage["failed_initial_openai_calls"] == 1
+
+
+def test_historical_openai_failure_bundle_keeps_legacy_default_provider():
+    result = {
+        "summary": {},
+        "trials": [{"requested_live_trial": True, "agent_request_status": "failed"}],
+    }
+
+    api_usage = _health_row("llm_only", result, ablation_presets()["llm_only"])["api_usage"]
+
+    assert api_usage["failed_initial_openai_calls"] == 1
 
 
 def test_proposal_cache_contains_no_credentials(tmp_path: Path):

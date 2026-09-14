@@ -13,6 +13,7 @@ from app.llm import (
     build_agents,
 )
 from app.schemas import ModelingPlan, ModelingResolution, PreprocessingContract
+from evaluation.ablation import _health_row, ablation_presets
 
 
 class _GeminiResponse:
@@ -98,6 +99,9 @@ def test_gemini_structured_output_uses_shared_schema_and_records_provenance():
     request = client.models.requests[0]
     assert request["model"] == "gemini-3.8-flash"
     assert json.loads(request["contents"])["question"] == "classify target"
+    assert request["config"]["system_instruction"].startswith(
+        "You are the independent post-formulation modeling agent."
+    )
     assert request["config"]["response_mime_type"] == "application/json"
     assert request["config"]["response_schema"] is ModelingPlan
     assert request["config"]["thinking_config"] == {"thinking_level": "medium"}
@@ -144,6 +148,19 @@ def test_gemini_malformed_structured_output_fails_without_coercion():
     )
     agent._client = client
     with pytest.raises(LLMUnavailable, match="invalid structured output"):
+        agent.modeling_plan({}, "classify target", "target", "classification")
+
+
+def test_gemini_missing_structured_output_uses_existing_error_contract():
+    client = _GeminiClient(_GeminiResponse(parsed=None, text=""))
+    agent = GeminiAgents(
+        api_key="test-secret",
+        model="gemini-3.8-flash",
+        respect_environment_model=False,
+    )
+    agent._client = client
+
+    with pytest.raises(LLMUnavailable, match="no structured output"):
         agent.modeling_plan({}, "classify target", "target", "classification")
 
 
@@ -232,6 +249,28 @@ def test_provider_aware_cache_identity_separates_openai_and_google():
     assert _proposal_cache_key(**common, provider="openai") != _proposal_cache_key(
         **common, provider="google"
     )
+
+
+def test_openai_only_metrics_require_openai_provider_identity():
+    from evaluation.metrics import summarize_trials
+
+    openai_row = {
+        "provider": "openai",
+        "agent_source": "openai",
+        "trial_status": "completed",
+        "requested_live_trial": True,
+    }
+    mismatched_row = {
+        "provider": "google",
+        "agent_source": "openai",
+        "trial_status": "completed",
+        "requested_live_trial": True,
+    }
+
+    summary = summarize_trials([openai_row, mismatched_row])
+
+    assert summary["successful_openai_trials"] == 1
+    assert summary["openai_only"]["requested_live_trials"] == 1
 
 
 def test_successful_google_runner_call_is_live_not_fallback(tmp_path, monkeypatch):
@@ -348,3 +387,21 @@ def test_failed_google_runner_call_uses_explicit_offline_fallback(tmp_path, monk
     assert trial["api_status"] == "offline"
     assert "private-gemini-token" not in trial["agent_request_error"]
     assert result["summary"]["successful_initial_live_calls"] == 0
+
+    strict = runner.run_evaluation(
+        tmp_path / "google-strict-failure",
+        cases=[case],
+        model="gemini-3.8-flash",
+        provider="google",
+        gate_mode="llm_only",
+        require_live=True,
+    )
+    strict_trial = strict["trials"][0]
+    assert strict_trial["agent_request_status"] == "failed"
+    assert strict_trial["live_request_failed"] is True
+    assert strict["summary"]["live_request_failed_trials"] == 1
+    api_usage = _health_row(
+        "llm_only", strict, ablation_presets()["llm_only"]
+    )["api_usage"]
+    assert api_usage["failed_initial_live_calls"] == 1
+    assert api_usage["failed_initial_openai_calls"] == 0

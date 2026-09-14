@@ -208,10 +208,24 @@ def _read_trials(path: Path) -> list[dict[str, Any]]:
 def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[str, Any]:
     summary = result["summary"]
     health = summary.get("gate_health", {})
-    def successful_live(row: dict[str, Any]) -> bool:
-        return row.get("agent_source") == str(row.get("provider") or "openai")
 
-    provider_names = sorted({str(row.get("provider") or "openai") for row in result.get("trials", [])})
+    result_config = result.get("config")
+    legacy_provider = (
+        result_config.get("provider")
+        if isinstance(result_config, dict)
+        else None
+    )
+
+    def trial_provider(row: dict[str, Any]) -> str:
+        # Older OpenAI bundles may omit provider metadata.  Keep their legacy
+        # interpretation while honoring explicit provider metadata on newer
+        # cross-provider rows.
+        return str(row.get("provider") or legacy_provider or "openai").strip().lower()
+
+    def successful_live(row: dict[str, Any]) -> bool:
+        return row.get("agent_source") == trial_provider(row)
+
+    provider_names = sorted({trial_provider(row) for row in result.get("trials", [])})
     live = {
         "requested_live_trials": sum(bool(row.get("requested_live_trial")) for row in result.get("trials", [])),
         "successful_initial_live_calls": sum(
@@ -219,19 +233,23 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
             for row in result.get("trials", [])
         ),
         "successful_initial_openai_calls": sum(
-            bool(row.get("initial_modeling_call_made")) and row.get("agent_source") == "openai"
+            bool(row.get("initial_modeling_call_made"))
+            and trial_provider(row) == "openai"
+            and row.get("agent_source") == "openai"
             for row in result.get("trials", [])
         ),
         "successful_initial_calls_by_provider": {
             provider: sum(
                 bool(row.get("initial_modeling_call_made")) and successful_live(row)
                 for row in result.get("trials", [])
-                if str(row.get("provider") or "openai") == provider
+                if trial_provider(row) == provider
             )
             for provider in provider_names
         },
         "failed_initial_openai_calls": sum(
-            bool(row.get("requested_live_trial")) and row.get("agent_request_status") == "failed"
+            bool(row.get("requested_live_trial"))
+            and trial_provider(row) == "openai"
+            and row.get("agent_request_status") == "failed"
             for row in result.get("trials", [])
         ),
         "failed_initial_live_calls": sum(
@@ -245,7 +263,7 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         "successful_reconciliation_live_calls": sum(
             bool(row.get("reconciliation_api_call_made"))
             and str(row.get("reconciliation_agent_source") or "")
-            == str(row.get("provider") or "openai")
+            == trial_provider(row)
             for row in result.get("trials", [])
         ),
         "failed_reconciliation_calls": sum(

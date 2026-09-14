@@ -1518,7 +1518,12 @@ def summarize_trials(
         return record.get("agent_source") == provider
 
     live_provider_trials = [record for record in completed if successful_live_provider_call(record)]
-    openai = [record for record in completed if record.get("agent_source") == "openai"]
+    openai = [
+        record
+        for record in completed
+        if str(record.get("provider") or "openai") == "openai"
+        and record.get("agent_source") == "openai"
+    ]
     clean = [record for record in trials if record.get("perturbation_id", "clean") == "clean"]
     deterministic_available = [
         record for record in completed if record.get("deterministic_recommendation") is not None
@@ -2131,7 +2136,11 @@ def summarize_trials(
         "clean_trial_count": len(clean),
         "perturbation_trial_count": total - len(clean),
         "requested_live_trials": sum(bool(record.get("requested_live_trial")) for record in trials),
-        "successful_openai_trials": sum(record.get("agent_source") == "openai" for record in trials),
+        "successful_openai_trials": sum(
+            str(record.get("provider") or "openai") == "openai"
+            and record.get("agent_source") == "openai"
+            for record in trials
+        ),
         "successful_initial_live_calls": sum(
             bool(record.get("initial_modeling_call_made"))
             and successful_live_provider_call(record)
