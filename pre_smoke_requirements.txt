@@ -1,6 +1,6 @@
 annotated-types==0.8.0
 anyio==4.15.0
--e git+https://github.com/yasamanebrahimi-byte/AutoDSAgent.git@55210fc#egg=autods_agent
+-e .
 certifi==2026.7.22
 cloudpickle==3.1.2
 colorama==0.4.6

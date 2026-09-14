@@ -43,6 +43,10 @@ DEFAULT_THRESHOLDS = {
 }
 
 
+def _normalized_provider(value: object, default: str = "openai") -> str:
+    return str(value or default).strip().lower()
+
+
 def raw_holdout_performance_delta(
     task_type: str,
     initial_holdout_metric: float | None,
@@ -1514,15 +1518,15 @@ def summarize_trials(
     failed = [record for record in trials if record.get("trial_status") == "failed"]
     completed = [record for record in trials if record.get("trial_status") != "failed"]
     def successful_live_provider_call(record: dict[str, Any]) -> bool:
-        provider = str(record.get("provider") or "openai")
-        return record.get("agent_source") == provider
+        provider = _normalized_provider(record.get("provider"))
+        return _normalized_provider(record.get("agent_source"), default="") == provider
 
     live_provider_trials = [record for record in completed if successful_live_provider_call(record)]
     openai = [
         record
         for record in completed
-        if str(record.get("provider") or "openai") == "openai"
-        and record.get("agent_source") == "openai"
+        if _normalized_provider(record.get("provider")) == "openai"
+        and _normalized_provider(record.get("agent_source"), default="") == "openai"
     ]
     clean = [record for record in trials if record.get("perturbation_id", "clean") == "clean"]
     deterministic_available = [
@@ -2137,8 +2141,8 @@ def summarize_trials(
         "perturbation_trial_count": total - len(clean),
         "requested_live_trials": sum(bool(record.get("requested_live_trial")) for record in trials),
         "successful_openai_trials": sum(
-            str(record.get("provider") or "openai") == "openai"
-            and record.get("agent_source") == "openai"
+            _normalized_provider(record.get("provider")) == "openai"
+            and _normalized_provider(record.get("agent_source"), default="") == "openai"
             for record in trials
         ),
         "successful_initial_live_calls": sum(
@@ -2152,9 +2156,9 @@ def summarize_trials(
                 bool(record.get("initial_modeling_call_made"))
                 and successful_live_provider_call(record)
                 for record in trials
-                if str(record.get("provider") or "openai") == provider
+                if _normalized_provider(record.get("provider")) == provider
             )
-            for provider in sorted({str(record.get("provider") or "openai") for record in trials})
+            for provider in sorted({_normalized_provider(record.get("provider")) for record in trials})
         },
         "offline_fallback_trials": sum(record.get("agent_source") == "offline_fallback" for record in trials),
         "failed_trials": len(failed),
@@ -2168,8 +2172,8 @@ def summarize_trials(
         ),
         "successful_reconciliation_live_calls": sum(
             bool(record.get("reconciliation_api_call_made"))
-            and str(record.get("reconciliation_agent_source") or "")
-            == str(record.get("provider") or "openai")
+            and _normalized_provider(record.get("reconciliation_agent_source"), default="")
+            == _normalized_provider(record.get("provider"))
             for record in trials
         ),
         "reconciler_live_success": sum(

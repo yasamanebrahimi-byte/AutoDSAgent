@@ -255,7 +255,7 @@ def test_openai_only_metrics_require_openai_provider_identity():
     from evaluation.metrics import summarize_trials
 
     openai_row = {
-        "provider": "openai",
+        "provider": " OpenAI ",
         "agent_source": "openai",
         "trial_status": "completed",
         "requested_live_trial": True,
