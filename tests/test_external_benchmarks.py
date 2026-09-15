@@ -232,7 +232,14 @@ def test_cli_defaults_to_local_and_forwards_external_suite_and_filters(monkeypat
 
     def fake_run_evaluation(output, **kwargs):
         calls.append((output, kwargs))
-        return {"suite": kwargs["suite"], "cases": kwargs["case_names"], "tier": kwargs["tier"]}
+        return {
+            "suite": kwargs["suite"],
+            "cases": kwargs["case_names"],
+            "tier": kwargs["tier"],
+            "config": {
+                "external_benchmark_manifest_matches": True,
+            },
+        }
 
     monkeypatch.setattr(evaluation_cli, "run_evaluation", fake_run_evaluation)
     monkeypatch.setattr(sys, "argv", ["evaluation.run"])
