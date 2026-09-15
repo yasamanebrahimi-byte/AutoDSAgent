@@ -76,11 +76,11 @@ bootstrap. The 40-task OpenML/AMLB panel
 is a frozen, predeclared evaluation panel, not a statistically random sample
 of AMLB tasks.
 
-The new draft cross-provider replication is declared separately in
+The completed cross-provider replication is declared separately in
 `evaluation/configs/paper_cross_provider_replication_v1.json`. It has two
 Google Gemini conditions (`gemini-3.8-flash` and `gemini-3.5-flash-lite`), the
 same three repetitions, and the same 40-task/seven-arm design, for 1,680
-planned matrix units. It is intentionally not frozen or externally executed.
+matrix units. It is frozen and externally executed.
 
 ## Provider support
 
@@ -185,10 +185,10 @@ The completed OpenAI confirmatory study is defined by
 GPT-5.6 Luna, and GPT-5.6 Terra. The Gemini replication is a separate
 cross-provider study and was not part of the historical v3 OpenAI run.
 
-The draft cross-provider replication is defined by
+The completed, frozen cross-provider replication is defined by
 `evaluation/configs/paper_cross_provider_replication_v1.json` and covers
-Gemini 3.8 Flash and Gemini 3.5 Flash-Lite. It remains draft / unfrozen / not
-yet externally executed. It preserves the 40-task panel, split/holdout
+Gemini 3.8 Flash and Gemini 3.5 Flash-Lite. Its external execution is complete.
+It preserves the 40-task panel, split/holdout
 protocol, prompts, challenger, arbitration policy, ablations, and statistical
 design; only the declared provider/model conditions differ.
 

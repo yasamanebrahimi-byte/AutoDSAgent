@@ -102,7 +102,7 @@ def render_summary_markdown(
         "| Trial category | Count |",
         "|---|---:|",
         f"| Requested live trials | {summary.get('requested_live_trials', 0)} |",
-        f"| Successful requested-provider live calls | {summary.get('successful_initial_live_calls', summary.get('planner_live_success', 0))} |",
+        f"| Successful requested-provider live calls | {summary.get('planner_live_success', summary.get('successful_initial_live_calls', 0))} |",
         f"| Successful OpenAI trials | {summary.get('successful_openai_trials', 0)} |",
         f"| Offline fallback trials | {summary.get('offline_fallback_trials', 0)} |",
         f"| Failed trials | {summary.get('failed_trials', 0)} |",
