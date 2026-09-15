@@ -103,7 +103,8 @@ def test_gemini_structured_output_uses_shared_schema_and_records_provenance():
         "You are the independent post-formulation modeling agent."
     )
     assert request["config"]["response_mime_type"] == "application/json"
-    assert request["config"]["response_schema"] is ModelingPlan
+    assert request["config"]["response_json_schema"] == ModelingPlan.model_json_schema()
+    assert "response_schema" not in request["config"]
     assert request["config"]["thinking_config"] == {"thinking_level": "medium"}
     assert "temperature" not in request["config"]
     assert "top_p" not in request["config"]
@@ -218,7 +219,8 @@ def test_shared_reconciler_schema_remains_modeling_resolution():
         {"_blinded_reconciliation_payload": {"proposal_a": {}, "proposal_b": {}}},
     )
     assert result == resolution
-    assert client.models.requests[0]["config"]["response_schema"] is ModelingResolution
+    assert client.models.requests[0]["config"]["response_json_schema"] == ModelingResolution.model_json_schema()
+    assert "response_schema" not in client.models.requests[0]["config"]
 
 
 def test_replication_manifest_is_provider_valid_and_preserves_matrix_definition():

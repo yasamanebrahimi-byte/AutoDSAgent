@@ -608,7 +608,7 @@ class GeminiAgents(BaseAgents):
         config: dict[str, Any] = {
             "system_instruction": instructions,
             "response_mime_type": "application/json",
-            "response_schema": schema,
+            "response_json_schema": schema.model_json_schema(),
         }
         for key in ("temperature", "top_p", "seed"):
             if key in supplied_settings:
