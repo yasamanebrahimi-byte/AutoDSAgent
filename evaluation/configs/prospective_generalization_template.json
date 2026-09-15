@@ -1,0 +1,23 @@
+{
+  "manifest_schema_version": "prospective-generalization-config-v1",
+  "status": "draft",
+  "analysis_role": "prospective_generalization",
+  "experiment_config_version": "prospective-generalization-v1-draft",
+  "panel_manifest": "PATH_TO_A_HUMAN_REVIEWED_FROZEN_TASK_PANEL_MANIFEST.json",
+  "split_seeds": [],
+  "split_seed_selection_rule": "Populate with several explicitly predeclared seeds before execution; never choose them from observed outcomes.",
+  "model_conditions": [],
+  "llm_repetitions": null,
+  "ablations": [
+    "llm_only",
+    "probe_direct",
+    "full"
+  ],
+  "selection_policy": {
+    "pairwise_cv_always": "raw mean-CV winner of the two persisted candidate plans; strict numerical ties preserve the initial LLM plan",
+    "all_four_cv": "best eligible family from the fixed four-family portfolio using training-only CV",
+    "holdout": "untouched final evaluation after plan selection",
+    "independent_unit": "dataset/task"
+  },
+  "freeze_note": "This is a template only. Do not mark it frozen until panel membership, sampling frame, criteria, seeds, model conditions, repetitions, and reporting choices have been scientifically reviewed."
+}

@@ -179,6 +179,10 @@ must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
 outcomes are not part of the normal publication-readiness workflow.
 
+Retrospective conventional baselines (`pairwise_cv_always` and `all_four_cv`),
+coverage diagnostics, and the separately versioned prospective fresh-panel
+workflow are documented in [`docs/conventional_baselines.md`](docs/conventional_baselines.md).
+
 The completed OpenAI confirmatory study is defined by
 `evaluation/configs/paper_confirmatory_v3.json`, with committed results under
 `evaluation_results/external_ablation_live_v3/`. It covers GPT-5.6 Sol,

@@ -1601,7 +1601,11 @@ def run_ablation_study(
         root_config.update({
             "fallback_rows": fallback_rows,
             "external_benchmark_manifest_matches": bool(
-                all(result["config"].get("external_benchmark_manifest_matches") is True for result in results.values())
+                all(
+                    condition_result.get("config", {}).get("external_benchmark_manifest_matches") is True
+                    for result in results.values()
+                    for condition_result in result.get("condition_results", {}).values()
+                )
             ),
             "confirmatory_valid": bool(
                 completeness is not None and completeness.get("complete", False)

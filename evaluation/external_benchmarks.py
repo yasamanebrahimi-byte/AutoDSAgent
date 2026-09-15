@@ -11,9 +11,10 @@ import inspect
 import hashlib
 import json
 import os
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import pandas as pd
 
@@ -48,6 +49,11 @@ class OpenMLBenchmarkSpec:
     # compatibility detail out of the serialized manifest and default direct
     # test/custom specs to the raw-feature interpretation.
     feature_count_includes_target: bool = field(default=False, repr=False, compare=False)
+    # Prospective panels may be sampled from a declared OpenML frame other
+    # than the frozen AMLB suites.  The historical manifest leaves this false;
+    # the opt-in flag keeps its validation unchanged while allowing the new
+    # panel manifest to reuse the loader and shape checks.
+    allow_non_amlb_source_suite: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.task_id <= 0:
@@ -68,7 +74,7 @@ class OpenMLBenchmarkSpec:
             expected_suite = AMLB_REGRESSION_SUITE_ID
         if self.source_suite is None:
             object.__setattr__(self, "source_suite", expected_suite)
-        elif self.source_suite != expected_suite:
+        elif self.source_suite != expected_suite and not self.allow_non_amlb_source_suite:
             raise ValueError(
                 f"Task {self.task_id} has source suite {self.source_suite}, "
                 f"expected {expected_suite} for {self.expected_task_type}."
@@ -76,6 +82,8 @@ class OpenMLBenchmarkSpec:
 
     @property
     def source_suite_label(self) -> str:
+        if self.source_suite not in {AMLB_CLASSIFICATION_SUITE_ID, AMLB_REGRESSION_SUITE_ID}:
+            return f"OpenML suite {self.source_suite}"
         kind = "classification" if self.expected_task_type == "classification" else "regression"
         return f"AMLB {kind} suite {self.source_suite}"
 
@@ -111,6 +119,210 @@ class OpenMLBenchmarkData:
     dataset_name: str
     original_target_name: str | None
     observed_classes: int | None
+
+
+PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION = "prospective-task-panel-v1"
+PROSPECTIVE_ANALYSIS_ROLE = "prospective_generalization"
+
+
+def prospective_panel_content_sha256(manifest: Mapping[str, Any]) -> str:
+    """Hash the declared sampling frame, criteria, and immutable task entries."""
+
+    payload = {
+        "panel_id": manifest.get("panel_id"),
+        "analysis_role": manifest.get("analysis_role"),
+        "panel_selection": manifest.get("panel_selection"),
+        "tasks": manifest.get("tasks"),
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_prospective_panel_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    require_frozen: bool = False,
+) -> dict[str, Any]:
+    """Validate a new task-panel manifest without changing the frozen v1 panel."""
+
+    if not isinstance(manifest, Mapping):
+        raise ValueError("Prospective task-panel manifest must be a JSON object.")
+    if manifest.get("manifest_schema_version") != PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION:
+        raise ValueError("Unsupported prospective task-panel manifest schema version.")
+    if manifest.get("analysis_role") != PROSPECTIVE_ANALYSIS_ROLE:
+        raise ValueError(
+            f"Prospective task panels must declare analysis_role={PROSPECTIVE_ANALYSIS_ROLE!r}."
+        )
+    if not str(manifest.get("panel_id", "")).strip():
+        raise ValueError("Prospective task panels must declare a non-empty panel_id.")
+    status = manifest.get("status")
+    if status not in {"draft", "frozen"}:
+        raise ValueError("Prospective task-panel status must be 'draft' or 'frozen'.")
+    selection = manifest.get("panel_selection")
+    if not isinstance(selection, Mapping):
+        raise ValueError("panel_selection must declare the sampling frame and criteria.")
+    if not str(selection.get("sampling_frame", "")).strip():
+        raise ValueError("panel_selection.sampling_frame is required.")
+    if not isinstance(selection.get("inclusion_criteria"), list) or not selection.get("inclusion_criteria"):
+        raise ValueError("panel_selection.inclusion_criteria must be a non-empty list.")
+    if not isinstance(selection.get("exclusion_criteria"), list):
+        raise ValueError("panel_selection.exclusion_criteria must be a list.")
+    seed = selection.get("selection_seed")
+    if status == "frozen" or require_frozen:
+        if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
+            raise ValueError("A frozen prospective panel must declare a non-negative selection_seed.")
+    tasks = manifest.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("A prospective panel must declare at least one task entry.")
+    task_ids: set[int] = set()
+    dataset_ids: set[int] = set()
+    for index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            raise ValueError(f"tasks[{index}] must be an object.")
+        required = (
+            "task_id", "dataset_id", "dataset_name", "dataset_version", "task_type",
+            "target", "expected_rows", "expected_features", "provenance", "selection_metadata",
+        )
+        missing = [key for key in required if task.get(key) in (None, "")]
+        if missing:
+            raise ValueError(f"tasks[{index}] is missing required fields: {', '.join(missing)}")
+        try:
+            task_id = int(task["task_id"])
+            dataset_id = int(task["dataset_id"])
+            expected_rows = int(task["expected_rows"])
+            expected_features = int(task["expected_features"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"tasks[{index}] identifiers and dimensions must be integers.") from exc
+        if task_id <= 0 or dataset_id <= 0 or expected_rows <= 0 or expected_features <= 0:
+            raise ValueError(f"tasks[{index}] identifiers and dimensions must be positive.")
+        if task_id in task_ids or dataset_id in dataset_ids:
+            raise ValueError("Prospective task_id and dataset_id values must be unique.")
+        task_ids.add(task_id)
+        dataset_ids.add(dataset_id)
+        if task["task_type"] not in {"classification", "regression"}:
+            raise ValueError(f"tasks[{index}].task_type must be classification or regression.")
+        if not isinstance(task["provenance"], Mapping) or not task["provenance"]:
+            raise ValueError(f"tasks[{index}].provenance must be a non-empty object.")
+        if not isinstance(task["selection_metadata"], Mapping) or not task["selection_metadata"]:
+            raise ValueError(f"tasks[{index}].selection_metadata must be a non-empty object.")
+        if task["task_type"] == "classification":
+            classes = task.get("expected_classes")
+            if not isinstance(classes, int) or isinstance(classes, bool) or classes < 2:
+                raise ValueError(f"tasks[{index}] classification entries require expected_classes >= 2.")
+        elif task.get("expected_classes") is not None:
+            raise ValueError(f"tasks[{index}] regression entries must not declare expected_classes.")
+        if not isinstance(task["dataset_version"], (str, int)) or isinstance(task["dataset_version"], bool):
+            raise ValueError(f"tasks[{index}].dataset_version must be a string or integer version.")
+    content_hash = prospective_panel_content_sha256(manifest)
+    declared_hash = manifest.get("content_sha256")
+    if status == "frozen" or require_frozen:
+        if declared_hash != content_hash:
+            raise ValueError(
+                "Frozen prospective panel content_sha256 does not match the declared panel entries."
+            )
+    return {
+        "status": status,
+        "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
+        "panel_id": manifest.get("panel_id"),
+        "selection_seed": seed,
+        "task_count": len(tasks),
+        "classification_count": sum(task.get("task_type") == "classification" for task in tasks),
+        "regression_count": sum(task.get("task_type") == "regression" for task in tasks),
+        "content_sha256": content_hash,
+        "manifest_sha256": hashlib.sha256(
+            json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def freeze_prospective_panel_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a reviewed draft with its immutable content hash and frozen status."""
+
+    draft = deepcopy(dict(manifest))
+    if draft.get("status") != "draft":
+        raise ValueError("Only a draft prospective panel can be frozen.")
+    validate_prospective_panel_manifest(draft)
+    draft["status"] = "frozen"
+    draft["content_sha256"] = prospective_panel_content_sha256(draft)
+    validate_prospective_panel_manifest(draft, require_frozen=True)
+    return draft
+
+
+def load_prospective_panel_manifest(path: str | Path) -> dict[str, Any]:
+    """Load a prospective panel manifest and return its validated JSON object."""
+
+    manifest_path = Path(path)
+    try:
+        value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"Prospective task-panel manifest does not exist: {manifest_path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Prospective task-panel manifest is not valid JSON: {manifest_path}") from exc
+    validate_prospective_panel_manifest(value)
+    return value
+
+
+def _prospective_case(entry: Mapping[str, Any], panel_version: str) -> BenchmarkCase:
+    task_type = str(entry["task_type"])
+    expected_suite = AMLB_CLASSIFICATION_SUITE_ID if task_type == "classification" else AMLB_REGRESSION_SUITE_ID
+    spec = OpenMLBenchmarkSpec(
+        task_id=int(entry["task_id"]),
+        name=str(entry["dataset_name"]),
+        expected_task_type=task_type,
+        expected_rows=int(entry["expected_rows"]),
+        expected_features=int(entry["expected_features"]),
+        expected_classes=entry.get("expected_classes"),
+        tier=entry.get("tier", "core"),
+        notes=str(entry.get("notes", "")),
+        source_suite=int(entry.get("source_suite_id") or expected_suite),
+        allow_non_amlb_source_suite=True,
+    )
+    target_name = str(entry["target"])
+
+    def loader() -> pd.DataFrame:
+        data = load_openml_task_data(spec)
+        if data.original_target_name is not None and data.original_target_name != target_name:
+            raise ValueError(
+                f"Prospective panel target mismatch for task {spec.task_id}: "
+                f"manifest={target_name!r}, OpenML={data.original_target_name!r}."
+            )
+        if entry.get("dataset_id") is not None and data.dataset_id is not None and int(entry["dataset_id"]) != data.dataset_id:
+            raise ValueError(
+                f"Prospective panel dataset mismatch for task {spec.task_id}: "
+                f"manifest={entry['dataset_id']}, OpenML={data.dataset_id}."
+            )
+        return data.frame
+
+    return BenchmarkCase(
+        name=str(entry["dataset_name"]),
+        target_column=CANONICAL_TARGET_COLUMN,
+        question=(
+            "Predict the target class from the provided tabular features."
+            if task_type == "classification"
+            else "Estimate the continuous target from the provided tabular features."
+        ),
+        expected_task_type=task_type,
+        dataset_source=str(entry.get("provenance", {}).get("source", f"OpenML task {spec.task_id}")),
+        dataframe_loader=loader,
+        category="openml_prospective_panel",
+        notes=str(entry.get("notes", "")),
+        random_seed=int(entry.get("random_seed", 42)),
+        role=BenchmarkRole.EXTERNAL_EVALUATION,
+        openml_task_id=spec.task_id,
+        source_suite=f"OpenML task panel {panel_version}",
+        source_suite_id=entry.get("source_suite_id"),
+        benchmark_suite_version=panel_version,
+        tier=entry.get("tier", "core"),
+    )
+
+
+def prospective_benchmark_cases(manifest: Mapping[str, Any] | str | Path) -> list[BenchmarkCase]:
+    """Return lazy BenchmarkCase objects for a validated prospective panel."""
+
+    loaded = load_prospective_panel_manifest(manifest) if isinstance(manifest, (str, Path)) else dict(manifest)
+    validate_prospective_panel_manifest(loaded)
+    panel_version = str(loaded.get("panel_id") or "prospective-panel")
+    return [_prospective_case(entry, panel_version) for entry in loaded["tasks"]]
 
 
 def _classification(
@@ -460,9 +672,16 @@ __all__ = [
     "ExternalTaskType",
     "OpenMLBenchmarkData",
     "OpenMLBenchmarkSpec",
+    "PROSPECTIVE_ANALYSIS_ROLE",
+    "PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION",
     "configure_openml_cache",
     "external_benchmark_cases",
     "external_benchmark_specs",
+    "freeze_prospective_panel_manifest",
+    "load_prospective_panel_manifest",
     "load_openml_task",
     "load_openml_task_data",
+    "prospective_benchmark_cases",
+    "prospective_panel_content_sha256",
+    "validate_prospective_panel_manifest",
 ]

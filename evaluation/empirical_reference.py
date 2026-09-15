@@ -8,6 +8,7 @@ decision.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any, Sequence
 
 import numpy as np
@@ -217,31 +218,57 @@ def evaluate_empirical_reference(
             random_state=random_state,
         )
 
-    metric = primary_metric(task_type)
-    eligible = [
-        (method, result)
-        for method, result in candidates.items()
-        if result.get("status") == "evaluated" and result.get("primary_mean") is not None
-    ]
-    if task_type == "classification":
-        ranking = sorted(eligible, key=lambda item: (-float(item[1]["primary_mean"]), item[0]))
-    else:
-        ranking = sorted(eligible, key=lambda item: (float(item[1]["primary_mean"]), item[0]))
-    ranking_names = [method for method, _ in ranking]
+    selected = select_empirical_reference_from_candidates(candidates, task_type)
     return {
-        "status": "evaluated" if ranking else "unavailable",
-        "primary_metric": metric,
-        "selection_rule": (
-            "highest_mean_cv_macro_f1" if task_type == "classification" else "lowest_mean_cv_rmse"
-        ),
-        "best_method": ranking_names[0] if ranking_names else None,
-        "best_primary_mean": ranking[0][1]["primary_mean"] if ranking else None,
-        "best_primary_std": ranking[0][1]["primary_std"] if ranking else None,
-        "ranking": ranking_names,
+        **selected,
         "candidate_metrics": candidates,
         "data_used": "frozen_training_partition_only",
         "holdout_used": False,
     }
+
+
+def select_empirical_reference_from_candidates(
+    candidate_metrics: Mapping[str, Mapping[str, Any]],
+    task_type: TaskType,
+) -> dict[str, Any]:
+    """Select the empirical reference from already-persisted candidate scores.
+
+    This is the persisted-artifact counterpart of
+    :func:`evaluate_empirical_reference`.  It deliberately uses the same
+    supported-family order and the same lexicographic tie break as the live
+    evaluator, so retrospective analyses do not subtly redefine the
+    all-family reference when the CV values are reused from a historical row.
+    """
+
+    metric = primary_metric(task_type)
+    eligible = [
+        (method, result)
+        for method in SUPPORTED_METHOD_ORDER
+        for result in [candidate_metrics.get(method, {})]
+        if isinstance(result, Mapping)
+        and result.get("status") == "evaluated"
+        and result.get("primary_mean") is not None
+    ]
+    if task_type == "classification":
+        ranking = sorted(eligible, key=lambda item: (-float(item[1]["primary_mean"]), item[0]))
+        selection_rule = "highest_mean_cv_macro_f1"
+    else:
+        ranking = sorted(eligible, key=lambda item: (float(item[1]["primary_mean"]), item[0]))
+        selection_rule = "lowest_mean_cv_rmse"
+    ranking_names = [method for method, _ in ranking]
+    return {
+        "status": "evaluated" if ranking else "unavailable",
+        "primary_metric": metric,
+        "selection_rule": selection_rule,
+        "best_method": ranking_names[0] if ranking else None,
+        "best_primary_mean": ranking[0][1]["primary_mean"] if ranking else None,
+        "best_primary_std": ranking[0][1].get("primary_std") if ranking else None,
+        "ranking": ranking_names,
+    }
+
+
+# Short alias for callers that read cached rows rather than frames.
+select_cached_empirical_reference = select_empirical_reference_from_candidates
 
 
 def evaluate_holdout_plan(
