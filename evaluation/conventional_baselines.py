@@ -59,7 +59,7 @@ from evaluation.statistics import (
 
 BASELINE_ANALYSIS_ROLE = "retrospective_posthoc_baseline"
 PROSPECTIVE_ANALYSIS_ROLE = "prospective_generalization"
-BASELINE_ANALYSIS_SCHEMA_VERSION = "conventional-baselines-v1"
+BASELINE_ANALYSIS_SCHEMA_VERSION = "conventional-baselines-v2"
 SUPPORTED_METHODS = ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
 BASELINE_NAMES = ("llm_only", "pairwise_cv_always", "probe_direct", "all_four_cv")
 STRICT_NUMERICAL_RTOL = 1e-12
@@ -153,6 +153,30 @@ def _source_for_label(
     )
 
 
+def _validity_value(value: Any) -> bool | None:
+    """Normalize persisted validation/actionability values without guessing."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return value
+    if isinstance(value, Mapping):
+        if value.get("valid") is not None:
+            return _validity_value(value.get("valid"))
+        for key in ("status", "overall_status", "actionability_status"):
+            if value.get(key) is not None:
+                return _validity_value(value.get(key))
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"passed", "pass", "valid", "actionable", "ready", "ok", "true", "yes"}:
+            return True
+        if normalized in {
+            "failed", "fail", "invalid", "not_actionable", "unavailable",
+            "false", "no", "rejected", "not_valid",
+        }:
+            return False
+    return None
+
+
 def select_pairwise_cv_always(
     task_type: str,
     initial_llm_family: str | None,
@@ -160,7 +184,7 @@ def select_pairwise_cv_always(
     probe: Mapping[str, Any] | None,
     *,
     initial_valid: bool = True,
-    challenger_valid: bool = True,
+    challenger_valid: bool | None = None,
     initial_preprocessing: Mapping[str, Any] | PreprocessingContract | None = None,
     challenger_preprocessing: Mapping[str, Any] | PreprocessingContract | None = None,
     proposal_a_source: str | None = None,
@@ -209,6 +233,11 @@ def select_pairwise_cv_always(
         "reconciler_call_count": 0,
     }
 
+    if challenger_family is None:
+        raise MissingHistoricalFields("deterministic challenger model family is missing")
+    if challenger_valid is None and challenger_family != initial_family:
+        raise MissingHistoricalFields("deterministic challenger validity/actionability status is missing")
+
     # Hard validation remains authoritative.  This is not an ordinary soft
     # comparison and therefore does not require a probe artifact.
     if not initial_valid:
@@ -227,8 +256,13 @@ def select_pairwise_cv_always(
             )
         return result
 
-    if challenger_family is None:
-        raise MissingHistoricalFields("deterministic challenger model family is missing")
+    if challenger_valid is None and challenger_family == initial_family:
+        result.update(
+            selection_source="initial_llm_incumbent",
+            selection_rule="model_family_agreement_preserve_initial",
+        )
+        return result
+
     if not challenger_valid:
         result.update(
             selection_source="initial_llm_incumbent",
@@ -269,10 +303,14 @@ def select_pairwise_cv_always(
         raw_winner = "A" if a_wins else "B"
     winner_source = "initial_llm" if raw_winner == "tie" else (source_a if raw_winner == "A" else source_b)
     selected_family = initial_family if winner_source == "initial_llm" else challenger_family
+    proposal_contracts = {
+        "initial_llm": initial_contract,
+        "deterministic_challenger": challenger_contract,
+    }
     if raw_winner == "A":
-        selected_contract = _preprocessing_dict(proposal_a.get("preprocessing")) or initial_contract
+        selected_contract = _preprocessing_dict(proposal_a.get("preprocessing")) or proposal_contracts[source_a]
     elif raw_winner == "B":
-        selected_contract = _preprocessing_dict(proposal_b.get("preprocessing")) or challenger_contract
+        selected_contract = _preprocessing_dict(proposal_b.get("preprocessing")) or proposal_contracts[source_b]
     else:
         selected_contract = initial_contract
     cv_folds = probe_map.get("cv_folds")
@@ -392,25 +430,38 @@ def _challenger_preprocessing(row: Mapping[str, Any]) -> dict[str, Any] | None:
 def _initial_valid(row: Mapping[str, Any]) -> bool | None:
     value = _first(row, "agent_initial_valid")
     if value is not None:
-        return bool(value)
+        return _validity_value(value)
     nested = _mapping(row.get("agent_initial")).get("valid")
     if nested is not None:
-        return bool(nested)
+        return _validity_value(nested)
     validation = _mapping(row.get("hard_validation")).get("initial_proposal")
-    if isinstance(validation, Mapping) and validation.get("status") is not None:
-        return validation.get("status") == "passed"
+    if validation:
+        parsed = _validity_value(validation)
+        if parsed is not None:
+            return parsed
     validation = _mapping(row.get("agent_initial_validation"))
-    if validation.get("overall_status") is not None:
-        return validation.get("overall_status") == "passed"
+    parsed = _validity_value(validation)
+    if parsed is not None:
+        return parsed
     return None
 
 
 def _challenger_valid(row: Mapping[str, Any]) -> bool | None:
     validation = _mapping(row.get("hard_validation")).get("deterministic_challenger")
-    if isinstance(validation, Mapping) and validation.get("status") is not None:
-        return validation.get("status") == "passed"
-    value = row.get("deterministic_valid")
-    return bool(value) if value is not None else True if _challenger_family(row) else None
+    parsed = _validity_value(validation)
+    if parsed is not None:
+        return parsed
+    for key in ("deterministic_valid", "deterministic_challenger_valid"):
+        if row.get(key) is not None:
+            parsed = _validity_value(row.get(key))
+            if parsed is not None:
+                return parsed
+    parsed = _validity_value(_mapping(row.get("deterministic_recommendation")).get("valid"))
+    if parsed is not None:
+        return parsed
+    # A family name is not evidence that the persisted challenger passed hard
+    # validation.  Returning None makes the missing-data path explicit.
+    return None if _challenger_family(row) else None
 
 
 def _candidate_metrics(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -433,6 +484,43 @@ def _reference_key(row: Mapping[str, Any], candidate_metrics: Mapping[str, Any])
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+def _all_four_compute_cost_key(
+    row: Mapping[str, Any],
+    candidate_metrics: Mapping[str, Any],
+) -> str:
+    """Key one shared conventional four-family CV search.
+
+    The key includes the dataset/split and CV configuration, while explicitly
+    excluding the ablation, model condition, and LLM repetition.  Those
+    dimensions can change the paired observation without changing this fixed
+    training-side search.
+    """
+
+    candidate_configuration = {
+        method: {
+            "status": _mapping(candidate_metrics.get(method)).get("status"),
+            "cv_folds": _mapping(candidate_metrics.get(method)).get("cv_folds"),
+            "cv_strategy": _mapping(candidate_metrics.get(method)).get("cv_strategy"),
+        }
+        for method in SUPPORTED_METHODS
+    }
+    payload = {
+        "benchmark_case": row.get("benchmark_case", row.get("dataset_id", row.get("task_id"))),
+        "dataset_id": row.get("dataset_id"),
+        "dataset_version": row.get("dataset_version"),
+        "benchmark_suite_version": row.get("benchmark_suite_version"),
+        "task_type": row.get("task_type"),
+        "target_column": row.get("agent_initial_target") or row.get("final_target") or row.get("target_column"),
+        "split_seed": row.get("split_seed"),
+        "split_random_state": row.get("split_random_state", row.get("split_seed")),
+        "split_contract": _mapping(row.get("split_contract")),
+        "test_size": row.get("test_size"),
+        "candidate_methods": list(SUPPORTED_METHODS),
+        "candidate_cv_configuration": candidate_configuration,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
 def _holdout_cache_key(
     row: Mapping[str, Any],
     selected_family: str,
@@ -449,52 +537,119 @@ def _holdout_cache_key(
 
 
 def _logical_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Identify one experimental realization across ablation directories.
+
+    The ablation arm is intentionally absent.  ``evaluation_variant`` and
+    ``order_swap_pair_id`` remain because swapped-order controls are separate
+    experimental realizations even when their dataset, split, and repetition
+    match the standard row.
+    """
+
     return (
         row.get("model_condition_id", "default"),
-        row.get("llm_repetition_id", row.get("trial")),
+        row.get("provider"),
+        row.get("planner_model_effective") or row.get("planner_model") or row.get("agent_model"),
         row.get("benchmark_case", row.get("dataset_id", row.get("task_id"))),
+        row.get("dataset_id"),
+        row.get("task_id"),
+        row.get("task_type"),
         row.get("perturbation_id", "clean"),
         row.get("split_seed"),
+        row.get("split_random_state", row.get("split_seed")),
+        row.get("llm_repetition_id", row.get("trial")),
         row.get("trial"),
+        row.get("evaluation_variant", "standard"),
+        row.get("order_swap_pair_id"),
     )
+
+
+def _source_ablation(row: Mapping[str, Any]) -> str | None:
+    value = row.get("source_ablation") or row.get("ablation_name")
+    if value is None:
+        value = row.get("gate_mode")
+    return str(value) if value else None
+
+
+def _has_initial_plan(row: Mapping[str, Any]) -> bool:
+    return _initial_family(row) is not None and _initial_valid(row) is not None
+
+
+def _has_direct_result(row: Mapping[str, Any]) -> bool:
+    source = _source_ablation(row)
+    return (
+        source == "probe_direct"
+        or row.get("gate_mode") == "probe_direct"
+    ) and _family(row.get("final_method")) is not None
 
 
 def _row_quality(row: Mapping[str, Any]) -> tuple[int, int, int]:
     probe = _mapping(row.get("empirical_probe"))
     has_probe = int(probe.get("status") == "completed")
     has_reference = int(bool(_candidate_metrics(row)))
-    is_probe_arm = int(
-        row.get("ablation_name") == "probe_direct" or row.get("gate_mode") == "probe_direct"
-    )
-    return has_probe, has_reference, is_probe_arm
+    is_probe_arm = int(_source_ablation(row) == "probe_direct" or row.get("gate_mode") == "probe_direct")
+    is_full_arm = int(_source_ablation(row) == "full")
+    return has_probe, has_reference, is_probe_arm + is_full_arm
 
 
-def _group_source_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Mapping[str, Any]]]:
+def _group_source_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[tuple[Any, ...], list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
         if row.get("trial_status") == "failed":
             continue
         groups[_logical_key(row)].append(row)
-    selected: list[dict[str, Mapping[str, Any]]] = []
-    for group_rows in groups.values():
-        ordered = sorted(group_rows, key=lambda row: (-_row_quality(row)[0], -_row_quality(row)[1], -_row_quality(row)[2], str(row.get("trial_id", ""))))
+    selected: list[dict[str, Any]] = []
+    for logical_key, group_rows in sorted(groups.items(), key=lambda item: str(item[0])):
+        ordered = sorted(
+            group_rows,
+            key=lambda row: (
+                -_row_quality(row)[0],
+                -_row_quality(row)[1],
+                -_row_quality(row)[2],
+                str(row.get("source_file", "")),
+                str(row.get("trial_id", "")),
+            ),
+        )
         probe_rows = [
             row for row in ordered
             if _mapping(row.get("empirical_probe")).get("status") == "completed"
         ]
-        probe_row = probe_rows[0] if probe_rows else None
-        llm_rows = [row for row in ordered if row.get("ablation_name") == "llm_only"]
-        all4_rows = [row for row in ordered if _candidate_metrics(row)]
+        llm_rows = [row for row in ordered if _source_ablation(row) == "llm_only" and _has_initial_plan(row)]
+        all4_rows = [
+            row for row in ordered
+            if _source_ablation(row) == "full" and _candidate_metrics(row)
+        ] or [row for row in ordered if _candidate_metrics(row)]
         direct_rows = [
             row for row in ordered
-            if row.get("ablation_name") == "probe_direct" or row.get("gate_mode") == "probe_direct"
+            if _has_direct_result(row)
         ]
+        probe_direct_rows = [row for row in direct_rows if _source_ablation(row) == "probe_direct"]
+        probe_row = probe_direct_rows[0] if probe_direct_rows else (probe_rows[0] if probe_rows else None)
+        representative = ordered[0]
+        # Flat historical bundles can contain all artifacts in one row.  Use
+        # that row when it really contains the required artifact, while still
+        # reporting missing dedicated source arms in the provenance map.
+        llm_row = llm_rows[0] if llm_rows else (representative if _has_initial_plan(representative) else None)
+        all4_row = all4_rows[0] if all4_rows else None
+        direct_row = direct_rows[0] if direct_rows else (probe_row if _has_direct_result(probe_row or {}) else None)
+        available = sorted({str(_source_ablation(row) or "unknown") for row in ordered})
+        role_rows = {
+            "llm_only_holdout": llm_row,
+            "empirical_probe": probe_row,
+            "probe_direct_selective": direct_row,
+            "full_all_four_empirical_reference": all4_row,
+        }
+        missing_roles = [role for role, row in role_rows.items() if row is None]
         selected.append({
-            "representative": ordered[0],
-            "llm": llm_rows[0] if llm_rows else ordered[0],
-            "probe": probe_row or ordered[0],
-            "direct": direct_rows[0] if direct_rows else probe_row,
-            "all4": all4_rows[0] if all4_rows else ordered[0],
+            "logical_key": logical_key,
+            "representative": representative,
+            "llm": llm_row,
+            "probe": probe_row,
+            "direct": direct_row,
+            "all4": all4_row,
+            "role_rows": role_rows,
+            "available_source_arms": available,
+            "missing_source_roles": missing_roles,
+            "source_rows": ordered,
         })
     return selected
 
@@ -541,6 +696,25 @@ def _cached_holdout_metric(
                     return parsed, "reused_existing_exact_plan_holdout_artifact"
                 continue
             return parsed, "reused_existing_holdout_artifact"
+    # A pairwise retrospective observation is valid only when the persisted
+    # holdout artifact is for the exact selected proposal.  In particular, a
+    # probe-direct final value must not be treated as the pairwise value when
+    # the two policies selected different families.
+    if baseline == "pairwise_cv_always" and selected_family is not None:
+        initial_family = _initial_family(row)
+        initial_preprocessing = _initial_preprocessing(row)
+        final_family = _family(row.get("final_method"))
+        final_preprocessing = _preprocessing_dict(row.get("final_preprocessing"))
+        if initial_family == selected_family and initial_preprocessing == selected_preprocessing:
+            value = row.get("initial_holdout_metric")
+            parsed = _float(value)
+            if parsed is not None:
+                return parsed, "reused_existing_exact_initial_plan_holdout_artifact"
+        if final_family == selected_family and final_preprocessing == selected_preprocessing:
+            value = row.get("final_holdout_metric")
+            parsed = _float(value)
+            if parsed is not None:
+                return parsed, "reused_existing_exact_final_plan_holdout_artifact"
     if baseline == "llm_only" and _initial_valid(row) is False:
         parsed = _float(row.get("final_holdout_metric"))
         if parsed is not None:
@@ -629,7 +803,7 @@ def _holdout_with_recompute(
     value = _float(_mapping(result.get("holdout_metrics")).get(metric_name))
     if value is None or result.get("status") != "evaluated":
         raise BaselineAnalysisError(
-            f"selected all-four plan holdout evaluation failed for trial {row.get('trial_id')!r}: "
+            f"selected baseline plan holdout evaluation failed for trial {row.get('trial_id')!r}: "
             f"{result.get('error') or result.get('status')}"
         )
     return value, {
@@ -642,9 +816,13 @@ def _holdout_with_recompute(
 
 def _base_provenance(row: Mapping[str, Any], source_run: str | None) -> dict[str, Any]:
     return {
-        "source_evaluation_run": source_run,
+        "source_evaluation_run": row.get("source_run") or source_run,
+        "source_file": row.get("source_file"),
+        "source_ablation": row.get("source_ablation") or row.get("ablation_name"),
+        "source_model_condition": row.get("source_model_condition") or row.get("model_condition_id", "default"),
+        "source_experiment_result_directory": row.get("source_experiment_result_directory"),
         "source_trial_id": row.get("trial_id"),
-        "source_ablation_name": row.get("ablation_name"),
+        "source_ablation_name": row.get("source_ablation") or row.get("ablation_name"),
         "source_evaluation_id": row.get("evaluation_id"),
         "dataset_task": row.get("benchmark_case", row.get("dataset_id", row.get("task_id"))),
         "benchmark_case": row.get("benchmark_case", row.get("dataset_id", row.get("task_id"))),
@@ -670,6 +848,9 @@ def _derived_row(
     baseline: str,
     source_run: str | None,
     *,
+    all4_source_row: Mapping[str, Any] | None,
+    source_roles: Mapping[str, Mapping[str, Any] | None] | None,
+    missing_source_roles: Sequence[str] = (),
     reference: Mapping[str, Any] | None,
     reference_recomputed: bool,
     pairwise: Mapping[str, Any] | None,
@@ -688,7 +869,9 @@ def _derived_row(
     if initial_valid is None:
         raise MissingHistoricalFields("initial hard-validity status is missing")
     provenance = _base_provenance(source_row, source_run)
-    candidate_metrics = _candidate_metrics(source_row)
+    candidate_metrics = _candidate_metrics(source_row) or (
+        _candidate_metrics(all4_source_row or {}) if baseline != "all_four_cv" else {}
+    )
     reference_selection = dict(reference or {})
     pair_selection = dict(pairwise or {})
     selected_family: str | None = None
@@ -698,6 +881,12 @@ def _derived_row(
     selection_scores: dict[str, Any] = {}
     reused_cached_scores = False
     recomputed_cv = reference_recomputed
+    baseline_required_role = {
+        "llm_only": "llm_only_holdout",
+        "pairwise_cv_always": "empirical_probe",
+        "probe_direct": "probe_direct_selective",
+        "all_four_cv": "full_all_four_empirical_reference",
+    }[baseline]
 
     if baseline == "llm_only":
         if initial_valid:
@@ -724,9 +913,7 @@ def _derived_row(
                 key: pair_selection.get(key)
                 for key in ("proposal_a_mean_score", "proposal_b_mean_score", "raw_mean_cv_winner", "raw_mean_cv_difference")
             }
-            reused_cached_scores = pair_selection.get("probe_fit_count", 0) == 0 or bool(
-                _mapping(source_row.get("empirical_probe"))
-            )
+            reused_cached_scores = bool(_mapping(source_row.get("empirical_probe")))
         else:
             selection_source = "missing_pairwise_probe"
             selection_rule = "raw_pairwise_mean_cv"
@@ -755,7 +942,19 @@ def _derived_row(
     else:
         raise ValueError(f"Unsupported baseline: {baseline!r}")
 
-    missing: list[str] = []
+    # A missing companion arm is a missing historical observation.  Do not
+    # turn another arm's final decision into a counterfactual baseline value.
+    if (source_roles or {}).get(baseline_required_role) is None:
+        selected_family = None
+        selected_preprocessing = None
+        selection_source = f"missing_source_arm:{baseline_required_role}"
+        reused_cached_scores = False
+
+    missing: list[str] = [f"missing companion source role: {role}" for role in missing_source_roles]
+    if (source_roles or {}).get(baseline_required_role) is None:
+        missing.append(f"required source arm for {baseline}: {baseline_required_role}")
+    if baseline in {"pairwise_cv_always", "probe_direct"} and challenger_valid is None:
+        missing.append("deterministic challenger validity/actionability status")
     if selected_family is None and baseline != "pairwise_cv_always":
         missing.append("selected_baseline_family")
     if baseline == "pairwise_cv_always" and not pair_selection:
@@ -810,7 +1009,7 @@ def _derived_row(
         task_type,
         _mapping(source_row.get("holdout_policy")).get("thresholds")
         if _mapping(source_row.get("holdout_policy")).get("thresholds")
-        else dict(thresholds or DEFAULT_THRESHOLDS),
+        else dict(source_row.get("source_thresholds") or thresholds or DEFAULT_THRESHOLDS),
     )
     outcome = classify_holdout_intervention_outcome(
         paper_delta, tolerance, intervention_occurred=intervention
@@ -820,7 +1019,10 @@ def _derived_row(
     all4_holdout = None
     if baseline != "all_four_cv":
         all4_holdout, _ = _cached_holdout_metric(
-            source_row, "all_four_cv", all4_family, _preprocessing_dict(reference_selection.get("selected_preprocessing"))
+            all4_source_row or source_row,
+            "all_four_cv",
+            all4_family,
+            _preprocessing_dict(reference_selection.get("selected_preprocessing")),
         ) if all4_family else (None, None)
     holdout_difference = None
     if holdout_metric is not None and all4_holdout is not None:
@@ -832,8 +1034,19 @@ def _derived_row(
     probe = _mapping(source_row.get("empirical_probe"))
     cv_fit_count = 0
     distinct_families = 0
+    actionable_disagreement = bool(
+        initial_family
+        and challenger_family
+        and initial_family != challenger_family
+        and initial_valid is True
+        and challenger_valid is True
+    )
     if baseline in {"pairwise_cv_always", "probe_direct"}:
-        cv_fit_count = int(pair_selection.get("counterfactual_selection_fit_count", 0) or probe.get("fit_count", 0) or 0)
+        cv_fit_count = int(
+            pair_selection.get("counterfactual_selection_fit_count", 0)
+            or probe.get("fit_count", 0)
+            or (2 * int(probe.get("cv_folds", 0) or 0) if actionable_disagreement else 0)
+        )
         distinct_families = 2 if initial_family and challenger_family and initial_family != challenger_family else int(bool(initial_family))
     elif baseline == "all_four_cv":
         cv_fit_count = int(reference_selection.get("counterfactual_selection_fit_count", 0) or 0)
@@ -843,14 +1056,48 @@ def _derived_row(
         "selected candidate preprocessing contract",
         "empirical_probe.proposal_a/proposal_b raw mean scores",
     }
+    selection_artifact_missing = bool(
+        selection_missing.intersection(missing)
+        or (source_roles or {}).get(baseline_required_role) is None
+        or (baseline in {"pairwise_cv_always", "probe_direct"} and challenger_valid is None)
+    )
+    counterfactual_probe_invocations = int(
+        baseline in {"pairwise_cv_always", "probe_direct"} and actionable_disagreement
+    )
+    counterfactual_planner_calls = int(
+        baseline in {"llm_only", "pairwise_cv_always", "probe_direct"}
+    )
+    counterfactual_reconciler_calls = 0
+    counterfactual_final_fits = int(
+        selected_family is not None and selected_preprocessing is not None
+    )
+    actual_cv_fits = int(
+        reference_selection.get("counterfactual_selection_fit_count", 0) or 0
+    ) if baseline == "all_four_cv" and recomputed_cv else 0
+    role_metadata = {
+        role: {
+            "source_file": row.get("source_file"),
+            "source_ablation": row.get("source_ablation") or row.get("ablation_name"),
+            "source_trial_id": row.get("trial_id"),
+        } if row is not None else None
+        for role, row in (source_roles or {}).items()
+    }
     row_out = {
         **provenance,
         "analysis_schema_version": BASELINE_ANALYSIS_SCHEMA_VERSION,
         "analysis_role": BASELINE_ANALYSIS_ROLE,
         "baseline_name": baseline,
-        "baseline_status": "missing_artifact" if selection_missing.intersection(missing) else "evaluated",
-        "selection_status": "missing_artifact" if selection_missing.intersection(missing) else "evaluated",
+        "baseline_status": "missing_artifact" if selection_artifact_missing else "evaluated",
+        "selection_status": "missing_artifact" if selection_artifact_missing else "evaluated",
         "missing_fields": missing,
+        "logical_trial_key": list(_logical_key(source_row)),
+        "source_arm_for_baseline": source_row.get("source_ablation") or source_row.get("ablation_name") or source_row.get("gate_mode"),
+        "source_arm_roles": role_metadata,
+        "available_source_arms": sorted({
+            str((role or {}).get("source_ablation") or (role or {}).get("ablation_name") or (role or {}).get("gate_mode"))
+            for role in (source_roles or {}).values() if role is not None
+        }),
+        "missing_source_roles": list(missing_source_roles),
         "initial_llm_family": initial_family,
         "deterministic_challenger_family": challenger_family,
         "initial_llm_hard_valid": initial_valid,
@@ -891,22 +1138,27 @@ def _derived_row(
             "absolute macro-F1 points" if task_type == "classification" else "relative RMSE improvement"
         ),
         "counterfactual_selection_fit_count": cv_fit_count,
-        "final_training_fit_count": holdout_fit_count if recomputed_holdout else int(bool(holdout_metric is not None)),
-        "empirical_probe_fit_count": int(probe.get("fit_count", 0) or 0) if baseline != "all_four_cv" else 0,
+        "counterfactual_final_fit_count": counterfactual_final_fits,
+        "counterfactual_planner_llm_call_count": counterfactual_planner_calls,
+        "counterfactual_reconciler_llm_call_count": counterfactual_reconciler_calls,
+        "counterfactual_probe_invocation_count": counterfactual_probe_invocations,
+        "final_training_fit_count": counterfactual_final_fits,
+        "empirical_probe_fit_count": cv_fit_count if baseline in {"pairwise_cv_always", "probe_direct"} else 0,
         "distinct_candidate_families_cv_evaluated": distinct_families,
-        "planner_llm_call_count": 0,
-        "reconciler_llm_call_count": 0,
-        "probe_invocation_count": int(
-            baseline in {"pairwise_cv_always", "probe_direct"}
-            and probe.get("status") == "completed"
-            and initial_family != challenger_family
-        ),
+        "planner_llm_call_count": counterfactual_planner_calls,
+        "reconciler_llm_call_count": counterfactual_reconciler_calls,
+        "probe_invocation_count": counterfactual_probe_invocations,
         "analysis_reused_cached_scores": bool(reused_cached_scores),
         "analysis_recomputed_cv": recomputed_cv,
         "analysis_recomputed_holdout": recomputed_holdout,
-        "actual_analysis_fit_count": holdout_fit_count,
+        "actual_analysis_fit_count": actual_cv_fits + holdout_fit_count,
+        "actual_analysis_llm_call_count": 0,
         "fit_wall_clock_seconds": fit_wall_clock,
         "reference_cache_key": _reference_key(source_row, candidate_metrics) if candidate_metrics else None,
+        "all_four_compute_cost_key": _all_four_compute_cost_key(
+            all4_source_row or source_row,
+            _candidate_metrics(all4_source_row or source_row) or candidate_metrics,
+        ) if baseline == "all_four_cv" and (_candidate_metrics(all4_source_row or source_row) or candidate_metrics) else None,
         "reference_reused_across_repetitions": True,
         "comparison_key": json.dumps(_logical_key(source_row), default=str),
         "reconciler_invoked": False,
@@ -993,53 +1245,63 @@ def derive_baseline_trials(
         all4_source = group["all4"]
         reference_error: str | None = None
         reference_recomputed = False
-        try:
-            reference, reference_reused = _reference_for_row(
-                all4_source,
-                frame_loader=frame_loader,
-                recompute_missing=recompute_missing,
-                reference_cache=reference_cache,
-                frame_cache=frame_cache,
-            )
-            reference_recomputed = reference is not None and not reference_reused
-        except BaselineAnalysisError as exc:
-            reference = None
-            reference_error = str(exc)
-            errors.append(f"trial {all4_source.get('trial_id')!r}, all_four_cv reference: {exc}")
+        reference: dict[str, Any] | None = None
+        if all4_source is not None:
+            try:
+                reference, reference_reused = _reference_for_row(
+                    all4_source,
+                    frame_loader=frame_loader,
+                    recompute_missing=recompute_missing,
+                    reference_cache=reference_cache,
+                    frame_cache=frame_cache,
+                )
+                reference_recomputed = reference is not None and not reference_reused
+            except BaselineAnalysisError as exc:
+                reference_error = str(exc)
+                errors.append(f"trial {all4_source.get('trial_id')!r}, all_four_cv reference: {exc}")
+        else:
+            reference_error = "full/all-four empirical-reference source row is missing"
         probe_source = group["probe"]
         pairwise = None
-        initial_family = _initial_family(probe_source)
-        challenger_family = _challenger_family(probe_source)
-        initial_valid = _initial_valid(probe_source)
-        challenger_valid = _challenger_valid(probe_source)
-        if initial_family and challenger_family and initial_valid is not None:
+        initial_family = _initial_family(probe_source or {})
+        challenger_family = _challenger_family(probe_source or {})
+        initial_valid = _initial_valid(probe_source or {})
+        challenger_valid = _challenger_valid(probe_source or {})
+        if initial_family and challenger_family and initial_valid is not None and challenger_valid is not None:
             try:
                 pairwise = select_pairwise_cv_always(
-                    str(probe_source.get("task_type")),
+                    str((probe_source or {}).get("task_type")),
                     initial_family,
                     challenger_family,
                     _mapping(probe_source.get("empirical_probe")) or None,
                     initial_valid=initial_valid,
-                    challenger_valid=bool(challenger_valid),
+                    challenger_valid=challenger_valid,
                     initial_preprocessing=_initial_preprocessing(probe_source),
                     challenger_preprocessing=_challenger_preprocessing(probe_source),
                     proposal_a_source=probe_source.get("proposal_a_source"),
                     proposal_b_source=probe_source.get("proposal_b_source"),
                 )
             except BaselineAnalysisError as exc:
-                errors.append(f"trial {probe_source.get('trial_id')!r}: {exc}")
+                errors.append(f"trial {(probe_source or {}).get('trial_id')!r}: {exc}")
         for baseline in baselines:
-            source = (
-                group["llm"] if baseline == "llm_only"
-                else group["direct"] if baseline == "probe_direct" and group["direct"] is not None
-                else probe_source if baseline == "pairwise_cv_always"
-                else all4_source
-            )
+            if baseline == "llm_only":
+                source = group["llm"]
+            elif baseline == "probe_direct":
+                source = group["direct"]
+            elif baseline == "pairwise_cv_always":
+                source = group["probe"]
+            else:
+                source = group["all4"]
+            if source is None:
+                source = group["representative"]
             try:
                 derived_row = _derived_row(
                     source,
                     baseline,
                     source_run,
+                    all4_source_row=all4_source,
+                    source_roles=group["role_rows"],
+                    missing_source_roles=group["missing_source_roles"],
                     reference=reference,
                     reference_recomputed=reference_recomputed,
                     pairwise=pairwise,
@@ -1064,11 +1326,32 @@ def derive_baseline_trials(
                     "analysis_role": BASELINE_ANALYSIS_ROLE,
                     "baseline_name": baseline,
                     "baseline_status": "missing_artifact",
-                    "missing_fields": [str(exc)],
+                    "missing_fields": [str(exc), *[
+                        f"missing companion source role: {role}"
+                        for role in group["missing_source_roles"]
+                    ]],
                     "initial_llm_family": _initial_family(source),
                     "deterministic_challenger_family": _challenger_family(source),
                     "selected_baseline_family": None,
                     "holdout_metric": None,
+                    "logical_trial_key": list(_logical_key(source)),
+                    "source_arm_for_baseline": _source_ablation(source),
+                    "source_arm_roles": {
+                        role: {
+                            "source_file": role_row.get("source_file"),
+                            "source_ablation": _source_ablation(role_row),
+                            "source_trial_id": role_row.get("trial_id"),
+                        } if role_row is not None else None
+                        for role, role_row in group["role_rows"].items()
+                    },
+                    "counterfactual_selection_fit_count": 0,
+                    "counterfactual_final_fit_count": 0,
+                    "counterfactual_planner_llm_call_count": 0,
+                    "counterfactual_reconciler_llm_call_count": 0,
+                    "counterfactual_probe_invocation_count": 0,
+                    "actual_analysis_fit_count": 0,
+                    "actual_analysis_llm_call_count": 0,
+                    "analysis_reused_cached_scores": False,
                     "reconciler_invoked": False,
                 })
     if strict and errors:
@@ -1131,6 +1414,17 @@ def _method_summary(
             "holdout_metric_dataset_macro_mean": _dataset_macro_value(condition_rows, "holdout_metric"),
             "training_normalized_regret_dataset_macro_mean": _dataset_macro_value(condition_rows, "training_normalized_regret_relative_to_all_four"),
         }
+    def cost_total(field: str) -> int:
+        if baseline != "all_four_cv" or field != "counterfactual_selection_fit_count":
+            return sum(int(row.get(field, 0) or 0) for row in evaluated)
+        # The fixed four-family search is shared by repetitions and model
+        # conditions when dataset, split, and CV configuration are identical.
+        unique_costs: dict[str, int] = {}
+        for row in evaluated:
+            key = str(row.get("all_four_compute_cost_key") or row.get("comparison_key"))
+            unique_costs[key] = max(unique_costs.get(key, 0), int(row.get(field, 0) or 0))
+        return sum(unique_costs.values())
+
     return {
         "baseline": baseline,
         "trial_count": len(subset),
@@ -1152,7 +1446,7 @@ def _method_summary(
         "beneficial_intervention_rate": float(counts["beneficial"] / len(comparable_interventions)) if comparable_interventions else None,
         "harmful_intervention_rate": float(counts["harmful"] / len(comparable_interventions)) if comparable_interventions else None,
         "neutral_intervention_rate": float(counts["neutral"] / len(comparable_interventions)) if comparable_interventions else None,
-        "counterfactual_selection_fit_count_total": sum(int(row.get("counterfactual_selection_fit_count", 0) or 0) for row in evaluated),
+        "counterfactual_selection_fit_count_total": cost_total("counterfactual_selection_fit_count"),
         "counterfactual_selection_fit_count_per_derived_trial": (
             float(statistics.mean([int(row.get("counterfactual_selection_fit_count", 0) or 0) for row in evaluated])) if evaluated else None
         ),
@@ -1161,9 +1455,13 @@ def _method_summary(
         "distinct_candidate_families_cv_evaluated_mean": (
             float(statistics.mean([int(row.get("distinct_candidate_families_cv_evaluated", 0) or 0) for row in evaluated])) if evaluated else None
         ),
-        "planner_llm_call_count": sum(int(row.get("planner_llm_call_count", 0) or 0) for row in evaluated),
-        "reconciler_llm_call_count": sum(int(row.get("reconciler_llm_call_count", 0) or 0) for row in evaluated),
-        "probe_invocation_count": sum(int(row.get("probe_invocation_count", 0) or 0) for row in evaluated),
+        "counterfactual_final_fit_count_total": sum(int(row.get("counterfactual_final_fit_count", 0) or 0) for row in evaluated),
+        "counterfactual_planner_llm_call_count": sum(int(row.get("counterfactual_planner_llm_call_count", 0) or 0) for row in evaluated),
+        "counterfactual_reconciler_llm_call_count": sum(int(row.get("counterfactual_reconciler_llm_call_count", 0) or 0) for row in evaluated),
+        "counterfactual_probe_invocation_count": sum(int(row.get("counterfactual_probe_invocation_count", 0) or 0) for row in evaluated),
+        "planner_llm_call_count": sum(int(row.get("counterfactual_planner_llm_call_count", 0) or 0) for row in evaluated),
+        "reconciler_llm_call_count": sum(int(row.get("counterfactual_reconciler_llm_call_count", 0) or 0) for row in evaluated),
+        "probe_invocation_count": sum(int(row.get("counterfactual_probe_invocation_count", 0) or 0) for row in evaluated),
         "analysis_reused_cached_scores_count": sum(bool(row.get("analysis_reused_cached_scores")) for row in evaluated),
         "analysis_recomputed_holdout_count": sum(bool(row.get("analysis_recomputed_holdout")) for row in evaluated),
         "actual_analysis_fit_count": sum(int(row.get("actual_analysis_fit_count", 0) or 0) for row in evaluated),
@@ -1232,7 +1530,10 @@ def _comparison_summary(rows: Sequence[Mapping[str, Any]], first: str, second: s
     return {
         "first": first,
         "second": second,
+        "comparison_scope": "one_model_condition_and_task_type",
         "paired_evaluable_count": len(paired),
+        "independent_dataset_count": len({str(item.get("benchmark_case")) for item in paired}),
+        "repetitions_and_splits_are_nested": True,
         "holdout_performance_difference_first_minus_second_dataset_macro_mean": _dataset_macro_value(
             paired, "holdout_performance_difference_first_minus_second"
         ),
@@ -1297,6 +1598,74 @@ def summarize_baseline_trials(
         )
         for baseline in BASELINE_NAMES
     }
+    comparisons_by_condition: dict[str, dict[str, Any]] = {}
+    comparisons_by_condition_and_task: dict[str, dict[str, Any]] = {}
+    condition_values = sorted({str(row.get("model_condition_id", "default")) for row in rows})
+    comparison_pairs = (
+        ("llm_only", "all_four_cv"),
+        ("pairwise_cv_always", "all_four_cv"),
+        ("probe_direct", "all_four_cv"),
+        ("pairwise_cv_always", "probe_direct"),
+    )
+    for condition in condition_values:
+        condition_rows = [
+            row for row in rows
+            if str(row.get("model_condition_id", "default")) == condition
+        ]
+        comparisons_by_condition[condition] = {
+            f"{first}_vs_{second}": _comparison_summary(condition_rows, first, second)
+            for first, second in comparison_pairs
+        }
+        comparisons_by_condition_and_task[condition] = {
+            task_type: {
+                f"{first}_vs_{second}": _comparison_summary(
+                    [row for row in condition_rows if row.get("task_type") == task_type],
+                    first,
+                    second,
+                )
+                for first, second in comparison_pairs
+            }
+            for task_type in ("classification", "regression")
+        }
+    descriptive_combined = {
+        "scope": "descriptive_audit_only_pooled_model_conditions",
+        "warning": "Model conditions are pooled here for audit only; this is not a primary estimate.",
+        "comparisons": {
+            f"{first}_vs_{second}": _comparison_summary(rows, first, second)
+            for first, second in comparison_pairs
+        },
+    }
+    descriptive_combined["comparisons"]["probe_direct_vs_pairwise_cv_always"] = _comparison_summary(
+        rows, "probe_direct", "pairwise_cv_always"
+    )
+    companion_diagnostics: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        missing_roles = row.get("missing_source_roles") or []
+        if not missing_roles:
+            continue
+        key = str(row.get("comparison_key") or row.get("logical_trial_key"))
+        companion_diagnostics.setdefault(
+            key,
+            {
+                "logical_trial_key": row.get("logical_trial_key"),
+                "model_condition_id": row.get("model_condition_id"),
+                "benchmark_case": row.get("benchmark_case"),
+                "split_seed": row.get("split_seed"),
+                "llm_repetition_id": row.get("llm_repetition_id"),
+                "missing_source_roles": list(missing_roles),
+                "available_source_arms": row.get("available_source_arms", []),
+            },
+        )
+    missing_data_diagnostics = [
+        {
+            "logical_trial_key": row.get("logical_trial_key"),
+            "baseline_name": row.get("baseline_name"),
+            "source_file": row.get("source_file"),
+            "missing_fields": list(row.get("missing_fields") or []),
+        }
+        for row in rows
+        if row.get("missing_fields")
+    ]
     return {
         "analysis_schema_version": BASELINE_ANALYSIS_SCHEMA_VERSION,
         "analysis_role": BASELINE_ANALYSIS_ROLE,
@@ -1321,6 +1690,9 @@ def summarize_baseline_trials(
             row.get("baseline_status") == "evaluated" and bool(row.get("missing_fields"))
             for row in rows
         ),
+        "incomplete_logical_trial_count": len(companion_diagnostics),
+        "missing_companion_diagnostics": list(companion_diagnostics.values()),
+        "missing_data_diagnostics": missing_data_diagnostics,
         "baseline_summaries": baseline_summaries,
         "candidate_set_coverage": _coverage_slice(rows),
         "by_task_type": by_task_type,
@@ -1330,10 +1702,16 @@ def summarize_baseline_trials(
             "baseline_summaries": baseline_summaries,
             "candidate_set_coverage": _coverage_slice(rows),
         },
+        "primary_comparison_scope": "model_condition_and_task_type",
+        "comparisons_by_model_condition": comparisons_by_condition,
+        "comparisons_by_model_condition_and_task_type": comparisons_by_condition_and_task,
+        "descriptive_combined_condition_comparisons": descriptive_combined,
+        # Compatibility alias retained for consumers of v1.  Its metadata
+        # makes clear that it is descriptive/audit-only.
         "comparisons": {
-            "pairwise_cv_always_vs_all_four_cv": _comparison_summary(rows, "pairwise_cv_always", "all_four_cv"),
-            "probe_direct_vs_pairwise_cv_always": _comparison_summary(rows, "probe_direct", "pairwise_cv_always"),
-            "llm_only_vs_all_four_cv": _comparison_summary(rows, "llm_only", "all_four_cv"),
+            "scope": descriptive_combined["scope"],
+            "warning": descriptive_combined["warning"],
+            **descriptive_combined["comparisons"],
         },
         "bootstrap": {
             "method": "dataset_cluster_bootstrap_percentile",
@@ -1363,7 +1741,7 @@ def discover_trial_files(source_dir: str | Path) -> list[Path]:
     """Find result bundles without assuming one historical directory layout."""
 
     source = Path(source_dir).resolve()
-    files = [source / "trials.jsonl"] if (source / "trials.jsonl").is_file() else sorted(source.rglob("trials.jsonl"))
+    files = sorted(source.rglob("trials.jsonl"))
     if not files:
         raise MissingHistoricalFields(
             f"No trials.jsonl found under {source}. Historical summary/config files alone do not contain enough trial-level provenance for retrospective baselines."
@@ -1382,6 +1760,97 @@ def _config_for_trial_file(trials_path: Path) -> dict[str, Any]:
 
 def _source_run_label(trials_path: Path, config: Mapping[str, Any]) -> str:
     return str(config.get("evaluation_id") or trials_path.parent)
+
+
+def _path_ablation_and_condition(source: Path, trials_path: Path) -> tuple[str | None, str | None]:
+    """Infer arm/condition only as a provenance fallback for sparse rows."""
+
+    try:
+        parts = trials_path.parent.relative_to(source).parts
+    except ValueError:
+        parts = trials_path.parent.parts
+    if not parts:
+        return None, None
+    if len(parts) == 1:
+        return None, None
+    return str(parts[0]), str(parts[1]) if len(parts) > 1 else None
+
+
+def _annotate_source_row(
+    row: Mapping[str, Any],
+    *,
+    source: Path,
+    trials_path: Path,
+    config: Mapping[str, Any],
+    source_run: str,
+) -> dict[str, Any]:
+    path_ablation, path_condition = _path_ablation_and_condition(source, trials_path)
+    ablation = row.get("ablation_name") or config.get("ablation_name") or path_ablation
+    condition = (
+        row.get("model_condition_id")
+        or config.get("model_condition_id")
+        or path_condition
+        or "default"
+    )
+    annotated = dict(row)
+    annotated.update({
+        "source_file": str(trials_path),
+        "source_ablation": str(ablation) if ablation is not None else None,
+        "source_model_condition": str(condition),
+        "source_experiment_result_directory": str(source),
+        "source_run": source_run,
+    })
+    # These defaults make grouping robust when a source arm persisted only
+    # the trial payload and kept run metadata in config.json.
+    for key in (
+        "ablation_name", "model_condition_id", "provider", "planner_model",
+        "planner_model_effective", "reconciler_model", "evaluation_id",
+        "experiment_config_version", "benchmark_suite_version", "test_size",
+    ):
+        if annotated.get(key) is None and config.get(key) is not None:
+            annotated[key] = config.get(key)
+    if annotated.get("ablation_name") is None and ablation is not None:
+        annotated["ablation_name"] = ablation
+    if annotated.get("model_condition_id") is None:
+        annotated["model_condition_id"] = condition
+    if annotated.get("source_thresholds") is None and isinstance(config.get("thresholds"), Mapping):
+        annotated["source_thresholds"] = dict(config["thresholds"])
+    return annotated
+
+
+def load_unified_trial_rows(source_dir: str | Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load every historical trial file before deriving any baseline."""
+
+    source = Path(source_dir).resolve()
+    all_rows: list[dict[str, Any]] = []
+    source_runs: list[dict[str, Any]] = []
+    for trial_file in discover_trial_files(source):
+        config = _config_for_trial_file(trial_file)
+        raw_rows = _read_jsonl(trial_file)
+        run_label = _source_run_label(trial_file, config)
+        path_ablation, path_condition = _path_ablation_and_condition(source, trial_file)
+        source_runs.append({
+            "source_run": run_label,
+            "trials_path": str(trial_file),
+            "source_ablation": config.get("ablation_name") or path_ablation,
+            "source_model_condition": config.get("model_condition_id") or path_condition,
+            "config_path": str(trial_file.parent / "config.json") if (trial_file.parent / "config.json").is_file() else None,
+            "trial_count": len(raw_rows),
+            "experiment_config_version": config.get("experiment_config_version"),
+            "provider": config.get("provider"),
+            "analysis_role_of_source": "historical_frozen_experiment" if config.get("confirmatory_mode") else "source_evaluation_run",
+        })
+        all_rows.extend(
+            _annotate_source_row(
+                row,
+                source=source,
+                trials_path=trial_file,
+                config=config,
+                source_run=run_label,
+            )
+            for row in raw_rows
+        )
+    return all_rows, source_runs
 
 
 def _json_safe(value: Any) -> Any:
@@ -1440,6 +1909,16 @@ def _render_markdown(summary: Mapping[str, Any], rows: Sequence[Mapping[str, Any
     lines.append(f"- Hard-valid/evaluable denominator: **{coverage.get('eligible_hard_valid_evaluable_trial_count', 0)}** trials across **{coverage.get('dataset_count', 0)}** datasets/tasks.")
     for key, value in (coverage.get("dataset_macro_rates") or {}).items():
         lines.append(f"- `{key}` dataset-macro rate: **{value}**.")
+    lines.extend(["", "## Primary comparisons by model condition", ""])
+    lines.append("Comparisons below are stratified by model condition and task type; repetitions and split seeds remain nested within dataset/task.")
+    lines.extend(["", "| Model condition | Task type | Comparison | Paired observations | Independent datasets | Dataset-macro difference |", "|---|---|---|---:|---:|---:|"])
+    for condition, task_map in (summary.get("comparisons_by_model_condition_and_task_type") or {}).items():
+        for task_type, comparison_map in task_map.items():
+            for name, item in comparison_map.items():
+                lines.append(
+                    f"| `{condition}` | `{task_type}` | `{name}` | {item.get('paired_evaluable_count', 0)} | {item.get('independent_dataset_count', 0)} | {item.get('holdout_performance_difference_first_minus_second_dataset_macro_mean')} |"
+                )
+    lines.extend(["", "## Descriptive combined-condition audit", "", "The combined-condition section is descriptive/audit-only and is not a primary pooled estimate.", ""])
     lines.extend(["", "## Missing or not-applicable provenance", ""])
     missing_rows = [
         row for row in rows
@@ -1483,33 +1962,19 @@ def analyze_result_directory(
         raise ValueError("Output directory must not be inside the source experiment directory.")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("Output directory must be new or empty; existing derived outputs are not overwritten.")
-    trial_files = discover_trial_files(source)
-    all_rows: list[dict[str, Any]] = []
-    source_runs: list[dict[str, Any]] = []
-    for trial_file in trial_files:
-        config = _config_for_trial_file(trial_file)
-        rows = _read_jsonl(trial_file)
-        run_label = _source_run_label(trial_file, config)
-        source_runs.append({
-            "source_run": run_label,
-            "trials_path": str(trial_file),
-            "config_path": str(trial_file.parent / "config.json") if (trial_file.parent / "config.json").is_file() else None,
-            "trial_count": len(rows),
-            "experiment_config_version": config.get("experiment_config_version"),
-            "provider": config.get("provider"),
-            "analysis_role_of_source": "historical_frozen_experiment" if config.get("confirmatory_mode") else "source_evaluation_run",
-        })
-        all_rows.extend(
-            derive_baseline_trials(
-                rows,
-                source_run=run_label,
-                frame_loader=frame_loader,
-                recompute_missing=recompute_missing,
-                baselines=baselines,
-                strict=strict,
-                thresholds=_mapping(config.get("thresholds")) or None,
-            )
-        )
+    all_source_rows, source_runs = load_unified_trial_rows(source)
+    # Derivation happens once, after every arm has been loaded.  This is the
+    # boundary that prevents one logical trial from being emitted once per
+    # ablation directory.
+    all_rows = derive_baseline_trials(
+        all_source_rows,
+        source_run=str(source),
+        frame_loader=frame_loader,
+        recompute_missing=recompute_missing,
+        baselines=baselines,
+        strict=strict,
+        thresholds=None,
+    )
     summary = summarize_baseline_trials(
         all_rows,
         bootstrap_replicates=bootstrap_replicates,
@@ -1533,13 +1998,36 @@ def analyze_result_directory(
         json.dumps(_json_safe(summary), indent=2, sort_keys=True, allow_nan=False),
         encoding="utf-8",
     )
-    _write_csv(output / "baseline_summary.csv", [
-        {
+    csv_rows: list[dict[str, Any]] = []
+    for baseline, item in summary.get("baseline_summaries", {}).items():
+        csv_rows.append({
+            "summary_scope": "descriptive_combined_condition",
+            "model_condition_id": "",
+            "task_type": "",
             "baseline": baseline,
             **{key: value for key, value in item.items() if not isinstance(value, (dict, list))},
-        }
-        for baseline, item in summary.get("baseline_summaries", {}).items()
-    ])
+        })
+    for condition, task_map in (summary.get("by_model_condition") or {}).items():
+        for task_type, task_item in (task_map.get("by_task_type") or {}).items():
+            for baseline, item in (task_item.get("baselines") or {}).items():
+                csv_rows.append({
+                    "summary_scope": "model_condition_task_type",
+                    "model_condition_id": condition,
+                    "task_type": task_type,
+                    "baseline": baseline,
+                    **{key: value for key, value in item.items() if not isinstance(value, (dict, list))},
+                })
+    for condition, task_map in (summary.get("comparisons_by_model_condition_and_task_type") or {}).items():
+        for task_type, comparison_map in task_map.items():
+            for comparison_name, item in comparison_map.items():
+                csv_rows.append({
+                    "summary_scope": "primary_comparison_by_model_condition_and_task_type",
+                    "model_condition_id": condition,
+                    "task_type": task_type,
+                    "comparison": comparison_name,
+                    **{key: value for key, value in item.items() if not isinstance(value, (dict, list))},
+                })
+    _write_csv(output / "baseline_summary.csv", csv_rows)
     (output / "baseline_summary.md").write_text(
         _render_markdown(summary, all_rows),
         encoding="utf-8",
@@ -1610,6 +2098,7 @@ __all__ = [
     "derive_baseline_trials",
     "derive_pairwise_cv_always",
     "discover_trial_files",
+    "load_unified_trial_rows",
     "select_all_four_cv",
     "select_pairwise_cv_always",
     "summarize_baseline_trials",

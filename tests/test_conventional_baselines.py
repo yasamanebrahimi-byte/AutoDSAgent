@@ -111,6 +111,7 @@ def _row(*, task_type: str = "classification", probe: dict[str, object] | None =
 def test_pairwise_classification_uses_higher_raw_mean_even_when_probe_says_tie():
     result = select_pairwise_cv_always(
         "classification", "linear", "tree_ensemble", _probe(0.70, 0.71),
+        challenger_valid=True,
         proposal_a_source="agent", proposal_b_source="deterministic",
     )
     assert result["selected_baseline_family"] == "tree_ensemble"
@@ -121,6 +122,7 @@ def test_pairwise_classification_uses_higher_raw_mean_even_when_probe_says_tie()
 def test_pairwise_regression_uses_lower_raw_mean():
     result = select_pairwise_cv_always(
         "regression", "linear", "tree_ensemble", _probe(10.0, 8.0),
+        challenger_valid=True,
         proposal_a_source="agent", proposal_b_source="deterministic",
     )
     assert result["selected_baseline_family"] == "tree_ensemble"
@@ -130,6 +132,7 @@ def test_pairwise_regression_uses_lower_raw_mean():
 def test_pairwise_true_numerical_tie_and_agreement_preserve_incumbent():
     tied = select_pairwise_cv_always(
         "classification", "linear", "tree_ensemble", _probe(0.7, 0.7),
+        challenger_valid=True,
         proposal_a_source="agent", proposal_b_source="deterministic",
     )
     assert tied["selected_baseline_family"] == "linear"
@@ -156,7 +159,9 @@ def test_pairwise_hard_invalid_initial_preserves_repair_semantics_without_probe(
 
 def test_pairwise_requires_raw_proposal_means_for_actionable_disagreement():
     with pytest.raises(MissingHistoricalFields, match="raw mean-CV"):
-        select_pairwise_cv_always("classification", "linear", "tree_ensemble", {"winner": "tie"})
+        select_pairwise_cv_always(
+            "classification", "linear", "tree_ensemble", {"winner": "tie"}, challenger_valid=True
+        )
 
 
 def test_all_four_uses_all_eligible_families_and_existing_tie_break():
@@ -247,9 +252,178 @@ def test_fit_accounting_and_summary_keep_dataset_as_statistical_unit():
     derived = derive_baseline_trials([first, second], source_run="fixture")
     summary = summarize_baseline_trials(derived, bootstrap_replicates=20)
     all4 = summary["baseline_summaries"]["all_four_cv"]
-    assert all4["counterfactual_selection_fit_count_total"] == 24
+    assert all4["counterfactual_selection_fit_count_total"] == 12
     assert summary["candidate_set_coverage"]["dataset_count"] == 1
     assert summary["independent_statistical_unit"] == "dataset/task"
+
+
+def _arm_row(
+    arm: str,
+    repetition: str,
+    *,
+    condition: str = "condition-a",
+    split_seed: int = 42,
+) -> dict[str, object]:
+    row = _row(probe=_probe(0.70, 0.71))
+    row.update({
+        "trial_id": f"{condition}:task:clean:split{split_seed}:{repetition}:{arm}",
+        "llm_repetition_id": repetition,
+        "model_condition_id": condition,
+        "provider": "openai",
+        "planner_model": "planner-fixture",
+        "split_seed": split_seed,
+        "ablation_name": arm,
+        "gate_mode": arm,
+    })
+    if arm == "llm_only":
+        row.update({
+            "empirical_probe": None,
+            "deterministic_method": None,
+            "deterministic_preprocessing": None,
+            "deterministic_valid": None,
+            "final_method": "linear",
+            "final_preprocessing": _contract(),
+            "final_holdout_metric": 0.70,
+        })
+    elif arm == "full":
+        row.update({
+            "final_method": "tree_ensemble",
+            "final_preprocessing": _contract(),
+            "final_holdout_metric": 0.80,
+        })
+    return row
+
+
+def _write_arm_tree(root: Path, *, include_direct: bool = True, conditions: tuple[str, ...] = ("condition-a",)) -> None:
+    arms = ["llm_only", "probe_direct", "full"] if include_direct else ["llm_only", "full"]
+    for arm in arms:
+        for condition in conditions:
+            directory = root / arm / condition
+            directory.mkdir(parents=True, exist_ok=True)
+            config = {
+                "ablation_name": arm,
+                "model_condition_id": condition,
+                "provider": "openai",
+                "planner_model": "planner-fixture",
+                "reconciler_model": "planner-fixture",
+                "evaluation_id": "fixture-tree",
+            }
+            (directory / "config.json").write_text(json.dumps(config), encoding="utf-8")
+            rows = [_arm_row(arm, "rep_001", condition=condition), _arm_row(arm, "rep_002", condition=condition)]
+            (directory / "trials.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+
+def test_realistic_cross_ablation_tree_is_grouped_before_derivation(tmp_path: Path):
+    source = tmp_path / "source"
+    output = tmp_path / "derived"
+    _write_arm_tree(source)
+    result = analyze_result_directory(source, output, bootstrap_replicates=10)
+    assert len(result["trials"]) == 2 * 4
+    for baseline in ("llm_only", "pairwise_cv_always", "probe_direct", "all_four_cv"):
+        baseline_rows = [row for row in result["trials"] if row["baseline_name"] == baseline]
+        assert len(baseline_rows) == 2
+        assert {row["llm_repetition_id"] for row in baseline_rows} == {"rep_001", "rep_002"}
+    logical_keys = {tuple(row["logical_trial_key"]) for row in result["trials"]}
+    assert len(logical_keys) == 2
+    pair = next(row for row in result["trials"] if row["baseline_name"] == "pairwise_cv_always")
+    assert pair["source_arm_for_baseline"] == "probe_direct"
+    assert pair["source_arm_roles"]["llm_only_holdout"]["source_ablation"] == "llm_only"
+    assert pair["source_arm_roles"]["empirical_probe"]["source_ablation"] == "probe_direct"
+    assert pair["source_arm_roles"]["probe_direct_selective"]["source_ablation"] == "probe_direct"
+    assert pair["source_arm_roles"]["full_all_four_empirical_reference"]["source_ablation"] == "full"
+    assert pair["selected_baseline_family"] == "tree_ensemble"
+    assert result["summary"]["incomplete_logical_trial_count"] == 0
+    summary_json = json.loads((output / "baseline_summary.json").read_text(encoding="utf-8"))
+    assert "condition-a" in summary_json["comparisons_by_model_condition"]
+    assert "condition-a" in (output / "baseline_summary.csv").read_text(encoding="utf-8")
+    assert "condition-a" in (output / "baseline_summary.md").read_text(encoding="utf-8")
+
+
+def test_cross_ablation_missing_companion_is_explicit(tmp_path: Path):
+    source = tmp_path / "source"
+    output = tmp_path / "derived"
+    _write_arm_tree(source, include_direct=False)
+    result = analyze_result_directory(source, output, bootstrap_replicates=5)
+    direct_rows = [row for row in result["trials"] if row["baseline_name"] == "probe_direct"]
+    assert len(direct_rows) == 2
+    assert all(row["baseline_status"] == "missing_artifact" for row in direct_rows)
+    assert any("probe_direct_selective" in role for role in result["summary"]["missing_companion_diagnostics"][0]["missing_source_roles"])
+    assert "missing companion source role" in " ".join(direct_rows[0]["missing_fields"])
+
+
+def test_all_four_cost_is_deduplicated_by_dataset_and_split_not_repetition():
+    first = _row(probe=_probe(0.70, 0.71))
+    second = copy.deepcopy(first)
+    second.update({"trial_id": "condition:task:clean:split43:rep_001:llm0", "split_seed": 43, "llm_repetition_id": "rep_001"})
+    derived = derive_baseline_trials([first, second])
+    summary = summarize_baseline_trials(derived, bootstrap_replicates=5)
+    assert summary["baseline_summaries"]["all_four_cv"]["counterfactual_selection_fit_count_total"] == 24
+
+
+def test_compute_accounting_separates_cached_analysis_from_deployed_policy_cost():
+    rows = derive_baseline_trials([_row(probe=_probe(0.70, 0.71))])
+    all4 = next(row for row in rows if row["baseline_name"] == "all_four_cv")
+    pair = next(row for row in rows if row["baseline_name"] == "pairwise_cv_always")
+    llm = next(row for row in rows if row["baseline_name"] == "llm_only")
+    assert all4["analysis_reused_cached_scores"] is True
+    assert all4["actual_analysis_fit_count"] == 0
+    assert all4["counterfactual_selection_fit_count"] == 12
+    assert all4["counterfactual_planner_llm_call_count"] == 0
+    assert all4["actual_analysis_llm_call_count"] == 0
+    assert pair["counterfactual_selection_fit_count"] == 6
+    assert pair["counterfactual_planner_llm_call_count"] == 1
+    assert pair["counterfactual_probe_invocation_count"] == 1
+    assert llm["counterfactual_planner_llm_call_count"] == 1
+
+
+def test_comparisons_are_primary_by_model_condition_and_keep_combined_audit_only():
+    first = _row(probe=_probe(0.70, 0.71))
+    second = _row(probe=_probe(0.70, 0.71))
+    for fixture in (first, second):
+        fixture["candidate_cv_metrics"]["tree_ensemble"]["validation"] = {"approved_preprocessing": _contract(scaling="none")}
+        fixture["final_preprocessing"] = _contract(scaling="none")
+    rows = derive_baseline_trials([
+        first,
+        {**second, "model_condition_id": "condition-b", "trial_id": "condition-b:task:clean:split42:rep_001"},
+    ])
+    summary = summarize_baseline_trials(rows, bootstrap_replicates=5)
+    assert set(summary["comparisons_by_model_condition"]) == {"condition", "condition-b"}
+    for condition in ("condition", "condition-b"):
+        comparison = summary["comparisons_by_model_condition"][condition]["llm_only_vs_all_four_cv"]
+        assert comparison["independent_dataset_count"] == 1
+    assert summary["descriptive_combined_condition_comparisons"]["scope"] == "descriptive_audit_only_pooled_model_conditions"
+
+
+def test_pairwise_preprocessing_fallback_follows_semantic_source_when_proposals_are_reversed():
+    reversed_probe = {
+        "status": "completed",
+        "cv_folds": 3,
+        "proposal_a": {"model_family": "tree_ensemble", "mean_score": 0.71},
+        "proposal_b": {"model_family": "linear", "mean_score": 0.70},
+    }
+    result = select_pairwise_cv_always(
+        "classification",
+        "linear",
+        "tree_ensemble",
+        reversed_probe,
+        challenger_valid=True,
+        initial_preprocessing=_contract(),
+        challenger_preprocessing=_contract(scaling="none"),
+    )
+    assert result["selected_baseline_family"] == "tree_ensemble"
+    assert result["selected_preprocessing"]["numeric_scaling"] == "none"
+
+
+def test_missing_challenger_validity_is_not_treated_as_valid():
+    row = _row(probe=_probe(0.70, 0.71))
+    row.pop("deterministic_valid")
+    derived = derive_baseline_trials([row], baselines=["pairwise_cv_always"])[0]
+    assert derived["challenger_hard_valid"] is None
+    assert derived["baseline_status"] == "missing_artifact"
+    assert any("validity/actionability" in field for field in derived["missing_fields"])
 
 
 def test_analyze_writes_new_outputs_and_does_not_overwrite_source(tmp_path: Path):

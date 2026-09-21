@@ -43,17 +43,38 @@ missing-artifact rows.
 
 Each output contains:
 
-* `baseline_trials.jsonl` — one provenance-rich derived row per source logical
-  trial and baseline;
-* `baseline_summary.json` — machine-readable comparisons, coverage, fit
-  accounting, and dataset-cluster bootstrap metadata;
+* `baseline_trials.jsonl` — one provenance-rich derived row per logical trial
+  and baseline, after all ablation arms under the source directory have been
+  grouped together;
+* `baseline_summary.json` — machine-readable comparisons, coverage, fit and
+  LLM-call accounting, missing-arm diagnostics, and dataset-cluster bootstrap
+  metadata;
 * `baseline_summary.csv` — flat baseline-level summary rows;
 * `baseline_summary.md` — human-readable audit report.
 
-Historical source trees must contain `trials.jsonl`. The checked-in historical
-external bundles currently contain configs and summaries but not those
-trial-level files; the CLI fails explicitly rather than inventing baseline
-decisions from aggregate prose.
+Historical source trees must contain `trials.jsonl`. The analyzer discovers all
+such files below the supplied directory before deriving any baseline. A logical
+trial is keyed by model condition, provider/model, benchmark case and dataset
+identity, task type, perturbation, split seed/random state, LLM repetition and
+trial slot, evaluation variant, and order-swap pair identity. The ablation arm
+is deliberately excluded. Each derived row records the source file, source
+ablation, source model condition, and the arm supplying the LLM-only holdout,
+empirical probe, probe-direct result, and full empirical reference.
+The checked-in historical external bundles currently contain configs and
+summaries but not those trial-level files; the CLI fails explicitly rather than
+inventing baseline decisions from aggregate prose.
+
+Counterfactual policy cost is separate from work performed by this analyzer.
+For example, cached historical CV scores produce zero
+`actual_analysis_fit_count`, while `all_four_cv` still reports its deployed
+four-family CV cost. That cost is keyed by dataset/task, frozen split, and CV
+configuration, excluding LLM repetition (and model condition), so two
+repetitions on one split charge one four-family search. `all_four_cv` search
+cost is therefore 12 fits for four families with three-fold CV, not 24 for two
+paired repetitions. Primary comparisons are exposed under
+`comparisons_by_model_condition` and
+`comparisons_by_model_condition_and_task_type`. Any combined-condition view is
+named `descriptive_combined_condition_comparisons` and is audit-only.
 
 ## Prospective fresh splits and task panels
 
@@ -134,3 +155,14 @@ primary reporting strata. Those choices are intentionally not invented here.
 * Does the result persist? Use the separate prospective run's
   `analysis_role`, frozen panel hash, explicit split-seed list, and the same
   dataset-clustered reporting hierarchy.
+
+## Small accounting example
+
+For one dataset/task, split seed `42`, and two LLM repetitions, the analyzer
+emits two paired observations for each repetition-dependent performance
+comparison. With three-fold CV and the four candidates listed above,
+`all_four_cv` has `4 × 3 = 12` counterfactual selection fits for the shared
+dataset/split. The second repetition reuses that same search key, so the
+summary remains at 12 rather than 24. If the persisted reference and holdout
+artifacts are reused, retrospective work is 0 new fits; the deployed policy
+cost still reports 12 selection fits plus the final-fit cost separately.
