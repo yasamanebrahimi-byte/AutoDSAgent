@@ -10,7 +10,7 @@ from evaluation.metrics import (
     HOLDOUT_METRIC_SCHEMA_VERSION,
     HOLDOUT_RMSE_EPSILON,
     classify_holdout_intervention_outcome,
-    paper_holdout_delta,
+    evaluation_holdout_delta,
     relative_rmse_improvement,
     summarize_gate_health,
     summarize_trials,
@@ -35,14 +35,14 @@ def _holdout_record(
         "initial_holdout_metric": initial,
         "final_holdout_metric": final,
         "holdout_metric_name": "macro_f1" if task_type == "classification" else "rmse",
-        "paper_holdout_delta": paper_holdout_delta(task_type, initial, final),
+        "evaluation_holdout_delta": evaluation_holdout_delta(task_type, initial, final),
         "repetitions_fixture": repetitions,
     }
 
 
-def test_paper_holdout_delta_sign_and_regression_scale_are_explicit():
-    assert paper_holdout_delta("classification", 0.60, 0.70) == pytest.approx(0.10)
-    assert paper_holdout_delta("classification", 0.70, 0.60) == pytest.approx(-0.10)
+def test_evaluation_holdout_delta_sign_and_regression_scale_are_explicit():
+    assert evaluation_holdout_delta("classification", 0.60, 0.70) == pytest.approx(0.10)
+    assert evaluation_holdout_delta("classification", 0.70, 0.60) == pytest.approx(-0.10)
     assert relative_rmse_improvement(100.0, 90.0) == pytest.approx(0.10)
     assert relative_rmse_improvement(100.0, 110.0) == pytest.approx(-0.10)
 
@@ -93,7 +93,7 @@ def test_training_reference_harm_and_holdout_harm_are_distinct_metrics():
             "gated_normalized_regret": final,
             "initial_holdout_metric": 0.60,
             "final_holdout_metric": 0.70,
-            "paper_holdout_delta": 0.10,
+            "evaluation_holdout_delta": 0.10,
             "trial": index,
         }
         records.append(record)
@@ -112,12 +112,12 @@ def test_dataset_macro_holdout_estimate_does_not_weight_extra_repetitions():
     ]
     summary = summarize_gate_health(records)
     # Direct gate-health is trial-level; use the same public aggregator used
-    # by paper reports to verify the equal-weighted dataset estimate.
+    # by evaluation reports to verify the equal-weighted dataset estimate.
     from evaluation.metrics import summarize_trials
 
-    paper_summary = summarize_trials(records)
-    assert paper_summary["dataset_macro_paper_holdout_delta_mean"] == pytest.approx(0.0)
-    assert paper_summary["paper_holdout_delta_mean"] == pytest.approx((0.10 - 9 * 0.10) / 10)
+    evaluation_summary = summarize_trials(records)
+    assert evaluation_summary["dataset_macro_evaluation_holdout_delta_mean"] == pytest.approx(0.0)
+    assert evaluation_summary["evaluation_holdout_delta_mean"] == pytest.approx((0.10 - 9 * 0.10) / 10)
     assert summary["holdout_intervention_metrics"]["valid_paired_holdout_comparison_count"] == 10
 
 
@@ -134,12 +134,12 @@ def test_ablation_primary_pairing_uses_holdout_delta_and_keeps_regret_diagnostic
     rows = {
         "first": [{
             **base,
-            "paper_holdout_delta": 0.10,
+            "evaluation_holdout_delta": 0.10,
             "gated_normalized_regret": 0.40,
         }],
         "second": [{
             **base,
-            "paper_holdout_delta": -0.10,
+            "evaluation_holdout_delta": -0.10,
             "gated_normalized_regret": 0.00,
         }],
     }
@@ -161,7 +161,7 @@ def test_ablation_pairing_is_dataset_macro_with_unequal_repetitions():
             "split_seed": 42,
             "trial": trial,
             "evaluation_variant": "standard",
-            "paper_holdout_delta": delta,
+            "evaluation_holdout_delta": delta,
         }
 
     rows = {
@@ -196,13 +196,13 @@ def test_descriptive_paired_comparison_skips_bootstrap_but_preserves_point_estim
         "split_seed": 42,
         "trial": 0,
         "evaluation_variant": "standard",
-        "paper_holdout_delta": 0.10,
+        "evaluation_holdout_delta": 0.10,
         "gated_normalized_regret": 0.40,
         "final_holdout_metric": 0.70,
     }
     rows = {
         "first": [base],
-        "second": [{**base, "paper_holdout_delta": -0.10, "gated_normalized_regret": 0.00}],
+        "second": [{**base, "evaluation_holdout_delta": -0.10, "gated_normalized_regret": 0.00}],
     }
     primary = _paired_comparison(rows, "first", "second")
     assert primary["paired_holdout_delta_ci"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
@@ -262,21 +262,21 @@ def test_ablation_pairing_win_tie_loss_is_dataset_level():
     }
     rows = {
         "first": [
-            {**base, "benchmark_case": "better", "trial": 0, "paper_holdout_delta": 0.05},
-            {**base, "benchmark_case": "tie", "trial": 0, "paper_holdout_delta": 0.01},
-            {**base, "benchmark_case": "worse", "trial": 0, "paper_holdout_delta": -0.05},
+            {**base, "benchmark_case": "better", "trial": 0, "evaluation_holdout_delta": 0.05},
+            {**base, "benchmark_case": "tie", "trial": 0, "evaluation_holdout_delta": 0.01},
+            {**base, "benchmark_case": "worse", "trial": 0, "evaluation_holdout_delta": -0.05},
         ],
         "second": [
-            {**base, "benchmark_case": "better", "trial": 0, "paper_holdout_delta": 0.00},
-            {**base, "benchmark_case": "tie", "trial": 0, "paper_holdout_delta": 0.00},
-            {**base, "benchmark_case": "worse", "trial": 0, "paper_holdout_delta": 0.00},
+            {**base, "benchmark_case": "better", "trial": 0, "evaluation_holdout_delta": 0.00},
+            {**base, "benchmark_case": "tie", "trial": 0, "evaluation_holdout_delta": 0.00},
+            {**base, "benchmark_case": "worse", "trial": 0, "evaluation_holdout_delta": 0.00},
         ],
     }
     result = _paired_comparison(rows, "first", "second", tolerance=0.02)
     assert (result["first_better"], result["second_better"], result["tied"]) == (1, 1, 1)
 
 
-def test_summary_exposes_versioned_paper_fields_and_marks_strict_failures():
+def test_summary_exposes_versioned_evaluation_fields_and_marks_strict_failures():
     completed = _holdout_record("classification", "classification", 0.60, 0.70)
     completed.update({
         "require_live": True,
@@ -291,19 +291,19 @@ def test_summary_exposes_versioned_paper_fields_and_marks_strict_failures():
 
     assert summary["strict_live_valid"] is False
     assert summary["result_schema_version"] == HOLDOUT_METRIC_SCHEMA_VERSION
-    assert summary["paper_holdout_delta_mean"] == pytest.approx(0.10)
+    assert summary["evaluation_holdout_delta_mean"] == pytest.approx(0.10)
     assert summary["harm_rate"] == pytest.approx(0.0)
-    assert "dataset_macro_confidence_intervals" in summary["paper_metrics_by_task"]["classification"]
+    assert "dataset_macro_confidence_intervals" in summary["evaluation_metrics_by_task"]["classification"]
 
 
 def test_summarize_trials_default_computes_dataset_cluster_confidence_intervals():
     summary = summarize_trials([_holdout_record("single", "classification", 0.60, 0.70)])
 
     dataset_ci = summary["dataset_macro_gate_health"]["confidence_intervals"]
-    assert dataset_ci["mean_paper_holdout_delta"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
+    assert dataset_ci["mean_evaluation_holdout_delta"]["n_bootstrap"] == DEFAULT_BOOTSTRAP_REPLICATES
     assert (
-        summary["paper_metrics_by_task"]["classification"]
-        ["dataset_macro_confidence_intervals"]["mean_paper_holdout_delta"]["n_bootstrap"]
+        summary["evaluation_metrics_by_task"]["classification"]
+        ["dataset_macro_confidence_intervals"]["mean_evaluation_holdout_delta"]["n_bootstrap"]
         == DEFAULT_BOOTSTRAP_REPLICATES
     )
 
@@ -324,10 +324,10 @@ def test_summarize_trials_can_skip_all_bootstrap_confidence_intervals(monkeypatc
     summary = summarize_trials(records, compute_confidence_intervals=False)
 
     assert summary["dataset_macro_gate_health"]["confidence_intervals"] == {}
-    assert summary["dataset_macro_paper_holdout_delta_ci"] == {}
+    assert summary["dataset_macro_evaluation_holdout_delta_ci"] == {}
     assert summary["regret_reduction_ci"] == {}
-    assert summary["paper_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"] == {}
-    assert summary["dataset_macro_paper_holdout_delta_mean"] == pytest.approx(0.0)
+    assert summary["evaluation_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"] == {}
+    assert summary["dataset_macro_evaluation_holdout_delta_mean"] == pytest.approx(0.0)
 
 
 def test_dataset_macro_multi_ci_matches_single_metric_path():
@@ -354,7 +354,7 @@ def test_dataset_macro_multi_ci_matches_single_metric_path():
             "initial_holdout_metric": initial_holdout,
             "final_holdout_metric": final_holdout,
             "holdout_metric_name": "macro_f1" if task_type == "classification" else "rmse",
-            "paper_holdout_delta": paper_holdout_delta(task_type, initial_holdout, final_holdout),
+            "evaluation_holdout_delta": evaluation_holdout_delta(task_type, initial_holdout, final_holdout),
             "trial": trial,
         }
 
@@ -367,7 +367,7 @@ def test_dataset_macro_multi_ci_matches_single_metric_path():
     metrics = (
         "beneficial_intervention_rate",
         "harmful_intervention_rate",
-        "mean_paper_holdout_delta",
+        "mean_evaluation_holdout_delta",
         "mean_regret_reduction",
     )
     tolerance = 0.03
@@ -458,15 +458,15 @@ def test_final_dataset_macro_cis_use_one_batched_pass_per_population(monkeypatch
     assert single_metric_calls  # Existing paired/holdout summaries remain unchanged.
     assert set(summary["dataset_macro_gate_health"]["confidence_intervals"]) >= {
         "mean_regret_reduction",
-        "mean_paper_holdout_delta",
+        "mean_evaluation_holdout_delta",
     }
-    assert set(summary["paper_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"]) == {
+    assert set(summary["evaluation_metrics_by_task"]["classification"]["dataset_macro_confidence_intervals"]) == {
         "beneficial_intervention_rate",
         "harmful_intervention_rate",
         "neutral_intervention_rate",
         "intervention_precision",
         "harm_rate",
-        "mean_paper_holdout_delta",
+        "mean_evaluation_holdout_delta",
     }
 
 

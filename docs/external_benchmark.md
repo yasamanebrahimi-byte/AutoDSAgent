@@ -73,7 +73,7 @@ Rows record the manifest/configuration hash, condition and model IDs,
 repetition ID, cache identity, prompt/schema versions, generation settings,
 and reconciliation invocation/status. Proposal counts therefore differ from
 reconciliation API-call counts because proposals are reused and reconciliation
-is conditional. Paper-primary summaries and paired comparisons are emitted
+is conditional. Primary evaluation summaries and paired comparisons are emitted
 under `analysis_summaries_by_model_condition` and
 `paired_comparisons_by_model_condition`; models are not silently pooled. These
 outputs contain separate dataset-macro estimates and uncertainty for each
@@ -208,10 +208,13 @@ Run only one tier:
 python -m evaluation.run --suite external --tier stress --offline --output evaluation_results/external_stress_offline
 ```
 
-## Confirmatory/publication commands
+## Confirmatory evaluation commands
+
+The manifest paths below are historical frozen evaluation artifacts and remain
+unchanged so prior runs can be reproduced.
 
 After the suite and manifest are intentionally frozen and live research
-approval is in place, every publication or full-benchmark run must pass the
+approval is in place, every full-benchmark run must pass the
 frozen manifest and strict-live enforcement:
 
 ```bash
@@ -225,7 +228,7 @@ LLM behavior in strict-live mode.
 
 The default `python -m evaluation.run` command remains the local suite.
 
-## Publication-readiness development procedure
+## External evaluation development procedure
 
 1. Exercise live planner/reconciler/API behavior only on a local or synthetic
 development case:
@@ -267,6 +270,6 @@ before running stress. If any such change is necessary, the earlier external
 run becomes exploratory and the modified later run cannot be combined with it
 as one untouched confirmatory experiment.
 
-An external live pilot is not part of the normal publication-readiness
+An external live pilot is not part of the normal external evaluation
 workflow. If operational debugging requires one, use only a predesignated
 task, record it as exploratory, and exclude it from confirmatory analysis.

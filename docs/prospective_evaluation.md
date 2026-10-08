@@ -1,4 +1,4 @@
-# Prospective MLSys experiment preparation
+# Prospective evaluation preparation
 
 This repository now contains preparation infrastructure for a fresh study of
 the reviewer question “Why not simply cross-validate all four fixed candidate
@@ -36,8 +36,8 @@ winner from summary prose.
 Build a deterministic draft without freezing it:
 
 ```text
-python scripts/build_mlsys_prospective_panel.py \
-  --output evaluation_results/mlsys_panel_draft.json \
+python scripts/build_prospective_panel.py \
+  --output evaluation_results/prospective_panel_draft.json \
   --selection-seed <predeclared-selection-seed> \
   --classification-count 20 \
   --regression-count 20
@@ -53,7 +53,7 @@ reasoned override is recorded in the frozen manifest. Reviewers must later choos
 filters, duplicate/version policy, panel membership, and exclusion record.
 
 The checked-in configuration checklist is
-`evaluation/configs/mlsys_prospective_template.json`. It contains placeholders
+`evaluation/configs/prospective_evaluation_template.json`. It contains placeholders
 for the panel hash, provider/model condition, repetitions, split seeds, runtime
 source arms, CV folds, output directory, and provenance fields. Do not replace
 those placeholders with scientific choices as part of repository preparation.
@@ -66,7 +66,7 @@ one split, one repetition, all three source arms, resume behavior, and strict
 validator failures:
 
 ```text
-python -m pytest -q tests/test_mlsys_prospective.py tests/test_conventional_baselines.py
+python -m pytest -q tests/test_prospective_evaluation.py tests/test_conventional_baselines.py
 ```
 
 The tests use fixture records and fake/mock behavior; they do not call OpenML
@@ -78,7 +78,7 @@ must use a new output directory and the reviewed frozen panel:
 ```text
 python -m evaluation.prospective \
   --panel-manifest path/to/frozen_prospective_task_panel.json \
-  --output evaluation_results/mlsys_prospective_run \
+  --output evaluation_results/prospective_evaluation_run \
   --split-seed <predeclared-seed> \
   --repetitions 1 \
   --ablation llm_only \
@@ -102,10 +102,10 @@ incomplete.
 Validate before deriving baselines:
 
 ```text
-python -m evaluation.validate_mlsys_run path/to/mlsys_prospective_run --strict
+python -m evaluation.validate_prospective_run path/to/prospective_evaluation_run --strict
 ```
 
-The command writes `mlsys_validation_report.json` and a human-readable text
+The command writes `prospective_validation_report.json` and a human-readable text
 report. Expected logical groups come from the frozen panel and declared
 experiment configuration (panel tasks × split seeds × model conditions ×
 repetitions), not from rows that happen to be present. The report separates
@@ -129,8 +129,8 @@ Only then should the existing analyzer be used:
 
 ```text
 python -m evaluation.conventional_baselines \
-  --source path/to/mlsys_prospective_run \
-  --output path/to/new/mlsys_prospective_baselines \
+  --source path/to/prospective_evaluation_run \
+  --output path/to/new/prospective_evaluation_baselines \
   --strict
 ```
 

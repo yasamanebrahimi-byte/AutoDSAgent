@@ -1,4 +1,4 @@
-"""Validate a prospective MLSys run before conventional baseline derivation.
+"""Validate a prospective evaluation run before conventional baseline derivation.
 
 The validator is intentionally strict about missing scientific evidence.  It
 never reconstructs a missing pairwise comparison or four-family reference
@@ -14,9 +14,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from evaluation.mlsys_prospective import (
-    MLSYS_SOURCE_ARMS,
-    SUPPORTED_MLSYS_TRIAL_SCHEMA_VERSIONS,
+from evaluation.prospective_contract import (
+    PROSPECTIVE_SOURCE_ARMS,
+    SUPPORTED_PROSPECTIVE_TRIAL_SCHEMA_VERSIONS,
     canonical_sha256,
     has_four_family_reference,
     has_holdout,
@@ -42,8 +42,8 @@ def _is_prospective_config(config: Mapping[str, Any]) -> bool:
     metadata = _config_metadata(config)
     return (
         metadata.get("analysis_role") == PROSPECTIVE_ANALYSIS_ROLE
-        or metadata.get("schema_version") == "mlsys-prospective-config-v1"
-        or metadata.get("study_role") == "mlsys_four_policy_comparison"
+        or metadata.get("schema_version") == "prospective-evaluation-config-v1"
+        or metadata.get("study_role") == "four_policy_comparison"
     )
 
 
@@ -270,14 +270,14 @@ def _supported_schema(row: dict[str, Any]) -> bool:
     value = (
         row.get("trial_schema_version")
         or row.get("schema_version")
-        or row.get("mlsys_trial_schema_version")
+        or row.get("prospective_trial_schema_version")
     )
     if value is None:
         # Existing rows remain useful as input when the run was created before
         # the prospective schema stamp was introduced.  The new runner writes
         # the explicit value; this fallback keeps the validator diagnostic.
         return bool(row.get("result_schema_version") or row.get("ablation_schema_version"))
-    return str(value) in SUPPORTED_MLSYS_TRIAL_SCHEMA_VERSIONS
+    return str(value) in SUPPORTED_PROSPECTIVE_TRIAL_SCHEMA_VERSIONS
 
 
 def _row_hashes(row: dict[str, Any], config: dict[str, Any], panel_hash: str | None) -> list[str]:
@@ -341,7 +341,7 @@ def _config_info(run_dir: Path) -> tuple[dict[str, Any], list[str]]:
     return value, []
 
 
-def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str, Any]:
+def validate_prospective_run(run_dir: str | Path, *, strict: bool = False) -> dict[str, Any]:
     """Return a machine-readable completeness report for one prospective run."""
 
     root = Path(run_dir).resolve()
@@ -451,7 +451,7 @@ def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str
             arm = source_arm(row)
             if arm:
                 by_arm[arm].append(row)
-        group_missing = [arm for arm in MLSYS_SOURCE_ARMS if not by_arm.get(arm)]
+        group_missing = [arm for arm in PROSPECTIVE_SOURCE_ARMS if not by_arm.get(arm)]
         missing_source_arms += len(group_missing)
         probe_direct_row = next(iter(by_arm.get("probe_direct", [])), None)
         pair_row = next((row for row in group_rows if has_pairwise_evidence(row)), None)
@@ -468,7 +468,7 @@ def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str
         hash_mismatches += len(group_hash_errors)
         schemas_ok = all(_supported_schema(row) for row in group_rows)
         unsupported_schema += int(not schemas_ok)
-        holdout_missing_arms = [arm for arm in MLSYS_SOURCE_ARMS if not any(has_holdout(row) for row in by_arm.get(arm, []))]
+        holdout_missing_arms = [arm for arm in PROSPECTIVE_SOURCE_ARMS if not any(has_holdout(row) for row in by_arm.get(arm, []))]
         missing_holdout += len(holdout_missing_arms)
         plans_ok = any(has_initial_plan(row) for row in group_rows)
         if not plans_ok:
@@ -486,7 +486,7 @@ def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str
             "expected_group": expected,
             "observed_rows": len(group_rows),
             "completely_missing": not bool(group_rows),
-            "source_arms": {arm: len(by_arm.get(arm, [])) for arm in MLSYS_SOURCE_ARMS},
+            "source_arms": {arm: len(by_arm.get(arm, [])) for arm in PROSPECTIVE_SOURCE_ARMS},
             "missing_source_arms": group_missing,
             "initial_plan": plans_ok,
             "pairwise_probe_required": pairwise_required,
@@ -543,7 +543,7 @@ def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str
         and split_mismatches == 0
     )
     report = {
-        "validator_schema_version": "mlsys-run-validator-v1",
+        "validator_schema_version": "prospective-run-validator-v1",
         "run_directory": str(root),
         "run_status": config.get("run_status"),
         "expected_logical_trial_groups": expected_groups,
@@ -571,16 +571,16 @@ def validate_mlsys_run(run_dir: str | Path, *, strict: bool = False) -> dict[str
         "ready_for_baseline_derivation": ready,
         "READY_FOR_BASELINE_DERIVATION": "YES" if ready else "NO",
     }
-    report_path = root / "mlsys_validation_report.json"
+    report_path = root / "prospective_validation_report.json"
     if root.exists():
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-        (root / "mlsys_validation_report.txt").write_text(render_summary(report), encoding="utf-8")
+        (root / "prospective_validation_report.txt").write_text(render_summary(report), encoding="utf-8")
     if strict and not ready:
-        raise MlsysValidationError(report)
+        raise ProspectiveValidationError(report)
     return report
 
 
-class MlsysValidationError(ValueError):
+class ProspectiveValidationError(ValueError):
     """Raised by strict validation when baseline derivation is not safe."""
 
     def __init__(self, report: dict[str, Any]):
@@ -613,13 +613,13 @@ def render_summary(report: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate a prospective MLSys run for baseline derivation.")
+    parser = argparse.ArgumentParser(description="Validate a prospective evaluation run for baseline derivation.")
     parser.add_argument("run_dir")
     parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
     try:
-        report = validate_mlsys_run(args.run_dir, strict=args.strict)
-    except MlsysValidationError as exc:
+        report = validate_prospective_run(args.run_dir, strict=args.strict)
+    except ProspectiveValidationError as exc:
         print(render_summary(exc.report), end="")
         return 1
     print(render_summary(report), end="")
@@ -630,4 +630,4 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 
 
-__all__ = ["MlsysValidationError", "main", "render_summary", "validate_mlsys_run"]
+__all__ = ["ProspectiveValidationError", "main", "render_summary", "validate_prospective_run"]

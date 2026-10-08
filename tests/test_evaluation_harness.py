@@ -364,7 +364,7 @@ def test_run_evaluation_skips_checkpoint_bootstrap_but_computes_final_ci(
     )
     assert summary_calls[1]["bootstrap_call_count"] == direct_single_condition_bootstrap_count
     assert checkpoint_summaries[0]["dataset_macro_gate_health"]["confidence_intervals"] == {}
-    assert checkpoint_summaries[0]["paper_metrics_by_task"]["classification"][
+    assert checkpoint_summaries[0]["evaluation_metrics_by_task"]["classification"][
         "dataset_macro_confidence_intervals"
     ] == {}
 

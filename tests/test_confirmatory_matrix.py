@@ -80,7 +80,7 @@ def test_primary_paired_effects_remain_separate_from_descriptive_cross_model_poo
             "evaluation_variant": "standard",
             "trial_status": "completed",
             "task_type": "classification",
-            "paper_holdout_delta": delta,
+            "evaluation_holdout_delta": delta,
         }
 
     primary_a = _paired_comparison(

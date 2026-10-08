@@ -1,8 +1,8 @@
 # Conventional baseline analysis
 
 The conventional baselines are a retrospective, post-hoc analysis layer. They
-do not alter the runtime gate and do not change the meaning of
-`paper_confirmatory_v3` or the completed Gemini replication.
+do not alter the runtime gate or the meaning of the historical
+`paper_confirmatory_v3` evaluation and completed Gemini replication.
 
 `all_four_cv` is conventional full-portfolio model-family selection over
 `linear`, `regularized_linear`, `tree_ensemble`, and `boosted_tree`. It selects
@@ -38,7 +38,7 @@ If a source row does not contain the selected baseline's holdout metric, add
 `--recompute-missing`. This loads only the deterministic benchmark data and
 verifies that the raw frame reproduces the persisted split contract before a
 single final holdout fit. It does not make an LLM call or rewrite the source.
-Use `--strict` when a paper pipeline should stop instead of writing explicit
+Use `--strict` when a strict evaluation pipeline should stop instead of writing explicit
 missing-artifact rows.
 
 Each output contains:
@@ -138,7 +138,7 @@ regression counts, eligibility bounds, exclusions, duplicate/version policy,
 provider/model conditions, repetition count, split seeds, and the intended
 primary reporting strata. Those choices are intentionally not invented here.
 
-## Paper mapping
+## Research questions and comparisons
 
 * Why not all-four CV? Compare `llm_only`, `pairwise_cv_always`, and
   `all_four_cv` holdout performance against training normalized regret and

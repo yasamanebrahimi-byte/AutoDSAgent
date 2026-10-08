@@ -1,4 +1,4 @@
-# Confirmatory v2 protocol
+# Historical evaluation artifacts: confirmatory v2 protocol
 
 `paper_confirmatory_v1.json` is the historical pilot / pre-contract-fix
 protocol. Its generated results are not part of confirmatory v2 claims.

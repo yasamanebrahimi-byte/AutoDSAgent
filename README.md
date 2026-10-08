@@ -2,7 +2,7 @@
 
 AutoDS Agent is an auditable workflow for classification and regression on tabular CSV data. It combines optional provider-backed agent suggestions with deterministic validation, preprocessing, model training, and reporting.
 
-The repository also contains a narrower research evaluation. Its paper-facing
+The repository also contains a narrower research evaluation. Its research
 claim concerns LLM-based model-family/preprocessing planning for supervised
 tabular classification and regression under a selective deterministic
 safeguard. It is not a claim that the confirmatory experiment validates every
@@ -16,7 +16,7 @@ The product workflow:
 4. Trains on the training partition and evaluates once on the untouched holdout.
 5. Saves the decision, model, metrics, plots, report, and a replay script.
 
-## Paper-facing evaluation
+## Research evaluation
 
 The narrower research question is whether a deterministic/non-LLM safeguard can
 selectively catch harmful LLM model-family planning without unnecessarily
@@ -27,7 +27,7 @@ independent soft-intervention trigger. The confirmatory scope is supervised
 tabular classification/regression planning; it does not validate every
 capability of the broader autonomous data-science product.
 
-The paper-facing decision path is:
+The research evaluation decision path is:
 
 ```text
 independent LLM proposal
@@ -177,15 +177,17 @@ The optional frozen AMLB/OpenML external evaluation suite is documented in [exte
 Development and confirmatory evaluation are separate. Live API smoke tests
 must use local or synthetic development cases. The external suite may be
 prefetched and schema-validated before confirmation, but live external pilot
-outcomes are not part of the normal publication-readiness workflow.
+outcomes are not part of the normal external evaluation workflow.
 
 Retrospective conventional baselines (`pairwise_cv_always` and `all_four_cv`),
 coverage diagnostics, and the separately versioned prospective fresh-panel
 workflow are documented in [`docs/conventional_baselines.md`](docs/conventional_baselines.md).
-Preparation for the new prospective MLSys four-policy study is documented in
-[`docs/mlsys_prospective_experiment.md`](docs/mlsys_prospective_experiment.md).
+Preparation for the new prospective four-policy evaluation is documented in
+[`docs/prospective_evaluation.md`](docs/prospective_evaluation.md).
 
-The completed OpenAI confirmatory study is defined by
+### Historical evaluation artifacts
+
+The completed OpenAI confirmatory evaluation is defined by
 `evaluation/configs/paper_confirmatory_v3.json`, with committed results under
 `evaluation_results/external_ablation_live_v3/`. It covers GPT-5.6 Sol,
 GPT-5.6 Luna, and GPT-5.6 Terra. The Gemini replication is a separate
@@ -223,7 +225,7 @@ before artifacts are modified. The root run configuration records
 Python/platform, package versions, Git commit, experiment-code SHA, manifest
 SHA, and benchmark-manifest SHA.
 
-Historical OpenAI paper-primary estimates are reported separately for each
+Historical OpenAI evaluation estimates are reported separately for each
 declared model condition (Luna, Sol, and Terra). Repetitions remain nested
 within dataset/task, and dataset/task is the independent statistical unit.
 Any cross-model aggregate or paired comparison is explicitly descriptive and

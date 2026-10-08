@@ -58,7 +58,7 @@ def _shared_row(*, task_type: str, initial: float, final: float, delta: float) -
         "task_type": task_type,
         "initial_holdout_metric": initial,
         "final_holdout_metric": final,
-        "paper_holdout_delta": delta,
+        "evaluation_holdout_delta": delta,
     }
 
 
@@ -80,7 +80,7 @@ def test_deterministic_only_row_uses_one_coherent_deterministic_plan(tmp_path):
     assert row["final_valid"] is True
     assert row["agent_initial_validation"]["status"] == row["final_validation"]["status"] == "passed"
     assert row["hard_validation_status"] == "passed"
-    assert row["paper_holdout_delta"] == 0.0
+    assert row["evaluation_holdout_delta"] == 0.0
 
 
 def test_strict_live_deterministic_failure_is_not_a_completed_unit(monkeypatch):

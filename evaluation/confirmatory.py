@@ -18,6 +18,7 @@ from typing import Any, Mapping
 CONFIRMATORY_MANIFEST_SCHEMA_VERSION = "confirmatory-manifest-v1"
 CONFIRMATORY_EXPERIMENT_NAME = "selective-intervention-reliability"
 EXPERIMENT_CODE_PATHS = ("app", "evaluation", "pyproject.toml")
+# Historical frozen manifest identifiers are preserved for reproducibility.
 CONFIRMATORY_MANIFEST_RELATIVE_PATH = "evaluation/configs/paper_confirmatory_v1.json"
 CONFIRMATORY_MANIFEST_RELATIVE_PATHS = (
     "evaluation/configs/paper_confirmatory_v1.json",
@@ -342,7 +343,7 @@ def model_conditions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _validate_confirmatory_design(loaded: Mapping[str, Any]) -> None:
-    """Validate the paper-facing design independently of runtime execution.
+    """Validate the research evaluation design independently of runtime execution.
 
     This check is intentionally usable while the manifest is draft.  It is a
     preflight of the protocol, not permission to run the external experiment.

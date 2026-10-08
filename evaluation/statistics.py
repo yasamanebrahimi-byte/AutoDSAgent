@@ -1,6 +1,6 @@
 """Small, reusable uncertainty helpers for benchmark result aggregation.
 
-The independent unit for paper-facing benchmark inference is a dataset/task.
+The independent unit for research evaluation benchmark inference is a dataset/task.
 These helpers deliberately resample complete clusters and retain multiplicity
 when a cluster is drawn more than once.
 """

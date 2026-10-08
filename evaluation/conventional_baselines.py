@@ -46,7 +46,7 @@ from evaluation.metrics import (
     holdout_neutral_tolerance,
     normalized_performance_delta,
     normalized_regret,
-    paper_holdout_delta,
+    evaluation_holdout_delta,
     relative_rmse_improvement,
 )
 from evaluation.statistics import (
@@ -1068,7 +1068,7 @@ def _derived_row(
                 "macro_f1" if task_type == "classification" else "rmse"
             )
         )
-    paper_delta = paper_holdout_delta(task_type, initial_holdout, holdout_metric)
+    evaluation_delta = evaluation_holdout_delta(task_type, initial_holdout, holdout_metric)
     intervention = bool(selected_family is not None and initial_family is not None and selected_family != initial_family)
     tolerance = holdout_neutral_tolerance(
         task_type,
@@ -1077,7 +1077,7 @@ def _derived_row(
         else dict(source_row.get("source_thresholds") or thresholds or DEFAULT_THRESHOLDS),
     )
     outcome = classify_holdout_intervention_outcome(
-        paper_delta, tolerance, intervention_occurred=intervention
+        evaluation_delta, tolerance, intervention_occurred=intervention
     )
     if baseline == "all_four_cv":
         outcome = "not_intervened" if not intervention else outcome
@@ -1212,7 +1212,7 @@ def _derived_row(
         "all_four_holdout_metric_for_comparison": all4_holdout,
         "holdout_performance_difference_baseline_minus_all_four": holdout_difference,
         "initial_holdout_metric": initial_holdout,
-        "paper_holdout_delta_initial_to_baseline": paper_delta,
+        "evaluation_holdout_delta_initial_to_baseline": evaluation_delta,
         "holdout_intervention_occurred": intervention,
         "holdout_intervention_outcome": outcome,
         "holdout_neutral_tolerance": tolerance,

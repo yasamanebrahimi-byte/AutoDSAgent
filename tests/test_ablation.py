@@ -563,7 +563,7 @@ def test_runtime_metadata_defines_hard_validation_only(tmp_path: Path):
 
 
 def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path: Path, monkeypatch):
-    """Exercise the paper-level loop with a no-API, two-condition fixture."""
+    """Exercise the evaluation-level loop with a no-API, two-condition fixture."""
     import evaluation.ablation as ablation
     import evaluation.metrics as metrics
     import evaluation.runner as runner
@@ -677,8 +677,8 @@ def test_confirmatory_orchestrator_executes_complete_multi_model_matrix(tmp_path
     assert result["summary"]["descriptive_combined_summary"]["role"] == "descriptive_only"
     assert result["summary"]["descriptive_combined_paired_comparisons"]["role"] == "descriptive_only"
     markdown = Path(result["paths"]["summary_markdown"]).read_text(encoding="utf-8")
-    assert markdown.index("Paper-Primary Results by Model Condition") < markdown.index(
-        "Paper-Primary Paired Comparisons by Model Condition"
+    assert markdown.index("Primary Evaluation Results by Model Condition") < markdown.index(
+        "Primary Evaluation Paired Comparisons by Model Condition"
     ) < markdown.index("Secondary information-asymmetry control") < markdown.index(
         "Combined Cross-Model Descriptive Audit"
     )
@@ -762,7 +762,7 @@ def test_secondary_initial_planner_quality_uses_initial_metrics_not_intervention
             "initial_holdout_metric": initial_metric,
             # LLM-only modes preserve the initial plan, so intervention delta
             # is zero even when their initial planner quality differs.
-            "paper_holdout_delta": 0.0,
+            "evaluation_holdout_delta": 0.0,
         }
 
     classification = _paired_initial_planner_comparison(
@@ -870,7 +870,7 @@ def test_secondary_initial_planner_quality_remains_separate_by_model_condition()
                 "task_type": "classification",
                 "agent_initial_valid": True,
                 "initial_holdout_metric": metric,
-                "paper_holdout_delta": 0.0,
+                "evaluation_holdout_delta": 0.0,
                 "ablation_name": ablation,
             }
         return {
@@ -909,7 +909,7 @@ def test_secondary_initial_plan_validity_reports_all_paired_outcomes_and_quality
             "llm_repetition_id": f"rep_{dataset}",
             "trial_status": "completed",
             "task_type": "classification",
-            "paper_holdout_delta": 0.0,
+            "evaluation_holdout_delta": 0.0,
         }
         return {
             "llm_with_diagnostics": {

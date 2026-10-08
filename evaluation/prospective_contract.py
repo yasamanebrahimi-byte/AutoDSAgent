@@ -1,7 +1,7 @@
-"""Shared metadata and validation helpers for the prospective MLSys study.
+"""Shared metadata and validation helpers for prospective evaluation.
 
 The prospective experiment is deliberately a fresh artifact family.  These
-helpers do not read, repair, or reinterpret historical result summaries.
+helpers do not read, repair, or reinterpret historical evaluation summaries.
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from collections.abc import Mapping
 from typing import Any
 
 
-MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION = "mlsys-prospective-config-v1"
-MLSYS_TRIAL_SCHEMA_VERSION = "mlsys-prospective-trial-v1"
-SUPPORTED_MLSYS_TRIAL_SCHEMA_VERSIONS = frozenset({MLSYS_TRIAL_SCHEMA_VERSION})
-MLSYS_SOURCE_ARMS = ("llm_only", "probe_direct", "full")
-MLSYS_FIXED_FAMILIES = ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
+PROSPECTIVE_CONFIG_SCHEMA_VERSION = "prospective-evaluation-config-v1"
+PROSPECTIVE_TRIAL_SCHEMA_VERSION = "prospective-evaluation-trial-v1"
+SUPPORTED_PROSPECTIVE_TRIAL_SCHEMA_VERSIONS = frozenset({PROSPECTIVE_TRIAL_SCHEMA_VERSION})
+PROSPECTIVE_SOURCE_ARMS = ("llm_only", "probe_direct", "full")
+FIXED_MODEL_FAMILIES = ("linear", "regularized_linear", "tree_ensemble", "boosted_tree")
 
 
 def jsonable(value: Any) -> Any:
@@ -113,7 +113,7 @@ def has_initial_plan(row: Mapping[str, Any]) -> bool:
     validity = row.get("agent_initial_valid")
     if validity is None and isinstance(nested, Mapping):
         validity = nested.get("valid")
-    return method in MLSYS_FIXED_FAMILIES and has_preprocessing(preprocessing) and validity is not None
+    return method in FIXED_MODEL_FAMILIES and has_preprocessing(preprocessing) and validity is not None
 
 
 def candidate_metrics(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -131,9 +131,9 @@ def candidate_metrics(row: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def has_four_family_reference(row: Mapping[str, Any]) -> bool:
     metrics = candidate_metrics(row)
-    if not all(family in metrics and isinstance(metrics[family], Mapping) for family in MLSYS_FIXED_FAMILIES):
+    if not all(family in metrics and isinstance(metrics[family], Mapping) for family in FIXED_MODEL_FAMILIES):
         return False
-    for family in MLSYS_FIXED_FAMILIES:
+    for family in FIXED_MODEL_FAMILIES:
         value = metrics[family]
         if not value.get("status"):
             return False
@@ -176,8 +176,8 @@ def has_pairwise_evidence(row: Mapping[str, Any]) -> bool:
     if not isinstance(a, Mapping) or not isinstance(b, Mapping):
         return False
     return (
-        a.get("model_family") in MLSYS_FIXED_FAMILIES
-        and b.get("model_family") in MLSYS_FIXED_FAMILIES
+        a.get("model_family") in FIXED_MODEL_FAMILIES
+        and b.get("model_family") in FIXED_MODEL_FAMILIES
         and (a.get("mean_score", a.get("raw_mean_cv_score")) is not None)
         and (b.get("mean_score", b.get("raw_mean_cv_score")) is not None)
         and evidence.get("metric") in {"macro_f1", "rmse"}
@@ -196,11 +196,11 @@ def has_holdout(row: Mapping[str, Any]) -> bool:
 
 
 __all__ = [
-    "MLSYS_FIXED_FAMILIES",
-    "MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION",
-    "MLSYS_SOURCE_ARMS",
-    "MLSYS_TRIAL_SCHEMA_VERSION",
-    "SUPPORTED_MLSYS_TRIAL_SCHEMA_VERSIONS",
+    "FIXED_MODEL_FAMILIES",
+    "PROSPECTIVE_CONFIG_SCHEMA_VERSION",
+    "PROSPECTIVE_SOURCE_ARMS",
+    "PROSPECTIVE_TRIAL_SCHEMA_VERSION",
+    "SUPPORTED_PROSPECTIVE_TRIAL_SCHEMA_VERSIONS",
     "candidate_metrics",
     "canonical_json_bytes",
     "canonical_sha256",

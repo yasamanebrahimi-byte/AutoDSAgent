@@ -29,7 +29,7 @@ from evaluation.metrics import (
     DEFAULT_THRESHOLDS,
     REGRESSION_HOLDOUT_RMSE_EPSILON,
     holdout_neutral_tolerance,
-    paper_holdout_delta,
+    evaluation_holdout_delta,
     relative_rmse_improvement,
     summarize_trials,
 )
@@ -300,10 +300,10 @@ def _health_row(name: str, result: dict[str, Any], spec: AblationSpec) -> dict[s
         "harm_rate": health.get("harm_rate", health.get("harmful_intervention_rate")),
         "neutral_intervention_rate": health.get("neutral_intervention_rate"),
         "unnecessary_intervention_rate": health.get("unnecessary_intervention_rate"),
-        "paper_holdout_delta_mean": summary.get("dataset_macro_paper_holdout_delta_mean"),
-        "paper_holdout_delta_median": summary.get("dataset_macro_paper_holdout_delta_median"),
-        "paper_holdout_delta_ci": summary.get("dataset_macro_paper_holdout_delta_ci"),
-        "paper_holdout_outcome_cis": {
+        "evaluation_holdout_delta_mean": summary.get("dataset_macro_evaluation_holdout_delta_mean"),
+        "evaluation_holdout_delta_median": summary.get("dataset_macro_evaluation_holdout_delta_median"),
+        "evaluation_holdout_delta_ci": summary.get("dataset_macro_evaluation_holdout_delta_ci"),
+        "evaluation_holdout_outcome_cis": {
             name: summary.get("dataset_macro_gate_health", {})
             .get("confidence_intervals", {}).get(name)
             for name in (
@@ -406,16 +406,16 @@ def _paired_comparison(
             difference = _final_plan_holdout_difference(task_type, first_value, second_value)
             first_delta = second_delta = None
         else:
-            first_delta = first_row.get("paper_holdout_delta")
-            second_delta = second_row.get("paper_holdout_delta")
+            first_delta = first_row.get("evaluation_holdout_delta")
+            second_delta = second_row.get("evaluation_holdout_delta")
             if first_delta is None:
-                first_delta = paper_holdout_delta(
+                first_delta = evaluation_holdout_delta(
                     task_type,
                     first_row.get("initial_holdout_metric"),
                     first_row.get("final_holdout_metric"),
                 )
             if second_delta is None:
-                second_delta = paper_holdout_delta(
+                second_delta = evaluation_holdout_delta(
                     task_type,
                     second_row.get("initial_holdout_metric"),
                     second_row.get("final_holdout_metric"),
@@ -497,7 +497,7 @@ def _paired_comparison(
         "paired_training_diagnostic_units": len(diagnostic_differences),
         "n_paired_datasets": len(dataset_effects),
         "paired_holdout_dataset_effects": dataset_effects,
-        # Paper-primary pairwise values: one equal-weighted effect per
+        # Primary evaluation pairwise values: one equal-weighted effect per
         # benchmark dataset/task, with win/tie/loss also classified per task.
         "first_better": dataset_better["first"],
         "second_better": dataset_better["second"],
@@ -552,7 +552,7 @@ def _paired_comparison(
         "trial_weighted_paired_regret_difference_ci": diagnostic_difference_ci,
         "training_reference_comparison_role": "secondary diagnostic; primary comparison uses untouched holdout",
         "paired_holdout_difference_sign": (
-            "first ablation paper_holdout_delta minus second ablation paper_holdout_delta; positive favors first"
+            "first ablation evaluation_holdout_delta minus second ablation evaluation_holdout_delta; positive favors first"
             if comparison_estimand == "intervention_effect"
             else "direction-normalized final holdout performance difference; positive favors first"
         ),
@@ -864,11 +864,11 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         f"- Primary ablations: `{payload.get('selected_primary_ablations', [])}`",
         f"- Secondary ablations: `{payload.get('selected_secondary_ablations', [])}`",
         "- Primary and secondary ablations are separate analysis strata; secondary diagnostics are not pooled into the primary claim.",
-        "- Paper-primary estimates are reported separately for each declared model condition. Repetitions remain nested within dataset/task.",
+        "- Primary evaluation estimates are reported separately for each declared model condition. Repetitions remain nested within dataset/task.",
         "- Repetitions are aligned by declared repetition slot for balanced analysis; `rep_001` across model conditions or ablations is not a shared-seed stochastic match, because those are separate planner calls.",
-        "- Any across-model aggregate below is explicitly descriptive/audit-only and is not a paper-primary estimand.",
+        "- Any across-model aggregate below is explicitly descriptive/audit-only and is not a primary evaluation estimand.",
         "",
-        "## Paper-Primary Results by Model Condition",
+        "## Primary Evaluation Results by Model Condition",
         "",
         "| Model condition | Ablation | Datasets | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Within-arm intervention delta (dataset macro) | CI |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
@@ -877,9 +877,9 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
     for condition_id, condition_payload in by_condition.items():
         for ablation_name, summary in condition_payload.get("primary", {}).items():
             lines.append(
-                f"| {condition_id} | {ablation_name} | {summary.get('dataset_macro_gate_health', {}).get('dataset_count', 0)} | {summary.get('challenge_rate')} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_paper_holdout_delta_mean')} | {summary.get('dataset_macro_paper_holdout_delta_ci')} |"
+                f"| {condition_id} | {ablation_name} | {summary.get('dataset_macro_gate_health', {}).get('dataset_count', 0)} | {summary.get('challenge_rate')} | {summary.get('intervention_rate')} | {summary.get('abstention_rate')} | {summary.get('beneficial_intervention_rate')} | {summary.get('harmful_intervention_rate')} | {summary.get('neutral_intervention_rate')} | {summary.get('dataset_macro_evaluation_holdout_delta_mean')} | {summary.get('dataset_macro_evaluation_holdout_delta_ci')} |"
             )
-    lines.extend(["", "## Paper-Primary Paired Comparisons by Model Condition", ""])
+    lines.extend(["", "## Primary Evaluation Paired Comparisons by Model Condition", ""])
     for condition_id, items in payload.get("paired_comparisons_by_model_condition", {}).items():
         lines.append(f"### `{condition_id}`")
         for item in items:
@@ -905,7 +905,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
         "is reported separately, and planner-quality magnitude is conditional on jointly valid and "
         "evaluable initial plans. Classification and regression magnitudes are reported separately; "
         "directional dataset outcomes may remain cross-task-type. This secondary information-asymmetry "
-        "analysis does not enter the paper-primary confirmatory claim.",
+        "analysis does not enter the primary evaluation confirmatory claim.",
         "",
     ])
     for condition_id, items in payload.get("secondary_paired_comparisons_by_model_condition", {}).items():
@@ -941,7 +941,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
                 f"diagnostics invalid/ordinary valid `{item['diagnostics_invalid_ordinary_valid_count']}`, "
                 f"both invalid `{item['both_initial_invalid_count']}`."
             )
-    lines.extend(["", "## Combined Cross-Model Descriptive Audit", "", "The following totals pool model conditions only for audit/descriptive purposes; they are not paper-primary estimates.", "", "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|"])
+    lines.extend(["", "## Combined Cross-Model Descriptive Audit", "", "The following totals pool model conditions only for audit/descriptive purposes; they are not primary evaluation estimates.", "", "| Analysis role | Ablation | Datasets | Valid | Failed/invalid | Challenge rate | Intervention rate | Abstention rate | Beneficial | Harmful | Neutral | Holdout delta (descriptive) | Holdout CI | Planner calls | Reconciler calls | Probe invocations |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|"])
     for row in payload["central_table"]:
         api = row["api_usage"]
         probe = payload["summaries"][row["ablation"]].get("probe_invocation_count", 0)
@@ -949,7 +949,7 @@ def _render_combined_markdown(payload: dict[str, Any]) -> str:
             "analysis_role", "secondary"
         )
         lines.append(
-            f"| {role} / descriptive-only | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('paper_holdout_delta_mean')} | {row.get('paper_holdout_delta_ci')} | {api['successful_initial_live_calls']} | {api['successful_reconciliation_live_calls']} | {probe} |"
+            f"| {role} / descriptive-only | {row['ablation']} | {row['n_datasets']} | {row['valid_trial_count']} | {row['invalid_trial_count']} | {row.get('challenge_rate')} | {row.get('intervention_rate')} | {row.get('abstention_rate')} | {row.get('beneficial_intervention_rate')} | {row.get('harmful_intervention_rate')} | {row.get('neutral_intervention_rate')} | {row.get('evaluation_holdout_delta_mean')} | {row.get('evaluation_holdout_delta_ci')} | {api['successful_initial_live_calls']} | {api['successful_reconciliation_live_calls']} | {probe} |"
         )
     lines.extend(["", "### Combined Cross-Model Descriptive Paired Comparisons", ""])
     for item in payload.get("descriptive_combined_paired_comparisons", {}).get("comparisons", []):
@@ -1093,7 +1093,7 @@ def run_ablation_study(
             split_seeds=split_seeds,
             llm_repetitions=int((manifest.get("splits_and_repetitions", {}) or {}).get("llm_repetitions", first_condition["llm_repetitions"])),
             holdout_fraction=0.2,
-            # Manifest validation compares the primary paper stratum. The
+            # Manifest validation compares the primary evaluation stratum. The
             # complete execution matrix below includes secondary controls too.
             selected_ablations=manifest_primary_names,
             deterministic_policy_version=DeterministicPolicy().version,
@@ -1274,6 +1274,7 @@ def run_ablation_study(
         "confirmatory_config_snapshot": (
             manifest_snapshot
             if confirmatory_metadata is not None
+            # Preserve the historical frozen manifest default for reproducibility.
             else "evaluation/configs/paper_confirmatory_v1.json"
         ),
         "confirmatory_mode": confirmatory_metadata is not None,
@@ -1297,7 +1298,7 @@ def run_ablation_study(
         "evaluation_objective": "intervention-quality-v1",
         "run_status": "initialized",
         "run_metadata": dict(run_metadata or {}),
-        "trial_schema_version": "mlsys-prospective-trial-v1",
+        "trial_schema_version": "prospective-evaluation-trial-v1",
     }
     if frozen_conditions is not None:
         root_config.update({
@@ -1567,28 +1568,28 @@ def run_ablation_study(
         "secondary_initial_planner_quality_by_model_condition": secondary_paired_comparisons_by_condition,
         "secondary_initial_planner_validity_by_model_condition": secondary_initial_planner_validity_by_condition,
         # Compatibility aliases for older consumers.  Their role is explicit
-        # so they cannot be mistaken for the paper-primary estimand.
+        # so they cannot be mistaken for the primary evaluation estimand.
         "analysis_summaries": {
             "primary": {name: summaries[name] for name in selected_primary_names},
             "secondary": {name: summaries[name] for name in selected_secondary_names},
             "role": "descriptive_only_compatibility_alias",
-            "warning": "Use analysis_summaries_by_model_condition for paper-primary reporting.",
+            "warning": "Use analysis_summaries_by_model_condition for primary evaluation reporting.",
         },
         "paired_comparisons": {
             "comparisons": paired,
             "role": "descriptive_only_compatibility_alias",
-            "warning": "Use paired_comparisons_by_model_condition for paper-primary reporting.",
+            "warning": "Use paired_comparisons_by_model_condition for primary evaluation reporting.",
         },
         "descriptive_combined_summary": {
             "primary": {name: summaries[name] for name in selected_primary_names},
             "secondary": {name: summaries[name] for name in selected_secondary_names},
             "role": "descriptive_only",
-            "warning": "Across-model totals are audit/descriptive aggregates and are not paper-primary estimands.",
+            "warning": "Across-model totals are audit/descriptive aggregates and are not primary evaluation estimands.",
         },
         "descriptive_combined_paired_comparisons": {
             "comparisons": paired,
             "role": "descriptive_only",
-            "warning": "Across-model paired comparisons are audit/descriptive aggregates and are not paper-primary estimands.",
+            "warning": "Across-model paired comparisons are audit/descriptive aggregates and are not primary evaluation estimands.",
         },
         "live_integrity": {
             row["ablation"]: row["api_usage"] for row in central

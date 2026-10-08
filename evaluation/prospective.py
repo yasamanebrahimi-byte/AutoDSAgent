@@ -26,9 +26,9 @@ from evaluation.external_benchmarks import (
 )
 from app.empirical_challenge_probe import EmpiricalProbePolicy
 from evaluation.metrics import DEFAULT_THRESHOLDS
-from evaluation.mlsys_prospective import (
-    MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
-    MLSYS_TRIAL_SCHEMA_VERSION,
+from evaluation.prospective_contract import (
+    PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+    PROSPECTIVE_TRIAL_SCHEMA_VERSION,
     canonical_sha256,
 )
 
@@ -87,7 +87,7 @@ def run_prospective_experiment(
     effective_reconciler_model = reconciler_model or model
     repetition_ids = [f"rep_{index + 1:03d}" for index in range(int(repetitions))]
     scientific_config = {
-        "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+        "schema_version": PROSPECTIVE_CONFIG_SCHEMA_VERSION,
         "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
         "panel_manifest_sha256": panel_manifest_hash,
         "panel_content_sha256": panel_content_hash,
@@ -108,8 +108,8 @@ def run_prospective_experiment(
     scientific_config_hash = canonical_sha256(scientific_config)
     prospective_metadata = {
         "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
-        "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
-        "study_role": "mlsys_four_policy_comparison",
+        "schema_version": PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+        "study_role": "four_policy_comparison",
         "experiment_config_sha256": scientific_config_hash,
         "prospective_experiment_config_sha256": scientific_config_hash,
         "prospective_experiment_config": scientific_config,
@@ -154,18 +154,18 @@ def run_prospective_experiment(
     config["experiment_config_sha256"] = scientific_config_hash
     config["panel_hash"] = panel_content_hash
     config["run_status"] = config.get("run_status", "complete")
-    from evaluation.validate_mlsys_run import validate_mlsys_run
+    from evaluation.validate_prospective_run import validate_prospective_run
 
-    validation_report = validate_mlsys_run(output)
-    config["mlsys_validation_ready"] = bool(
+    validation_report = validate_prospective_run(output)
+    config["prospective_validation_ready"] = bool(
         validation_report.get("ready_for_baseline_derivation")
     )
     config["run_status"] = (
         "complete"
-        if config["mlsys_validation_ready"] and config.get("run_status") == "complete"
+        if config["prospective_validation_ready"] and config.get("run_status") == "complete"
         else "incomplete/interrupted"
     )
-    metadata["mlsys_validation_ready"] = config["mlsys_validation_ready"]
+    metadata["prospective_validation_ready"] = config["prospective_validation_ready"]
     _atomic_write_text(config_path, json.dumps(config, indent=2, sort_keys=True))
     if summary_path.is_file():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -193,7 +193,7 @@ def _annotate_prospective_trials(output: Path, metadata: dict[str, Any]) -> None
                         "prospective_panel_content_sha256": metadata["prospective_panel_content_sha256"],
                         "prospective_split_seeds": metadata["prospective_split_seeds"],
                         "panel_hash": metadata["panel_hash"],
-                        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+                        "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
                     })
                 rows.append(value)
         _atomic_write_text(

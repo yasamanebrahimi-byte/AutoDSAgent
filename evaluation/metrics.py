@@ -34,7 +34,7 @@ DEFAULT_THRESHOLDS = {
     # Legacy alias retained for readers of older result bundles.  New code
     # resolves the task-specific values below first.
     "holdout_neutral_tolerance": 0.02,
-    # Paper-facing holdout tolerances.  Classification is an absolute
+    # Research evaluation holdout tolerances.  Classification is an absolute
     # macro-F1 delta; regression is a relative RMSE improvement.
     "classification_holdout_neutral_tolerance": 0.02,
     "regression_holdout_neutral_tolerance": 0.02,
@@ -55,7 +55,7 @@ def raw_holdout_performance_delta(
     """Return the legacy/native-unit paired delta for diagnostics only.
 
     Classification uses macro-F1 directly.  Regression uses the raw RMSE
-    difference and must not be used for cross-dataset paper aggregation.
+    difference and must not be used for cross-dataset evaluation aggregation.
     """
 
     if initial_holdout_metric is None or final_holdout_metric is None:
@@ -82,14 +82,14 @@ def relative_rmse_improvement(
     return float((float(initial_rmse) - float(final_rmse)) / max(abs(float(initial_rmse)), epsilon))
 
 
-def paper_holdout_delta(
+def evaluation_holdout_delta(
     task_type: str,
     initial_holdout_metric: float | None,
     final_holdout_metric: float | None,
     *,
     epsilon: float = HOLDOUT_RMSE_EPSILON,
 ) -> float | None:
-    """Return the dimensionless, paper-facing holdout improvement.
+    """Return the dimensionless, research evaluation holdout improvement.
 
     For classification this is the macro-F1 difference.  For regression this
     is relative RMSE improvement.  In both cases positive means the final
@@ -112,7 +112,7 @@ def holdout_intervention_delta(
 ) -> float | None:
     """Backward-compatible native-unit holdout delta.
 
-    New paper-facing code should use :func:`paper_holdout_delta`.  This name
+    New research evaluation code should use :func:`evaluation_holdout_delta`.  This name
     remains available because historical callers used it for raw RMSE
     diagnostics.
     """
@@ -121,7 +121,7 @@ def holdout_intervention_delta(
 
 
 def holdout_neutral_tolerance(task_type: str, thresholds: dict[str, float]) -> float:
-    """Resolve the frozen task-specific paper tolerance and its units."""
+    """Resolve the frozen task-specific evaluation tolerance and its units."""
 
     if task_type in thresholds:
         return float(thresholds[task_type])
@@ -603,7 +603,7 @@ def _intervention_occurred(record: dict[str, Any]) -> bool:
 
 
 def _holdout_pair(record: dict[str, Any]) -> tuple[float | None, float | None, str | None, float | None]:
-    """Extract a paired holdout metric and the dimensionless paper delta.
+    """Extract a paired holdout metric and the dimensionless evaluation delta.
 
     Old result rows may contain only ``holdout_intervention_delta``.  When raw
     initial/final metrics are available we deliberately recompute the new
@@ -621,13 +621,13 @@ def _holdout_pair(record: dict[str, Any]) -> tuple[float | None, float | None, s
         metric_name = metric_name or ("macro_f1" if task_type == "classification" else "rmse")
         initial = initial_metrics.get(metric_name)
         final = final_metrics.get(metric_name)
-    delta = record.get("paper_holdout_delta")
+    delta = record.get("evaluation_holdout_delta")
     if delta is None:
         delta = record.get("holdout_rmse_relative_improvement")
     if delta is None:
         delta = record.get("holdout_macro_f1_delta")
     if delta is None and initial is not None and final is not None:
-        delta = paper_holdout_delta(
+        delta = evaluation_holdout_delta(
             record.get("task_type", "classification"), float(initial), float(final),
             epsilon=float(record.get("holdout_rmse_epsilon", HOLDOUT_RMSE_EPSILON)),
         )
@@ -726,14 +726,14 @@ def _holdout_health(
         "holdout_neutral_intervention_incidence": _rate(neutral, len(records)),
         "mean_holdout_intervention_delta": _mean(deltas),
         "median_holdout_intervention_delta": _median(deltas),
-        "mean_paper_holdout_delta": _mean(deltas),
-        "median_paper_holdout_delta": _median(deltas),
+        "mean_evaluation_holdout_delta": _mean(deltas),
+        "median_evaluation_holdout_delta": _median(deltas),
         "mean_beneficial_holdout_delta": _mean(beneficial_deltas),
         "mean_harmful_holdout_delta": _mean(harmful_deltas),
         "mean_beneficial_holdout_magnitude": _mean(beneficial_deltas),
         "mean_harmful_holdout_magnitude": _mean([-delta for delta in harmful_deltas]),
         "holdout_intervention_delta_ci": delta_ci,
-        "paper_holdout_delta_ci": delta_ci,
+        "evaluation_holdout_delta_ci": delta_ci,
         "intervention_precision_ci": precision_ci,
         "harmful_intervention_rate_ci": harmful_ci,
         "neutral_intervention_rate_ci": neutral_ci,
@@ -764,7 +764,7 @@ def _soft_outcome_counts(records: list[dict[str, Any]], tolerance: float) -> dic
 
 
 def iid_bootstrap_ci(values: list[float], seed: int = 20260824, samples: int = 1000) -> dict[str, Any]:
-    """Legacy IID/row bootstrap retained for diagnostics, never paper-primary."""
+    """Legacy IID/row bootstrap retained for diagnostics, never primary evaluation."""
 
     if not values:
         return {"lower": None, "upper": None, "support": 0, "stable": False}
@@ -1139,7 +1139,7 @@ def _gate_health(
             "challenge_yield": "deprecated alias for training_reference_challenge_yield",
             "unnecessary_intervention_rate": "deprecated alias for training_reference_unnecessary_intervention_rate",
             "harmful_intervention_rate": (
-                "paper holdout rate when holdout pairs are available; historical training-reference fallback otherwise"
+                "evaluation holdout rate when holdout pairs are available; historical training-reference fallback otherwise"
             ),
         },
         "challenge_recall": _rate(beneficial_challenges, beneficial_opportunities),
@@ -1238,8 +1238,8 @@ def _dataset_macro_health(
         "neutral_intervention_rate", "intervention_rate",
         "beneficial_intervention_incidence", "harmful_intervention_incidence",
         "neutral_intervention_incidence",
-        "abstention_preservation_rate", "mean_paper_holdout_delta",
-        "median_paper_holdout_delta",
+        "abstention_preservation_rate", "mean_evaluation_holdout_delta",
+        "median_evaluation_holdout_delta",
         "disagreement_rate", "probe_invocation_rate_conditional_on_disagreement",
         "abstention_rate_conditional_on_disagreement",
         "intervention_rate_conditional_on_disagreement",
@@ -1251,7 +1251,7 @@ def _dataset_macro_health(
         **{name: _mean(
             float(item[name]) for item in per_dataset.values() if item.get(name) is not None
         ) for name in numeric},
-        "paper_holdout_intervention_metrics": {
+        "evaluation_holdout_intervention_metrics": {
             name: _mean(
                 float(item["holdout_intervention_metrics"][name])
                 for item in per_dataset.values()
@@ -1260,8 +1260,8 @@ def _dataset_macro_health(
             for name in (
                 "intervention_count", "valid_paired_holdout_comparison_count",
                 "beneficial_intervention_count", "harmful_intervention_count",
-                "neutral_intervention_count", "mean_paper_holdout_delta",
-                "median_paper_holdout_delta", "mean_beneficial_holdout_delta",
+                "neutral_intervention_count", "mean_evaluation_holdout_delta",
+                "median_evaluation_holdout_delta", "mean_beneficial_holdout_delta",
                 "mean_harmful_holdout_delta", "mean_beneficial_holdout_magnitude",
                 "mean_harmful_holdout_magnitude",
             )
@@ -1292,15 +1292,15 @@ def _dataset_macro_health(
                 for item in per_dataset.values()
                 if item["holdout_intervention_metrics"].get("holdout_neutral_intervention_rate") is not None
             ),
-            "mean_paper_holdout_delta": _mean(
-                float(item["holdout_intervention_metrics"]["mean_paper_holdout_delta"])
+            "mean_evaluation_holdout_delta": _mean(
+                float(item["holdout_intervention_metrics"]["mean_evaluation_holdout_delta"])
                 for item in per_dataset.values()
-                if item["holdout_intervention_metrics"].get("mean_paper_holdout_delta") is not None
+                if item["holdout_intervention_metrics"].get("mean_evaluation_holdout_delta") is not None
             ),
-            "median_paper_holdout_delta": _mean(
-                float(item["holdout_intervention_metrics"]["median_paper_holdout_delta"])
+            "median_evaluation_holdout_delta": _mean(
+                float(item["holdout_intervention_metrics"]["median_evaluation_holdout_delta"])
                 for item in per_dataset.values()
-                if item["holdout_intervention_metrics"].get("median_paper_holdout_delta") is not None
+                if item["holdout_intervention_metrics"].get("median_evaluation_holdout_delta") is not None
             ),
             "mean_beneficial_holdout_delta": _mean(
                 float(item["holdout_intervention_metrics"]["mean_beneficial_holdout_delta"])
@@ -1847,9 +1847,9 @@ def summarize_trials(
                 float(_holdout_pair(record)[3]) for record in holdout_paired
             ]),
             "holdout_intervention_metrics": health["holdout_intervention_metrics"],
-            "paper_holdout_delta_mean": health["holdout_intervention_metrics"]["mean_paper_holdout_delta"],
-            "paper_holdout_delta_median": health["holdout_intervention_metrics"]["median_paper_holdout_delta"],
-            "paper_holdout_delta_ci": health["holdout_intervention_metrics"]["paper_holdout_delta_ci"],
+            "evaluation_holdout_delta_mean": health["holdout_intervention_metrics"]["mean_evaluation_holdout_delta"],
+            "evaluation_holdout_delta_median": health["holdout_intervention_metrics"]["median_evaluation_holdout_delta"],
+            "evaluation_holdout_delta_ci": health["holdout_intervention_metrics"]["evaluation_holdout_delta_ci"],
             "mean_beneficial_holdout_delta": health["holdout_intervention_metrics"][
                 "mean_beneficial_holdout_delta"
             ],
@@ -1962,7 +1962,7 @@ def summarize_trials(
     dataset_holdout = dataset_gate_health.get(
         "dataset_macro_holdout_intervention_metrics", {}
     )
-    # The paper-facing estimand is the equally weighted mean of eligible
+    # The research evaluation estimand is the equally weighted mean of eligible
     # dataset/task summaries. Its intervals use the same dataset-cluster
     # bootstrap, rather than an IID row bootstrap or a trial-weighted mean.
     macro_ci_metrics = (
@@ -1976,7 +1976,7 @@ def summarize_trials(
         "beneficial_intervention_rate", "neutral_intervention_rate", "intervention_rate",
         "beneficial_intervention_incidence", "harmful_intervention_incidence",
         "neutral_intervention_incidence",
-        "abstention_preservation_rate", "mean_paper_holdout_delta", "median_paper_holdout_delta",
+        "abstention_preservation_rate", "mean_evaluation_holdout_delta", "median_evaluation_holdout_delta",
         "intervention_precision_excluding_neutral",
     )
     dataset_macro_cis = (
@@ -2019,7 +2019,7 @@ def summarize_trials(
             {_normalized_provider(record.get("agent_source"), default="") for record in trials}
         )
     }
-    paper_task_summaries: dict[str, Any] = {}
+    evaluation_task_summaries: dict[str, Any] = {}
     for task in ("classification", "regression"):
         task_records = [record for record in completed if record.get("task_type") == task]
         task_macro = _dataset_macro_health(
@@ -2039,7 +2039,7 @@ def summarize_trials(
                     "neutral_intervention_rate",
                     "intervention_precision",
                     "harm_rate",
-                    "mean_paper_holdout_delta",
+                    "mean_evaluation_holdout_delta",
                 ),
                 tolerance=neutral_tolerance,
                 catastrophic_threshold=float(configured["catastrophic_regret_threshold"]),
@@ -2049,7 +2049,7 @@ def summarize_trials(
             if compute_confidence_intervals
             else {}
         )
-        paper_task_summaries[task] = {
+        evaluation_task_summaries[task] = {
             "task_type": task,
             "dataset_macro": {
                 key: task_macro.get(key)
@@ -2057,8 +2057,8 @@ def summarize_trials(
                     "dataset_count", "challenge_rate", "intervention_rate",
                     "abstention_rate", "beneficial_intervention_rate",
                     "harmful_intervention_rate", "neutral_intervention_rate",
-                    "intervention_precision", "mean_paper_holdout_delta",
-                    "median_paper_holdout_delta",
+                    "intervention_precision", "mean_evaluation_holdout_delta",
+                    "median_evaluation_holdout_delta",
                 )
             },
             "dataset_macro_confidence_intervals": task_macro_ci,
@@ -2085,18 +2085,18 @@ def summarize_trials(
             "holdout_macro_f1_delta": "final_holdout_macro_f1-initial_holdout_macro_f1",
             "holdout_rmse_delta_raw": "initial_holdout_rmse-final_holdout_rmse (diagnostic/native units only)",
             "holdout_rmse_relative_improvement": "(initial_holdout_rmse-final_holdout_rmse)/max(abs(initial_holdout_rmse), holdout_rmse_epsilon)",
-            "paper_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
+            "evaluation_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
             "holdout_intervention_outcome": "beneficial/harmful/neutral for changed soft plans; not_intervened otherwise; missing paired evaluations are not_comparable",
-            "beneficial_intervention": "paper_holdout_delta > task-specific neutral tolerance",
-            "harmful_intervention": "paper_holdout_delta < -task-specific neutral tolerance",
-            "neutral_intervention": "abs(paper_holdout_delta) <= task-specific neutral tolerance",
+            "beneficial_intervention": "evaluation_holdout_delta > task-specific neutral tolerance",
+            "harmful_intervention": "evaluation_holdout_delta < -task-specific neutral tolerance",
+            "neutral_intervention": "abs(evaluation_holdout_delta) <= task-specific neutral tolerance",
             "beneficial_intervention_rate": "beneficial actual interventions / actual interventions with evaluable holdout outcome",
             "neutral_intervention_rate": "neutral actual interventions / actual interventions with evaluable holdout outcome",
             "intervention_precision": "beneficial actual interventions / actual interventions with evaluable holdout outcome; null when denominator is zero",
             "harmful_intervention_rate": "harmful actual interventions / actual interventions with evaluable holdout outcome; historical rows without holdout retain the deprecated training-reference fallback",
             "harm_rate": "same numerator and denominator as harmful_intervention_rate",
-            "mean_beneficial_holdout_magnitude": "mean positive paper_holdout_delta among beneficial interventions; null when unsupported",
-            "mean_harmful_holdout_magnitude": "mean absolute negative paper_holdout_delta among harmful interventions; null when unsupported",
+            "mean_beneficial_holdout_magnitude": "mean positive evaluation_holdout_delta among beneficial interventions; null when unsupported",
+            "mean_harmful_holdout_magnitude": "mean absolute negative evaluation_holdout_delta among harmful interventions; null when unsupported",
             "challenge_rate": "challenged actionable model-family disagreements / actionable model-family disagreements; null when denominator is zero",
             "intervention_rate": "actual final-plan changes caused by the soft safeguard / completed eligible trials",
             "abstention_rate": "actionable model-family disagreements preserved because evidence was insufficient / actionable model-family disagreements",
@@ -2348,14 +2348,14 @@ def summarize_trials(
         "mean_holdout_intervention_delta": overall_holdout["mean_holdout_intervention_delta"],
         "median_holdout_intervention_delta": overall_holdout["median_holdout_intervention_delta"],
         "holdout_intervention_outcome_counts": overall_holdout["outcome_counts"],
-        "paper_holdout_delta_mean": overall_holdout["mean_paper_holdout_delta"],
-        "paper_holdout_delta_median": overall_holdout["median_paper_holdout_delta"],
-        "paper_holdout_delta_ci": overall_holdout["paper_holdout_delta_ci"],
+        "evaluation_holdout_delta_mean": overall_holdout["mean_evaluation_holdout_delta"],
+        "evaluation_holdout_delta_median": overall_holdout["median_evaluation_holdout_delta"],
+        "evaluation_holdout_delta_ci": overall_holdout["evaluation_holdout_delta_ci"],
         "dataset_macro_holdout_intervention_metrics": dataset_holdout,
-        "dataset_macro_paper_holdout_delta_mean": dataset_holdout.get("mean_paper_holdout_delta"),
-        "dataset_macro_paper_holdout_delta_median": dataset_holdout.get("median_paper_holdout_delta"),
-        "dataset_macro_paper_holdout_delta_ci": dataset_macro_cis.get(
-            "mean_paper_holdout_delta", {}
+        "dataset_macro_evaluation_holdout_delta_mean": dataset_holdout.get("mean_evaluation_holdout_delta"),
+        "dataset_macro_evaluation_holdout_delta_median": dataset_holdout.get("median_evaluation_holdout_delta"),
+        "dataset_macro_evaluation_holdout_delta_ci": dataset_macro_cis.get(
+            "mean_evaluation_holdout_delta", {}
         ),
         "challenge_recall": dataset_gate_health["challenge_recall"],
         "rescue_recall": dataset_gate_health["challenge_recall"],
@@ -2364,7 +2364,7 @@ def summarize_trials(
         "missed_rescue_count": overall_selective["missed_rescue_count"],
         "good_abstention_count": overall_selective["good_abstention_count"],
         "neutral_abstention_count": overall_selective["neutral_abstention_count"],
-        # Keep the legacy key, but make it resolve to the paper-facing
+        # Keep the legacy key, but make it resolve to the research evaluation
         # dataset-macro estimate so it cannot silently remain trial-weighted.
         "gate_health": dataset_gate_health,
         "trial_weighted_gate_health": overall_gate_health,
@@ -2473,7 +2473,7 @@ def summarize_trials(
         ),
         "failure_counts_by_validation_code": dict(sorted(failure_counts.items())),
         "by_task": by_task,
-        "paper_metrics_by_task": paper_task_summaries,
+        "evaluation_metrics_by_task": evaluation_task_summaries,
         "by_dataset": by_dataset,
         "openai_only": {
             **({} if not openai else {

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.mlsys_panel import PanelBuildOptions, PanelEligibility, build_draft_panel
-from evaluation.mlsys_prospective import MLSYS_TRIAL_SCHEMA_VERSION
+from evaluation.prospective_panel import PanelBuildOptions, PanelEligibility, build_draft_panel
+from evaluation.prospective_contract import PROSPECTIVE_TRIAL_SCHEMA_VERSION
 from evaluation.external_benchmarks import freeze_prospective_panel_manifest
-from evaluation.validate_mlsys_run import MlsysValidationError, validate_mlsys_run
+from evaluation.validate_prospective_run import ProspectiveValidationError, validate_prospective_run
 
 
 def _record(task_id: int, task_type: str, *, name: str | None = None) -> dict[str, object]:
@@ -142,7 +142,7 @@ def _synthetic_rows(
         row = {
             "trial_id": f"{arm}-trial",
             "logical_trial_id": logical_trial_id,
-            "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+            "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
             "trial_status": "completed",
             "source_arm": arm,
             "ablation_name": arm,
@@ -200,8 +200,8 @@ def _write_run(
     config = {
         "run_status": "complete",
         "analysis_role": "prospective_generalization",
-        "schema_version": "mlsys-prospective-config-v1",
-        "study_role": "mlsys_four_policy_comparison",
+        "schema_version": "prospective-evaluation-config-v1",
+        "study_role": "four_policy_comparison",
         "panel_hash": panel_hash,
         "experiment_config_sha256": config_hash,
         "split_seeds": [42],
@@ -226,7 +226,7 @@ def _write_run(
 
 def test_complete_synthetic_run_is_ready(tmp_path: Path):
     panel_hash = _write_run(tmp_path, _synthetic_rows("panel-fixture-hash"))
-    report = validate_mlsys_run(tmp_path, strict=True)
+    report = validate_prospective_run(tmp_path, strict=True)
     assert report["ready_for_baseline_derivation"] is True
     assert report["missing_source_arms"] == 0
     assert report["missing_pairwise_evidence"] == 0
@@ -236,16 +236,16 @@ def test_complete_synthetic_run_is_ready(tmp_path: Path):
 
 def test_missing_pairwise_evidence_fails_strict_validation(tmp_path: Path):
     _write_run(tmp_path, _synthetic_rows("panel-fixture-hash", include_pairwise=False))
-    with pytest.raises(MlsysValidationError, match="Missing pairwise evidence: 1"):
-        validate_mlsys_run(tmp_path, strict=True)
-    assert json.loads((tmp_path / "mlsys_validation_report.json").read_text())["missing_pairwise_evidence"] == 1
+    with pytest.raises(ProspectiveValidationError, match="Missing pairwise evidence: 1"):
+        validate_prospective_run(tmp_path, strict=True)
+    assert json.loads((tmp_path / "prospective_validation_report.json").read_text())["missing_pairwise_evidence"] == 1
 
 
 def test_legitimate_no_probe_agreement_is_complete(tmp_path: Path):
     rows = _synthetic_rows("panel-fixture-hash", include_pairwise=False)
     rows[1]["deterministic_method"] = "linear"
     _write_run(tmp_path, rows)
-    report = validate_mlsys_run(tmp_path, strict=True)
+    report = validate_prospective_run(tmp_path, strict=True)
     assert report["legitimate_no_probe_groups"] == 1
     assert report["groups_requiring_pairwise_evidence"] == 0
     assert report["missing_pairwise_evidence"] == 0
@@ -258,15 +258,15 @@ def test_completely_missing_declared_logical_group_is_reported(tmp_path: Path):
     ]
     rows = _synthetic_rows("panel-fixture-hash")
     _write_run(tmp_path, rows, task_specs=task_specs)
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert report["expected_logical_trial_groups"] == 2
     assert report["observed_logical_trial_groups"] == 1
     assert report["completely_missing_logical_groups"] == 1
     assert report["incomplete_observed_logical_groups"] == 0
     assert report["complete_logical_trial_groups"] == 1
     assert report["ready_for_baseline_derivation"] is False
-    with pytest.raises(MlsysValidationError):
-        validate_mlsys_run(tmp_path, strict=True)
+    with pytest.raises(ProspectiveValidationError):
+        validate_prospective_run(tmp_path, strict=True)
 
 
 @pytest.mark.parametrize("hash_mode", ["mismatch", "missing"])
@@ -278,7 +278,7 @@ def test_prospective_config_hash_is_fail_closed(tmp_path: Path, hash_mode: str):
         for row in rows:
             row.pop("experiment_config_sha256")
     _write_run(tmp_path, rows)
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert report["hash_mismatches"] > 0
     assert report["ready_for_baseline_derivation"] is False
     assert any("config hash" in error for error in report["groups"][0]["hash_errors"])
@@ -291,7 +291,7 @@ def test_historical_rows_without_prospective_config_hash_remain_readable(tmp_pat
     _panel(tmp_path)
     (tmp_path / "config.json").write_text(json.dumps({"run_status": "complete", "panel_hash": "panel-fixture-hash"}), encoding="utf-8")
     (tmp_path / "trials.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert not any("config hash" in error for error in report["errors"])
 
 
@@ -299,8 +299,8 @@ def test_missing_all_four_candidate_fails_strict_validation(tmp_path: Path):
     rows = _synthetic_rows("panel-fixture-hash")
     del rows[2]["four_family_cv_records"]["boosted_tree"]
     _write_run(tmp_path, rows)
-    with pytest.raises(MlsysValidationError, match="Incomplete four-family references: 1"):
-        validate_mlsys_run(tmp_path, strict=True)
+    with pytest.raises(ProspectiveValidationError, match="Incomplete four-family references: 1"):
+        validate_prospective_run(tmp_path, strict=True)
 
 
 def test_conflicting_duplicate_trial_id_is_reported(tmp_path: Path):
@@ -309,7 +309,7 @@ def test_conflicting_duplicate_trial_id_is_reported(tmp_path: Path):
     duplicate["trial_id"] = rows[1]["trial_id"]
     duplicate["final_holdout_metric"] = 0.1
     _write_run(tmp_path, rows + [duplicate])
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert report["conflicting_trial_ids"] == 1
     assert report["ready_for_baseline_derivation"] is False
 
@@ -318,7 +318,7 @@ def test_conflicting_duplicate_trial_id_is_reported(tmp_path: Path):
 def test_each_missing_source_arm_is_reported(tmp_path: Path, missing_arm: str):
     rows = [row for row in _synthetic_rows("panel-fixture-hash") if row["source_arm"] != missing_arm]
     _write_run(tmp_path, rows)
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert report["missing_source_arms"] == 1
     assert report["ready_for_baseline_derivation"] is False
 
@@ -328,6 +328,6 @@ def test_hash_and_split_mismatches_are_reported(tmp_path: Path):
     rows[1]["panel_hash"] = "different-panel"
     rows[2]["split_seed"] = 99
     _write_run(tmp_path, rows)
-    report = validate_mlsys_run(tmp_path)
+    report = validate_prospective_run(tmp_path)
     assert report["hash_mismatches"] == 1
     assert report["split_identity_mismatches"] == 1

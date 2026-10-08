@@ -1,7 +1,7 @@
 # Gate evaluation objective
 
 The evaluation objective is versioned as `intervention-quality-v1`. The
-paper-facing claim is deliberately narrow: selective reliability safeguards
+research evaluation claim is deliberately narrow: selective reliability safeguards
 for LLM-based model-family and preprocessing planning in supervised tabular
 classification and regression. AutoDSAgent remains a broader end-to-end
 data-science product; this evaluation does not validate arbitrary EDA,
@@ -38,7 +38,7 @@ plan is frozen are the initial and final plans evaluated on the same holdout.
 ## Trial outcomes
 
 The primary intervention outcome is the paired exact-plan untouched-holdout
-result. `paper_holdout_delta` is dimensionless and positive always means the
+result. `evaluation_holdout_delta` is dimensionless and positive always means the
 final/intervened plan is better:
 
 ```text
@@ -52,7 +52,7 @@ regression:
 
 `holdout_rmse_delta_raw = initial_holdout_rmse - final_holdout_rmse` remains
 available for regression diagnostics, but is native-unit and is never averaged
-with classification deltas for a paper-facing cross-dataset estimate.
+with classification deltas for a research evaluation cross-dataset estimate.
 
 Classification neutrality uses
 `classification_holdout_neutral_tolerance` in absolute macro-F1 points.
@@ -89,7 +89,7 @@ These regret-based values remain diagnostics of what training-side evidence
 predicted; they are not the primary definition of realized intervention
 success or harm.
 
-## Paper-facing intervention metrics
+## Research evaluation intervention metrics
 
 - An actionable soft disagreement is a completed, hard-valid comparison where
   the LLM and deterministic model families differ. Preprocessing-only
@@ -141,7 +141,7 @@ secondary diagnostics.
 - `challenge_yield` is a deprecated alias for
   `training_reference_challenge_yield`; `unnecessary_intervention_rate` is a
   deprecated alias for `training_reference_unnecessary_intervention_rate`.
-  New paper-facing harm is always the untouched-holdout
+  New research evaluation harm is always the untouched-holdout
   `harmful_intervention_rate`; historical rows without holdout pairs retain a
   documented compatibility fallback rather than being reinterpreted.
 - `challenge_recall` (also exposed as `rescue_recall`) is an optional post-hoc
@@ -204,7 +204,7 @@ fixed-seed dataset-clustered interval; support below 20 is marked unstable.
 Paired ablation effects follow the same independent-unit rule: trials are
 paired by case, perturbation, split seed, model condition, LLM repetition, and
 evaluation variant. Primary intervention comparisons use
-`paper_holdout_delta`. The secondary diagnostics control instead compares
+`evaluation_holdout_delta`. The secondary diagnostics control instead compares
 initial plans: classification uses
 `diagnostics_initial_macro_f1 - ordinary_initial_macro_f1`, while regression
 uses `(ordinary_initial_rmse - diagnostics_initial_rmse) /
@@ -216,9 +216,9 @@ task's neutral tolerance. Invalid initial plans remain in the separate
 paired-validity analysis and are excluded from quality magnitudes, which are
 conditional on jointly valid and evaluable initial plans.
 
-The pooled `paper_holdout_delta` is descriptive because classification uses
+The pooled `evaluation_holdout_delta` is descriptive because classification uses
 absolute macro-F1 points while regression uses relative RMSE improvement.
-Paper reporting therefore emphasizes challenge/intervention/abstention and
+Research evaluation reporting therefore emphasizes challenge/intervention/abstention and
 holdout outcome rates, dataset-level win/tie/loss, and separate classification
 and regression magnitude summaries with clustered CIs.
 

@@ -1,9 +1,9 @@
 {
-  "schema_version": "mlsys-prospective-config-v1",
+  "schema_version": "prospective-evaluation-config-v1",
   "status": "draft",
   "analysis_role": "prospective_generalization",
-  "study_role": "mlsys_four_policy_comparison",
-  "study_name": "fresh-prospective-mlsys-four-policy-comparison",
+  "study_role": "four_policy_comparison",
+  "study_name": "fresh-prospective-evaluation-four-policy-comparison",
   "panel_manifest": "PATH_TO_DRAFT_OR_LATER_FROZEN_PANEL_MANIFEST.json",
   "panel_hash": "FILL_AFTER_PANEL_REVIEW",
   "provider": "FILL_BEFORE_FREEZE",
@@ -22,7 +22,7 @@
   "provenance": {
     "config_hash": "computed_from_canonical_json_before_execution",
     "git_sha": "recorded_at_run_initialization",
-    "schema_version": "mlsys-prospective-config-v1",
+    "schema_version": "prospective-evaluation-config-v1",
     "panel_manifest_copy": "preserve_inside_output_directory",
     "trials_sha256": "computed_after_each_safe_checkpoint"
   },

@@ -64,7 +64,7 @@ from evaluation.metrics import (
     classify_intervention_outcome,
     holdout_neutral_tolerance,
     normalized_performance_delta,
-    paper_holdout_delta,
+    evaluation_holdout_delta,
     raw_holdout_performance_delta,
     normalized_regret,
     regret,
@@ -94,9 +94,10 @@ from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_REPLICATES,
     DEFAULT_BOOTSTRAP_SEED,
 )
-from evaluation.mlsys_prospective import MLSYS_TRIAL_SCHEMA_VERSION, canonical_sha256
+from evaluation.prospective_contract import PROSPECTIVE_TRIAL_SCHEMA_VERSION, canonical_sha256
 
 
+# Historical frozen evaluation defaults retained for reproducibility.
 EXPERIMENT_CONFIG_VERSION = "paper-confirmatory-v1"
 CONFIRMATORY_CONFIG_SNAPSHOT = "evaluation/configs/paper_confirmatory_v1.json"
 
@@ -1336,7 +1337,7 @@ def _run_trial(
     holdout_delta_raw = raw_holdout_performance_delta(
         case.expected_task_type, initial_holdout_metric, final_holdout_metric
     )
-    paired_holdout_delta = paper_holdout_delta(
+    paired_holdout_delta = evaluation_holdout_delta(
         case.expected_task_type,
         initial_holdout_metric,
         final_holdout_metric,
@@ -1464,7 +1465,7 @@ def _run_trial(
         "model_condition_id": config.model_condition_id,
         "trial_id": context["trial_id"],
         "logical_trial_id": context["logical_trial_id"],
-        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+        "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
         "ablation_name": config.ablation_name,
@@ -1780,13 +1781,13 @@ def _run_trial(
         "holdout_rmse_relative_improvement": (
             paired_holdout_delta if case.expected_task_type == "regression" else None
         ),
-        "paper_holdout_delta": paired_holdout_delta,
+        "evaluation_holdout_delta": paired_holdout_delta,
         # Preserve the historical field in its native-unit meaning.  New
-        # paper-facing consumers must use paper_holdout_delta or the explicit
+        # research evaluation consumers must use evaluation_holdout_delta or the explicit
         # task-specific fields above.
         "holdout_intervention_delta": holdout_delta_raw,
         "holdout_intervention_delta_raw": holdout_delta_raw,
-        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use paper_holdout_delta for paper analysis",
+        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use evaluation_holdout_delta for evaluation analysis",
         "holdout_intervention_outcome": holdout_outcome,
         "agent_initial_holdout_split_contract": (agent_holdout or {})
         .get("validation", {})
@@ -1948,7 +1949,7 @@ def _failed_trial_record(
     return {
         "trial_id": trial_id,
         "logical_trial_id": trial_id.removesuffix(f":{config.ablation_name}") if config.ablation_name else trial_id,
-        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+        "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
         "benchmark_case": case.name,
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
@@ -2025,10 +2026,10 @@ def _failed_trial_record(
         "holdout_macro_f1_delta": None,
         "holdout_rmse_delta_raw": None,
         "holdout_rmse_relative_improvement": None,
-        "paper_holdout_delta": None,
+        "evaluation_holdout_delta": None,
         "holdout_intervention_delta": None,
         "holdout_intervention_delta_raw": None,
-        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use paper_holdout_delta for paper analysis",
+        "holdout_intervention_delta_semantics": "deprecated native-unit legacy delta; use evaluation_holdout_delta for evaluation analysis",
         "holdout_intervention_outcome": "not_comparable",
         "intervention_occurred": False,
         "hard_repair_occurred": False,
@@ -2430,7 +2431,7 @@ def run_evaluation(
         respect_environment_model=confirmatory_metadata is None,
     )
     stable_config = {
-        "config_version": "2026-09-04.evaluation.v5-paper-metrics",
+        "config_version": "2026-09-04.evaluation.v5-holdout-metrics",
         "experiment_config_version": config.experiment_config_version,
         "confirmatory_config_snapshot": config.confirmatory_config_snapshot,
         "confirmatory_mode": confirmatory_metadata is not None,
@@ -2541,7 +2542,7 @@ def run_evaluation(
             "holdout_macro_f1_delta": "final_holdout_macro_f1-initial_holdout_macro_f1",
             "holdout_rmse_delta_raw": "initial_holdout_rmse-final_holdout_rmse (diagnostic/native units)",
             "holdout_rmse_relative_improvement": "(initial_holdout_rmse-final_holdout_rmse)/max(abs(initial_holdout_rmse), holdout_rmse_epsilon)",
-            "paper_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
+            "evaluation_holdout_delta": "classification=holdout_macro_f1_delta; regression=holdout_rmse_relative_improvement",
             "repetition_design": "same split and training-only profile; repetitions are aligned by declared slot for balanced analysis, not shared-seed stochastic matches across separate planner calls",
             "objective": "intervention quality; exact family match is diagnostic only",
             "neutrality": "training-side regret uses neutral_tolerance; holdout outcomes use task-specific classification/regression tolerances",
@@ -2569,7 +2570,7 @@ def run_evaluation(
             if confirmatory_metadata is not None else None
         ),
         "run_metadata": _jsonable(dict(run_metadata or {})),
-        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+        "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
         "run_status": "initialized",
     }
     if config.suite == "external":
@@ -2746,7 +2747,7 @@ def run_evaluation(
                                 confirmatory_metadata.get("experiment_config_sha256")
                                 if confirmatory_metadata else None
                             ),
-                            "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+                            "trial_schema_version": PROSPECTIVE_TRIAL_SCHEMA_VERSION,
                             "run_metadata": _jsonable(dict(run_metadata or {})),
                         })
                         for metadata_key in (

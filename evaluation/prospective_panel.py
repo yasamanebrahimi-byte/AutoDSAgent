@@ -1,4 +1,4 @@
-"""Deterministic draft-panel construction for the prospective MLSys study."""
+"""Deterministic draft-panel construction for prospective evaluation."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from evaluation.external_benchmarks import (
     PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION,
     prospective_panel_content_sha256,
 )
-from evaluation.mlsys_prospective import (
-    MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+from evaluation.prospective_contract import (
+    PROSPECTIVE_CONFIG_SCHEMA_VERSION,
     manifest_hash_without_hash_fields,
 )
 
@@ -50,7 +50,7 @@ class PanelBuildOptions:
     classification_count: int = 20
     regression_count: int = 20
     selection_seed: int = 20261008
-    panel_id: str = "mlsys-prospective-draft"
+    panel_id: str = "prospective-evaluation-draft"
     eligibility: PanelEligibility = field(default_factory=PanelEligibility)
 
 
@@ -330,7 +330,7 @@ def build_draft_panel(
     task_entries: list[dict[str, Any]] = []
     for draw, record in enumerate(selected, start=1):
         task_entries.append({
-            "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+            "schema_version": PROSPECTIVE_CONFIG_SCHEMA_VERSION,
             "task_id": int(record["task_id"]),
             "dataset_id": int(record["dataset_id"]),
             "dataset_name": record["dataset_name"],
@@ -347,13 +347,13 @@ def build_draft_panel(
             },
             "provenance": {
                 "source": "OpenML task listing and task metadata",
-                "builder": "scripts/build_mlsys_prospective_panel.py",
+                "builder": "scripts/build_prospective_panel.py",
                 "historical_panel_excluded": True,
             },
         })
     manifest: dict[str, Any] = {
         "manifest_schema_version": PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION,
-        "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+        "schema_version": PROSPECTIVE_CONFIG_SCHEMA_VERSION,
         "status": "draft",
         "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
         "panel_id": configured.panel_id,
@@ -396,7 +396,7 @@ def build_draft_panel(
         },
         "provenance": {
             "openml_api": "lazy; resolved at build time",
-            "builder_schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+            "builder_schema_version": PROSPECTIVE_CONFIG_SCHEMA_VERSION,
             "historical_manifest": "evaluation.external_benchmarks.EXTERNAL_BENCHMARK_MANIFEST",
         },
     }
@@ -420,12 +420,12 @@ def write_draft_panel(manifest: Mapping[str, Any], output_path: str | Path) -> P
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build a deterministic draft OpenML panel for the MLSys study.")
+    parser = argparse.ArgumentParser(description="Build a deterministic draft OpenML panel for prospective evaluation.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--classification-count", type=int, default=20)
     parser.add_argument("--regression-count", type=int, default=20)
     parser.add_argument("--selection-seed", type=int, required=True)
-    parser.add_argument("--panel-id", default="mlsys-prospective-draft")
+    parser.add_argument("--panel-id", default="prospective-evaluation-draft")
     parser.add_argument("--min-rows", type=int, default=100)
     parser.add_argument("--max-rows", type=int, default=100000)
     parser.add_argument("--min-features", type=int, default=2)
