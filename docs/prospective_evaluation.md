@@ -1,9 +1,9 @@
 # Prospective evaluation preparation
 
-This repository now contains preparation infrastructure for a fresh study of
-the reviewer question “Why not simply cross-validate all four fixed candidate
+This repository now contains preparation infrastructure for a fresh evaluation
+of the research question “Why not simply cross-validate all four fixed candidate
 model families?” The historical `trials.jsonl` files are unavailable, so the
-old experiment cannot be reconstructed from summary tables. The new study is
+old experiment cannot be reconstructed from summary tables. The new evaluation is
 prospective: its task panel, seeds, model conditions, repetitions, and
 reporting rules must be reviewed and frozen before execution.
 

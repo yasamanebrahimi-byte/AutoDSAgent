@@ -6,9 +6,17 @@ from pathlib import Path
 
 import pytest
 
+import evaluation.prospective as prospective
+from evaluation.external_benchmarks import (
+    PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION,
+    freeze_prospective_panel_manifest,
+    prospective_panel_content_sha256,
+)
 from evaluation.prospective_panel import PanelBuildOptions, PanelEligibility, build_draft_panel
-from evaluation.prospective_contract import PROSPECTIVE_TRIAL_SCHEMA_VERSION
-from evaluation.external_benchmarks import freeze_prospective_panel_manifest
+from evaluation.prospective_contract import (
+    PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+    PROSPECTIVE_TRIAL_SCHEMA_VERSION,
+)
 from evaluation.validate_prospective_run import ProspectiveValidationError, validate_prospective_run
 
 
@@ -222,6 +230,87 @@ def _write_run(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
     )
     return panel_hash
+
+
+def test_prospective_runner_emits_generic_contract_and_validation_artifacts(tmp_path: Path, monkeypatch):
+    manifest = {
+        "manifest_schema_version": PROSPECTIVE_PANEL_MANIFEST_SCHEMA_VERSION,
+        "panel_id": "panel-wrapper",
+        "status": "frozen",
+        "analysis_role": "prospective_generalization",
+        "panel_selection": {
+            "sampling_frame": "offline fixture",
+            "selection_seed": 9,
+            "inclusion_criteria": ["fixture"],
+            "exclusion_criteria": [],
+        },
+        "tasks": [{
+            "task_id": 123,
+            "dataset_id": 456,
+            "dataset_name": "fixture",
+            "dataset_version": "1",
+            "task_type": "classification",
+            "target": "label",
+            "expected_rows": 100,
+            "expected_features": 4,
+            "expected_classes": 2,
+            "provenance": {"source": "fixture"},
+            "selection_metadata": {"draw": 1},
+        }],
+    }
+    manifest["content_sha256"] = prospective_panel_content_sha256(manifest)
+    panel_path = tmp_path / "panel.json"
+    panel_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def fake_run(output, **kwargs):
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "config.json").write_text(json.dumps({"suite": "local"}), encoding="utf-8")
+        (output / "ablation_summary.json").write_text(json.dumps({}), encoding="utf-8")
+        (output / "trials.jsonl").write_text(
+            json.dumps({"trial_id": "fixture"}) + "\n", encoding="utf-8"
+        )
+        return {"output_dir": str(output), "config": {}, "summary": {}, "trials": []}
+
+    monkeypatch.setattr(prospective, "run_ablation_study", fake_run)
+    result = prospective.run_prospective_experiment(
+        tmp_path / "out",
+        panel_path,
+        split_seeds=[101, 202],
+        offline=True,
+    )
+    output = tmp_path / "out"
+    config = json.loads((output / "config.json").read_text(encoding="utf-8"))
+    assert result["config"] == config
+    assert (
+        config["schema_version"]
+        == "prospective-evaluation-config-v1"
+        == PROSPECTIVE_CONFIG_SCHEMA_VERSION
+    )
+    assert config["study_role"] == "four_policy_comparison"
+    assert "prospective_validation_ready" in config
+
+    trial = json.loads((output / "trials.jsonl").read_text(encoding="utf-8").strip())
+    assert (
+        trial["trial_schema_version"]
+        == "prospective-evaluation-trial-v1"
+        == PROSPECTIVE_TRIAL_SCHEMA_VERSION
+    )
+    assert (output / "prospective_validation_report.json").is_file()
+    assert not (output / "mlsys_validation_report.json").exists()
+
+    output_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in output.rglob("*")
+        if path.is_file()
+    )
+    for obsolete in (
+        "mlsys_validation_ready",
+        "mlsys-prospective-config-v1",
+        "mlsys-prospective-trial-v1",
+        "mlsys_four_policy_comparison",
+        "mlsys_validation_report.json",
+    ):
+        assert obsolete not in output_text
 
 
 def test_complete_synthetic_run_is_ready(tmp_path: Path):
