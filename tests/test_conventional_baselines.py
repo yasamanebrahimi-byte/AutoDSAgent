@@ -25,6 +25,10 @@ from evaluation.external_benchmarks import (
     prospective_panel_content_sha256,
     validate_prospective_panel_manifest,
 )
+from evaluation.prospective_contract import (
+    PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+    PROSPECTIVE_TRIAL_SCHEMA_VERSION,
+)
 from app.validation import freeze_supervised_split
 
 
@@ -621,8 +625,30 @@ def test_prospective_wrapper_stamps_role_manifest_and_split_seeds(tmp_path: Path
         split_seeds=[101, 202],
         offline=True,
     )
-    assert result["config"]["analysis_role"] == "prospective_generalization"
-    assert result["config"]["prospective_split_seeds"] == [101, 202]
-    trial = json.loads((tmp_path / "out" / "trials.jsonl").read_text().strip())
+    output = tmp_path / "out"
+    config = json.loads((output / "config.json").read_text(encoding="utf-8"))
+    assert result["config"] == config
+    assert config["analysis_role"] == "prospective_generalization"
+    assert config["schema_version"] == PROSPECTIVE_CONFIG_SCHEMA_VERSION
+    assert config["study_role"] == "four_policy_comparison"
+    assert config["prospective_split_seeds"] == [101, 202]
+    assert "prospective_validation_ready" in config
+    trial = json.loads((output / "trials.jsonl").read_text(encoding="utf-8").strip())
     assert trial["analysis_role"] == "prospective_generalization"
     assert trial["prospective_split_seeds"] == [101, 202]
+    assert trial["trial_schema_version"] == PROSPECTIVE_TRIAL_SCHEMA_VERSION
+    assert (output / "prospective_validation_report.json").is_file()
+    assert not (output / "mlsys_validation_report.json").exists()
+    output_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in output.rglob("*")
+        if path.is_file()
+    )
+    for obsolete in (
+        "mlsys_validation_ready",
+        "mlsys-prospective-config-v1",
+        "mlsys-prospective-trial-v1",
+        "mlsys_four_policy_comparison",
+        "mlsys_validation_report.json",
+    ):
+        assert obsolete not in output_text
