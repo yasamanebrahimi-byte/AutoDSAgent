@@ -213,6 +213,32 @@ def validate_prospective_panel_manifest(
             raise ValueError(f"tasks[{index}] regression entries must not declare expected_classes.")
         if not isinstance(task["dataset_version"], (str, int)) or isinstance(task["dataset_version"], bool):
             raise ValueError(f"tasks[{index}].dataset_version must be a string or integer version.")
+    selected_counts = {
+        "classification": sum(task.get("task_type") == "classification" for task in tasks),
+        "regression": sum(task.get("task_type") == "regression" for task in tasks),
+    }
+    requested_counts = selection.get("requested_counts")
+    if requested_counts is not None:
+        if not isinstance(requested_counts, Mapping):
+            raise ValueError("panel_selection.requested_counts must be an object when declared.")
+        mismatches = {
+            task_type: {
+                "requested": int(requested_counts.get(task_type, 0)),
+                "selected": selected_counts[task_type],
+            }
+            for task_type in ("classification", "regression")
+            if int(requested_counts.get(task_type, 0)) != selected_counts[task_type]
+        }
+        override = selection.get("count_shortfall_override")
+        override_approved = isinstance(override, Mapping) and override.get("approved") is True
+        if (status == "frozen" or require_frozen) and mismatches and not override_approved:
+            raise ValueError(
+                "A prospective panel cannot be frozen with requested-count shortfalls: "
+                + json.dumps(mismatches, sort_keys=True)
+            )
+        if (status == "frozen" or require_frozen) and mismatches and override_approved:
+            if not str(override.get("reason", "")).strip():
+                raise ValueError("A count-shortfall override must include an auditable reason.")
     content_hash = prospective_panel_content_sha256(manifest)
     declared_hash = manifest.get("content_sha256")
     if status == "frozen" or require_frozen:
@@ -226,8 +252,21 @@ def validate_prospective_panel_manifest(
         "panel_id": manifest.get("panel_id"),
         "selection_seed": seed,
         "task_count": len(tasks),
-        "classification_count": sum(task.get("task_type") == "classification" for task in tasks),
-        "regression_count": sum(task.get("task_type") == "regression" for task in tasks),
+        "classification_count": selected_counts["classification"],
+        "regression_count": selected_counts["regression"],
+        "requested_counts": dict(requested_counts) if isinstance(requested_counts, Mapping) else None,
+        "count_shortfall": (
+            {
+                task_type: {
+                    "requested": int(requested_counts.get(task_type, 0)),
+                    "selected": selected_counts[task_type],
+                }
+                for task_type in ("classification", "regression")
+                if isinstance(requested_counts, Mapping)
+                and int(requested_counts.get(task_type, 0)) != selected_counts[task_type]
+            }
+            if isinstance(requested_counts, Mapping) else {}
+        ),
         "content_sha256": content_hash,
         "manifest_sha256": hashlib.sha256(
             json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -235,13 +274,47 @@ def validate_prospective_panel_manifest(
     }
 
 
-def freeze_prospective_panel_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_prospective_panel_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    allow_count_shortfall: bool = False,
+    shortfall_reason: str | None = None,
+) -> dict[str, Any]:
     """Return a reviewed draft with its immutable content hash and frozen status."""
 
     draft = deepcopy(dict(manifest))
     if draft.get("status") != "draft":
         raise ValueError("Only a draft prospective panel can be frozen.")
     validate_prospective_panel_manifest(draft)
+    selection = draft.get("panel_selection")
+    requested_counts = selection.get("requested_counts") if isinstance(selection, Mapping) else None
+    if isinstance(requested_counts, Mapping):
+        selected_counts = {
+            "classification": sum(task.get("task_type") == "classification" for task in draft["tasks"]),
+            "regression": sum(task.get("task_type") == "regression" for task in draft["tasks"]),
+        }
+        mismatches = {
+            task_type: {
+                "requested": int(requested_counts.get(task_type, 0)),
+                "selected": selected_counts[task_type],
+            }
+            for task_type in ("classification", "regression")
+            if int(requested_counts.get(task_type, 0)) != selected_counts[task_type]
+        }
+        if mismatches:
+            if not allow_count_shortfall:
+                raise ValueError(
+                    "Cannot freeze a prospective panel with requested-count shortfalls: "
+                    + json.dumps(mismatches, sort_keys=True)
+                )
+            if not str(shortfall_reason or "").strip():
+                raise ValueError("shortfall_reason is required when allowing a panel count shortfall.")
+            selection["count_shortfall_override"] = {
+                "approved": True,
+                "reason": str(shortfall_reason),
+                "requested_counts": dict(requested_counts),
+                "selected_counts": selected_counts,
+            }
     draft["status"] = "frozen"
     draft["content_sha256"] = prospective_panel_content_sha256(draft)
     validate_prospective_panel_manifest(draft, require_frozen=True)

@@ -24,7 +24,13 @@ from evaluation.external_benchmarks import (
     prospective_panel_content_sha256,
     validate_prospective_panel_manifest,
 )
-from evaluation.mlsys_prospective import MLSYS_TRIAL_SCHEMA_VERSION
+from app.empirical_challenge_probe import EmpiricalProbePolicy
+from evaluation.metrics import DEFAULT_THRESHOLDS
+from evaluation.mlsys_prospective import (
+    MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+    MLSYS_TRIAL_SCHEMA_VERSION,
+    canonical_sha256,
+)
 
 
 def run_prospective_experiment(
@@ -76,8 +82,40 @@ def run_prospective_experiment(
         _atomic_copy(source_manifest, copied_manifest)
     panel_manifest_hash = hashlib_manifest(manifest)
     panel_content_hash = prospective_panel_content_sha256(manifest)
+    selected_ablations = tuple(ablations or ("llm_only", "probe_direct", "full"))
+    effective_planner_model = planner_model or model
+    effective_reconciler_model = reconciler_model or model
+    repetition_ids = [f"rep_{index + 1:03d}" for index in range(int(repetitions))]
+    scientific_config = {
+        "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+        "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
+        "panel_manifest_sha256": panel_manifest_hash,
+        "panel_content_sha256": panel_content_hash,
+        "split_seeds": list(selected_seeds),
+        "model_conditions": [{
+            "condition_id": "default",
+            "provider": provider,
+            "planner_model": effective_planner_model,
+            "reconciler_model": effective_reconciler_model,
+            "llm_repetitions": int(repetitions),
+            "llm_repetition_ids": repetition_ids,
+        }],
+        "runtime_source_arms": list(selected_ablations),
+        "cv_folds": EmpiricalProbePolicy().cv_folds,
+        "intervention_thresholds": dict(DEFAULT_THRESHOLDS),
+        "generation_settings": {},
+    }
+    scientific_config_hash = canonical_sha256(scientific_config)
     prospective_metadata = {
         "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
+        "schema_version": MLSYS_PROSPECTIVE_CONFIG_SCHEMA_VERSION,
+        "study_role": "mlsys_four_policy_comparison",
+        "experiment_config_sha256": scientific_config_hash,
+        "prospective_experiment_config_sha256": scientific_config_hash,
+        "prospective_experiment_config": scientific_config,
+        "model_conditions": scientific_config["model_conditions"],
+        "runtime_source_arms": list(selected_ablations),
+        "repetitions": int(repetitions),
         "prospective_panel_id": manifest.get("panel_id"),
         "prospective_panel_manifest_sha256": panel_manifest_hash,
         "prospective_panel_content_sha256": panel_content_hash,
@@ -99,7 +137,7 @@ def run_prospective_experiment(
         reconciler_model=reconciler_model,
         offline=offline,
         require_live=require_live,
-        ablations=ablations or ("llm_only", "probe_direct", "full"),
+        ablations=selected_ablations,
         case_names=case_names,
         resume=resume,
         # The panel itself is supplied explicitly as cases; no historical
@@ -113,6 +151,7 @@ def run_prospective_experiment(
     summary_path = output / "ablation_summary.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config.update(metadata)
+    config["experiment_config_sha256"] = scientific_config_hash
     config["panel_hash"] = panel_content_hash
     config["run_status"] = config.get("run_status", "complete")
     from evaluation.validate_mlsys_run import validate_mlsys_run
@@ -148,6 +187,8 @@ def _annotate_prospective_trials(output: Path, metadata: dict[str, Any]) -> None
                 if isinstance(value, dict):
                     value.update({
                         "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
+                        "experiment_config_sha256": metadata["experiment_config_sha256"],
+                        "prospective_experiment_config_sha256": metadata["prospective_experiment_config_sha256"],
                         "prospective_panel_id": metadata["prospective_panel_id"],
                         "prospective_panel_content_sha256": metadata["prospective_panel_content_sha256"],
                         "prospective_split_seeds": metadata["prospective_split_seeds"],

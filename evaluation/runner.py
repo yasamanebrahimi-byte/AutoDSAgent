@@ -2751,6 +2751,8 @@ def run_evaluation(
                         })
                         for metadata_key in (
                             "analysis_role",
+                            "experiment_config_sha256",
+                            "prospective_experiment_config_sha256",
                             "prospective_panel_id",
                             "prospective_panel_manifest_sha256",
                             "prospective_panel_content_sha256",

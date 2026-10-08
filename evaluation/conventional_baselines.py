@@ -446,7 +446,7 @@ def _challenger_preprocessing(row: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def _initial_valid(row: Mapping[str, Any]) -> bool | None:
-    value = _first(row, "agent_initial_valid")
+    value = _first(row, "agent_initial_valid", "initial_plan_valid", "initial_valid")
     if value is not None:
         return _validity_value(value)
     nested = _mapping(row.get("agent_initial")).get("valid")
@@ -469,7 +469,7 @@ def _challenger_valid(row: Mapping[str, Any]) -> bool | None:
     parsed = _validity_value(validation)
     if parsed is not None:
         return parsed
-    for key in ("deterministic_valid", "deterministic_challenger_valid"):
+    for key in ("deterministic_valid", "deterministic_challenger_valid", "challenger_valid"):
         if row.get(key) is not None:
             parsed = _validity_value(row.get(key))
             if parsed is not None:
@@ -480,6 +480,22 @@ def _challenger_valid(row: Mapping[str, Any]) -> bool | None:
     # A family name is not evidence that the persisted challenger passed hard
     # validation.  Returning None makes the missing-data path explicit.
     return None if _challenger_family(row) else None
+
+
+def _pairwise_probe_required(row: Mapping[str, Any] | None) -> bool:
+    """Whether raw pairwise CV is required by the persisted hard-validation state."""
+
+    if not row:
+        return False
+    initial_family = _initial_family(row)
+    challenger_family = _challenger_family(row)
+    return bool(
+        _initial_valid(row) is True
+        and _challenger_valid(row) is True
+        and initial_family
+        and challenger_family
+        and initial_family != challenger_family
+    )
 
 
 def _candidate_metrics(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -833,6 +849,7 @@ def _holdout_with_recompute(
 
 
 def _base_provenance(row: Mapping[str, Any], source_run: str | None) -> dict[str, Any]:
+    metadata = _mapping(row.get("run_metadata"))
     return {
         "source_evaluation_run": row.get("source_run") or source_run,
         "source_file": row.get("source_file"),
@@ -858,9 +875,23 @@ def _base_provenance(row: Mapping[str, Any], source_run: str | None) -> dict[str
         "provider": row.get("provider"),
         "planner_model": row.get("planner_model"),
         "reconciler_model": row.get("reconciler_model"),
-        "panel_hash": row.get("panel_hash") or row.get("prospective_panel_content_sha256"),
-        "prospective_panel_manifest_sha256": row.get("prospective_panel_manifest_sha256"),
-        "config_sha256": row.get("config_sha256") or row.get("experiment_config_sha256"),
+        "panel_hash": (
+            row.get("panel_hash")
+            or row.get("prospective_panel_content_sha256")
+            or metadata.get("panel_hash")
+            or metadata.get("prospective_panel_content_sha256")
+        ),
+        "prospective_panel_manifest_sha256": (
+            row.get("prospective_panel_manifest_sha256")
+            or metadata.get("prospective_panel_manifest_sha256")
+        ),
+        "config_sha256": (
+            row.get("experiment_config_sha256")
+            or row.get("prospective_experiment_config_sha256")
+            or row.get("config_sha256")
+            or metadata.get("experiment_config_sha256")
+            or metadata.get("prospective_experiment_config_sha256")
+        ),
         "trial_schema_version": row.get("trial_schema_version") or row.get("schema_version"),
     }
 
@@ -905,7 +936,10 @@ def _derived_row(
     recomputed_cv = reference_recomputed
     baseline_required_role = {
         "llm_only": "llm_only_holdout",
-        "pairwise_cv_always": "empirical_probe",
+        # The probe-direct row is the authoritative persisted decision row.
+        # Raw empirical evidence is conditional: agreement and hard-validation
+        # cases intentionally have no empirical_probe artifact.
+        "pairwise_cv_always": "probe_direct_selective",
         "probe_direct": "probe_direct_selective",
         "all_four_cv": "full_all_four_empirical_reference",
     }[baseline]
@@ -972,14 +1006,23 @@ def _derived_row(
         selection_source = f"missing_source_arm:{baseline_required_role}"
         reused_cached_scores = False
 
-    missing: list[str] = [f"missing companion source role: {role}" for role in missing_source_roles]
+    pairwise_probe_required = _pairwise_probe_required(source_row) if baseline == "pairwise_cv_always" else False
+    missing: list[str] = [
+        f"missing companion source role: {role}"
+        for role in missing_source_roles
+        if not (
+            baseline == "pairwise_cv_always"
+            and role == "empirical_probe"
+            and not pairwise_probe_required
+        )
+    ]
     if (source_roles or {}).get(baseline_required_role) is None:
         missing.append(f"required source arm for {baseline}: {baseline_required_role}")
     if baseline in {"pairwise_cv_always", "probe_direct"} and challenger_valid is None:
         missing.append("deterministic challenger validity/actionability status")
     if selected_family is None and baseline != "pairwise_cv_always":
         missing.append("selected_baseline_family")
-    if baseline == "pairwise_cv_always" and not pair_selection:
+    if baseline == "pairwise_cv_always" and pairwise_probe_required and not pair_selection:
         missing.append("empirical_probe.proposal_a/proposal_b raw mean scores")
     if selected_family is not None and selected_preprocessing is None:
         missing.append("selected candidate preprocessing contract")
@@ -1300,7 +1343,11 @@ def derive_baseline_trials(
                 errors.append(f"trial {all4_source.get('trial_id')!r}, all_four_cv reference: {exc}")
         else:
             reference_error = "full/all-four empirical-reference source row is missing"
-        probe_source = group["probe"]
+        # ``probe_direct`` persists the initial/challenger validity and plan
+        # metadata even when no empirical probe was scientifically required.
+        # Use that row for the conditional selector and pass probe=None in the
+        # legitimate no-probe cases; never synthesize CV evidence.
+        probe_source = group["probe"] or group["direct"]
         pairwise = None
         initial_family = _initial_family(probe_source or {})
         challenger_family = _challenger_family(probe_source or {})
@@ -1328,7 +1375,7 @@ def derive_baseline_trials(
             elif baseline == "probe_direct":
                 source = group["direct"]
             elif baseline == "pairwise_cv_always":
-                source = group["probe"]
+                source = group["probe"] or group["direct"]
             else:
                 source = group["all4"]
             if source is None:
@@ -1841,15 +1888,20 @@ def _annotate_source_row(
     })
     # These defaults make grouping robust when a source arm persisted only
     # the trial payload and kept run metadata in config.json.
+    config_metadata = _mapping(config.get("run_metadata"))
     for key in (
         "ablation_name", "model_condition_id", "provider", "planner_model",
         "planner_model_effective", "reconciler_model", "evaluation_id",
         "experiment_config_version", "benchmark_suite_version", "test_size",
-        "config_sha256", "trials_jsonl_sha256", "run_status", "panel_hash",
+        "config_sha256", "experiment_config_sha256", "prospective_experiment_config_sha256",
+        "trials_jsonl_sha256", "run_status", "panel_hash",
         "prospective_panel_content_sha256", "prospective_panel_manifest_sha256",
     ):
-        if annotated.get(key) is None and config.get(key) is not None:
-            annotated[key] = config.get(key)
+        configured_value = config.get(key)
+        if configured_value is None:
+            configured_value = config_metadata.get(key)
+        if annotated.get(key) is None and configured_value is not None:
+            annotated[key] = configured_value
     if annotated.get("ablation_name") is None and ablation is not None:
         annotated["ablation_name"] = ablation
     if annotated.get("model_condition_id") is None:

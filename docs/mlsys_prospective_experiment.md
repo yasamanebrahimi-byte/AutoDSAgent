@@ -47,7 +47,9 @@ The builder uses a lazy OpenML dependency, excludes the checked-in historical
 panel, applies explicit row/feature/class filters, samples independently by
 task type after canonical sorting, and records rejected tasks and reasons. The
 manifest always starts with `"status": "draft"`; this command never freezes a
-panel. Reviewers must later choose the final sampling frame, eligibility
+panel. Draft output records requested and selected counts, including any
+shortfall. Normal freezing rejects a count mismatch unless an explicit,
+reasoned override is recorded in the frozen manifest. Reviewers must later choose the final sampling frame, eligibility
 filters, duplicate/version policy, panel membership, and exclusion record.
 
 The checked-in configuration checklist is
@@ -104,10 +106,19 @@ python -m evaluation.validate_mlsys_run path/to/mlsys_prospective_run --strict
 ```
 
 The command writes `mlsys_validation_report.json` and a human-readable text
-report. It checks the three source arms, initial plans and preprocessing
-contracts, normalized raw pairwise evidence, all four family CV records, split
-and repetition identities, panel/config hashes, holdout results, supported
-schema versions, duplicate trial IDs, and run status. Strict mode exits
+report. Expected logical groups come from the frozen panel and declared
+experiment configuration (panel tasks × split seeds × model conditions ×
+repetitions), not from rows that happen to be present. The report separates
+expected, observed, completely missing, incomplete, and complete groups. It
+checks the three source arms, initial plans and preprocessing contracts,
+normalized raw pairwise evidence, all four family CV records, split and
+repetition identities, panel/config hashes, holdout results, supported schema
+versions, duplicate trial IDs, and run status. Raw pairwise evidence is
+required only for an actionable disagreement where both plans are valid and
+their families differ; agreement and hard-validation repair cases are valid
+no-probe cases. The canonical experiment-config hash is mandatory for the new
+strict prospective workflow, while historical/non-prospective rows remain
+readable. Strict mode exits
 nonzero unless the report says:
 
 ```text

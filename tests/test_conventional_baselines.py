@@ -355,6 +355,80 @@ def test_realistic_cross_ablation_tree_is_grouped_before_derivation(tmp_path: Pa
     assert "condition-a" in (output / "baseline_summary.md").read_text(encoding="utf-8")
 
 
+def _no_probe_rows(*, initial_valid: bool = True, challenger_valid: bool = True, agree: bool = False):
+    rows = [_arm_row(arm, "rep_001") for arm in ("llm_only", "probe_direct", "full")]
+    direct = rows[1]
+    direct["empirical_probe"] = None
+    direct["pairwise_cv_evidence"] = None
+    direct["agent_initial_valid"] = initial_valid
+    direct["deterministic_valid"] = challenger_valid
+    if agree:
+        direct["deterministic_method"] = "linear"
+        direct["deterministic_preprocessing"] = _contract()
+        direct["final_method"] = "linear"
+        direct["final_preprocessing"] = _contract()
+    elif not initial_valid:
+        direct["final_method"] = "tree_ensemble"
+        direct["final_preprocessing"] = _contract(scaling="none")
+    elif not challenger_valid:
+        direct["final_method"] = "linear"
+        direct["final_preprocessing"] = _contract()
+    return rows
+
+
+def test_pairwise_derivation_accepts_agreement_without_probe():
+    derived = derive_baseline_trials(
+        _no_probe_rows(agree=True), baselines=["pairwise_cv_always"], strict=True
+    )
+    row = derived[0]
+    assert row["baseline_status"] == "evaluated"
+    assert row["selected_baseline_family"] == "linear"
+    assert row["empirical_probe_fit_count"] == 0
+    assert row["counterfactual_probe_invocation_count"] == 0
+
+
+def test_pairwise_derivation_repairs_hard_invalid_initial_without_probe():
+    derived = derive_baseline_trials(
+        _no_probe_rows(initial_valid=False), baselines=["pairwise_cv_always"], strict=True
+    )
+    assert derived[0]["baseline_status"] == "evaluated"
+    assert derived[0]["selected_baseline_family"] == "tree_ensemble"
+
+
+def test_pairwise_derivation_retains_incumbent_when_challenger_is_invalid_without_probe():
+    derived = derive_baseline_trials(
+        _no_probe_rows(challenger_valid=False), baselines=["pairwise_cv_always"], strict=True
+    )
+    assert derived[0]["baseline_status"] == "evaluated"
+    assert derived[0]["selected_baseline_family"] == "linear"
+
+
+def test_pairwise_derivation_rejects_missing_probe_for_valid_disagreement():
+    with pytest.raises(MissingHistoricalFields):
+        derive_baseline_trials(
+            _no_probe_rows(), baselines=["pairwise_cv_always"], strict=True
+        )
+
+
+def test_analyzer_accepts_no_probe_agreement_end_to_end(tmp_path: Path):
+    source = tmp_path / "source"
+    output = tmp_path / "derived"
+    for row in _no_probe_rows(agree=True):
+        arm = str(row["ablation_name"])
+        directory = source / arm
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "config.json").write_text(
+            json.dumps({"ablation_name": arm, "model_condition_id": "condition-a"}),
+            encoding="utf-8",
+        )
+        (directory / "trials.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    result = analyze_result_directory(
+        source, output, strict=True, baselines=["pairwise_cv_always"], bootstrap_replicates=5
+    )
+    assert result["trials"][0]["baseline_status"] == "evaluated"
+    assert result["trials"][0]["selected_baseline_family"] == "linear"
+
+
 def test_cross_ablation_missing_companion_is_explicit(tmp_path: Path):
     source = tmp_path / "source"
     output = tmp_path / "derived"
