@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -22,6 +24,7 @@ from evaluation.external_benchmarks import (
     prospective_panel_content_sha256,
     validate_prospective_panel_manifest,
 )
+from evaluation.mlsys_prospective import MLSYS_TRIAL_SCHEMA_VERSION
 
 
 def run_prospective_experiment(
@@ -59,6 +62,9 @@ def run_prospective_experiment(
     if output == source_manifest:
         raise ValueError("Prospective experiment output must be separate from the panel manifest.")
     copied_manifest = output / "prospective_task_panel_manifest.json"
+    if not resume and output.exists() and any(output.iterdir()):
+        raise ValueError("Prospective output directory already exists; use --resume or choose a new directory.")
+    output.mkdir(parents=True, exist_ok=True)
     if resume:
         if not copied_manifest.is_file():
             raise ValueError("Prospective resume requires the copied panel manifest artifact.")
@@ -66,6 +72,21 @@ def run_prospective_experiment(
         validate_prospective_panel_manifest(existing_manifest, require_frozen=True)
         if hashlib_manifest(existing_manifest) != hashlib_manifest(manifest):
             raise ValueError("Prospective resume panel manifest differs from the existing output artifact.")
+    else:
+        _atomic_copy(source_manifest, copied_manifest)
+    panel_manifest_hash = hashlib_manifest(manifest)
+    panel_content_hash = prospective_panel_content_sha256(manifest)
+    prospective_metadata = {
+        "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
+        "prospective_panel_id": manifest.get("panel_id"),
+        "prospective_panel_manifest_sha256": panel_manifest_hash,
+        "prospective_panel_content_sha256": panel_content_hash,
+        "panel_hash": panel_content_hash,
+        "prospective_panel_manifest_path": str(copied_manifest),
+        "prospective_split_seeds": list(selected_seeds),
+        "split_selection_rule": "explicitly declared before execution; not selected from outcomes",
+        "historical_confirmatory_manifest_used": False,
+    }
 
     result = run_ablation_study(
         output,
@@ -78,31 +99,35 @@ def run_prospective_experiment(
         reconciler_model=reconciler_model,
         offline=offline,
         require_live=require_live,
-        ablations=ablations,
+        ablations=ablations or ("llm_only", "probe_direct", "full"),
         case_names=case_names,
         resume=resume,
         # The panel itself is supplied explicitly as cases; no historical
         # confirmatory manifest is accepted on this prospective path.
         suite="local",
+        run_metadata=prospective_metadata,
     )
-    if not resume:
-        shutil.copyfile(source_manifest, copied_manifest)
-    metadata = {
-        "analysis_role": PROSPECTIVE_ANALYSIS_ROLE,
-        "prospective_panel_id": manifest.get("panel_id"),
-        "prospective_panel_manifest_sha256": hashlib_manifest(manifest),
-        "prospective_panel_content_sha256": prospective_panel_content_sha256(manifest),
-        "prospective_panel_manifest_path": str(copied_manifest),
-        "prospective_split_seeds": list(selected_seeds),
-        "split_selection_rule": "explicitly declared before execution; not selected from outcomes",
-        "historical_confirmatory_manifest_used": False,
-    }
+    metadata = prospective_metadata
     _annotate_prospective_trials(output, metadata)
     config_path = output / "config.json"
     summary_path = output / "ablation_summary.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config.update(metadata)
-    config_path.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+    config["panel_hash"] = panel_content_hash
+    config["run_status"] = config.get("run_status", "complete")
+    from evaluation.validate_mlsys_run import validate_mlsys_run
+
+    validation_report = validate_mlsys_run(output)
+    config["mlsys_validation_ready"] = bool(
+        validation_report.get("ready_for_baseline_derivation")
+    )
+    config["run_status"] = (
+        "complete"
+        if config["mlsys_validation_ready"] and config.get("run_status") == "complete"
+        else "incomplete/interrupted"
+    )
+    metadata["mlsys_validation_ready"] = config["mlsys_validation_ready"]
+    _atomic_write_text(config_path, json.dumps(config, indent=2, sort_keys=True))
     if summary_path.is_file():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         summary.update(metadata)
@@ -126,12 +151,38 @@ def _annotate_prospective_trials(output: Path, metadata: dict[str, Any]) -> None
                         "prospective_panel_id": metadata["prospective_panel_id"],
                         "prospective_panel_content_sha256": metadata["prospective_panel_content_sha256"],
                         "prospective_split_seeds": metadata["prospective_split_seeds"],
+                        "panel_hash": metadata["panel_hash"],
+                        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
                     })
                 rows.append(value)
-        trials_path.write_text(
+        _atomic_write_text(
+            trials_path,
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
-            encoding="utf-8",
         )
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_copy(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.tmp")
+    shutil.copyfile(source, temporary)
+    os.replace(temporary, target)
 
 
 def hashlib_manifest(manifest: dict[str, Any]) -> str:

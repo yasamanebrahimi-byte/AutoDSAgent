@@ -360,6 +360,24 @@ def select_all_four_cv(
 
     if not isinstance(candidate_cv_metrics, Mapping):
         raise MissingHistoricalFields("candidate_cv_metrics is missing")
+    missing_families = [
+        method for method in SUPPORTED_METHODS
+        if not isinstance(candidate_cv_metrics.get(method), Mapping)
+    ]
+    if missing_families:
+        raise MissingHistoricalFields(
+            "all_four_cv requires one persisted CV record for every fixed family; "
+            f"missing: {', '.join(missing_families)}"
+        )
+    failed_families = [
+        method for method in SUPPORTED_METHODS
+        if _mapping(candidate_cv_metrics[method]).get("status") != "evaluated"
+    ]
+    if failed_families:
+        raise MissingHistoricalFields(
+            "all_four_cv requires successful training-only CV for every fixed family; "
+            f"failed: {', '.join(failed_families)}"
+        )
     selected = select_empirical_reference_from_candidates(candidate_cv_metrics, task_type)
     best = selected.get("best_method")
     candidate = _mapping(candidate_cv_metrics.get(best)) if best else {}
@@ -840,6 +858,10 @@ def _base_provenance(row: Mapping[str, Any], source_run: str | None) -> dict[str
         "provider": row.get("provider"),
         "planner_model": row.get("planner_model"),
         "reconciler_model": row.get("reconciler_model"),
+        "panel_hash": row.get("panel_hash") or row.get("prospective_panel_content_sha256"),
+        "prospective_panel_manifest_sha256": row.get("prospective_panel_manifest_sha256"),
+        "config_sha256": row.get("config_sha256") or row.get("experiment_config_sha256"),
+        "trial_schema_version": row.get("trial_schema_version") or row.get("schema_version"),
     }
 
 
@@ -1109,6 +1131,23 @@ def _derived_row(
         "selection_metric": "macro_f1" if task_type == "classification" else "rmse",
         "selection_higher_is_better": _direction(task_type),
         "selection_cv_values": selection_scores,
+        "raw_cv_values": (
+            selection_scores
+            if baseline == "pairwise_cv_always"
+            else {
+                family: {
+                    "mean": _mapping(value).get("primary_mean"),
+                    "metric": _mapping(value).get("primary_metric"),
+                    "fold_scores": _mapping(_mapping(value).get("metrics")).get(
+                        _mapping(value).get("primary_metric"), {}
+                    ).get("folds"),
+                    "status": _mapping(value).get("status"),
+                }
+                for family, value in candidate_metrics.items()
+                if family in SUPPORTED_METHODS
+            }
+            if baseline == "all_four_cv" else selection_scores
+        ),
         "all_four_cv_selected_family": all4_family,
         "all_four_cv_best_primary_mean": all4_score,
         "candidate_set_contains_all4_winner": bool(
@@ -1806,6 +1845,8 @@ def _annotate_source_row(
         "ablation_name", "model_condition_id", "provider", "planner_model",
         "planner_model_effective", "reconciler_model", "evaluation_id",
         "experiment_config_version", "benchmark_suite_version", "test_size",
+        "config_sha256", "trials_jsonl_sha256", "run_status", "panel_hash",
+        "prospective_panel_content_sha256", "prospective_panel_manifest_sha256",
     ):
         if annotated.get(key) is None and config.get(key) is not None:
             annotated[key] = config.get(key)

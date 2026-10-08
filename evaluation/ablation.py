@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean, median
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from evaluation.benchmarks import BenchmarkCase, default_benchmark_cases
 from evaluation.runner import EXPERIMENT_CONFIG_VERSION, run_evaluation
@@ -1001,6 +1001,7 @@ def run_ablation_study(
     suite: str = "local",
     tier: str | None = None,
     confirmatory_config_path: str | Path | None = None,
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if require_live and offline:
         raise ValueError("require_live cannot be combined with offline mode.")
@@ -1294,6 +1295,9 @@ def run_ablation_study(
         "config_mismatch_detected": False,
         "confirmatory_valid": None,
         "evaluation_objective": "intervention-quality-v1",
+        "run_status": "initialized",
+        "run_metadata": dict(run_metadata or {}),
+        "trial_schema_version": "mlsys-prospective-trial-v1",
     }
     if frozen_conditions is not None:
         root_config.update({
@@ -1402,6 +1406,7 @@ def run_ablation_study(
                 model_condition_id=condition_id,
                 llm_repetition_ids=condition_ids,
                 generation_settings=dict(condition.get("generation_settings", {}) or {}),
+                run_metadata=run_metadata,
             )
             condition_results[condition_id] = result
             combined_rows.extend(result["trials"])
@@ -1417,6 +1422,15 @@ def run_ablation_study(
         trial_rows[spec.name] = combined_rows
 
     central = [_health_row(name, results[name], all_specs[name]) for name in selected_names]
+    root_config["run_status"] = (
+        "complete"
+        if trial_rows and all(
+            row.get("trial_status") != "failed"
+            for rows in trial_rows.values()
+            for row in rows
+        )
+        else "incomplete/interrupted"
+    )
     summaries = {name: results[name]["summary"] for name in selected_names}
     rows_by_name = {name: trial_rows[name] for name in selected_names}
     pairs = PRIMARY_PAIRED_COMPARISON_PAIRS
@@ -1619,7 +1633,7 @@ def run_ablation_study(
         })
         combined.update(root_config)
         combined["confirmatory_valid"] = root_config["confirmatory_valid"]
-        config_path.write_text(json.dumps(root_config, indent=2, sort_keys=True), encoding="utf-8")
+    config_path.write_text(json.dumps(root_config, indent=2, sort_keys=True), encoding="utf-8")
     (root / "ablation_summary.json").write_text(
         json.dumps(combined, indent=2, sort_keys=True), encoding="utf-8"
     )

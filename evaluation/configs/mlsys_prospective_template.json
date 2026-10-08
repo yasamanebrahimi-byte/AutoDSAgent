@@ -1,0 +1,36 @@
+{
+  "schema_version": "mlsys-prospective-config-v1",
+  "status": "draft",
+  "analysis_role": "prospective_generalization",
+  "study_role": "mlsys_four_policy_comparison",
+  "study_name": "fresh-prospective-mlsys-four-policy-comparison",
+  "panel_manifest": "PATH_TO_DRAFT_OR_LATER_FROZEN_PANEL_MANIFEST.json",
+  "panel_hash": "FILL_AFTER_PANEL_REVIEW",
+  "provider": "FILL_BEFORE_FREEZE",
+  "model": "FILL_BEFORE_FREEZE",
+  "model_conditions": [],
+  "repetitions": null,
+  "split_seeds": [],
+  "runtime_source_arms": [
+    "llm_only",
+    "probe_direct",
+    "full"
+  ],
+  "cv_folds": 3,
+  "output_directory": "PATH_TO_NEW_LOCAL_OUTPUT_DIRECTORY",
+  "strict_validation": true,
+  "provenance": {
+    "config_hash": "computed_from_canonical_json_before_execution",
+    "git_sha": "recorded_at_run_initialization",
+    "schema_version": "mlsys-prospective-config-v1",
+    "panel_manifest_copy": "preserve_inside_output_directory",
+    "trials_sha256": "computed_after_each_safe_checkpoint"
+  },
+  "selection_policies": {
+    "llm_only": "initial LLM plan after universal hard validation",
+    "probe_direct": "existing selective pairwise probe-direct policy",
+    "pairwise_cv_always": "raw mean-CV winner of the same LLM incumbent and deterministic challenger; strict ties retain the LLM incumbent",
+    "all_four_cv": "best of the four fixed candidate families using training-only CV and deterministic ties"
+  },
+  "freeze_note": "Template only. Do not choose final models, seeds, panel membership, thresholds, or reporting strata here. Review and explicitly freeze them later."
+}

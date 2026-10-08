@@ -186,6 +186,19 @@ def test_all_four_regression_direction_and_selected_canonical_preprocessing():
     assert selected["selected_preprocessing"]["numeric_scaling"] == "none"
 
 
+def test_all_four_requires_every_fixed_family_and_successful_cv():
+    metrics = _candidate_metrics({"linear": 0.8, "regularized_linear": 0.7, "tree_ensemble": 0.6, "boosted_tree": 0.5})
+    missing = dict(metrics)
+    missing.pop("boosted_tree")
+    with pytest.raises(MissingHistoricalFields, match="missing: boosted_tree"):
+        select_all_four_cv("classification", missing)
+    failed = copy.deepcopy(metrics)
+    failed["boosted_tree"]["status"] = "fit_failed"
+    failed["boosted_tree"]["error"] = "fixture failure"
+    with pytest.raises(MissingHistoricalFields, match="failed: boosted_tree"):
+        select_all_four_cv("classification", failed)
+
+
 def test_derived_rows_have_provenance_coverage_and_no_reconciler_calls():
     rows = derive_baseline_trials([_row(probe=_probe(0.70, 0.71))], source_run="fixture-run")
     pair = next(row for row in rows if row["baseline_name"] == "pairwise_cv_always")

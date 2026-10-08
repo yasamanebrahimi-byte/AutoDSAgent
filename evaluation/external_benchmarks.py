@@ -262,7 +262,9 @@ def load_prospective_panel_manifest(path: str | Path) -> dict[str, Any]:
     return value
 
 
-def _prospective_case(entry: Mapping[str, Any], panel_version: str) -> BenchmarkCase:
+def _prospective_case(
+    entry: Mapping[str, Any], panel_version: str, panel_hash: str | None = None
+) -> BenchmarkCase:
     task_type = str(entry["task_type"])
     expected_suite = AMLB_CLASSIFICATION_SUITE_ID if task_type == "classification" else AMLB_REGRESSION_SUITE_ID
     spec = OpenMLBenchmarkSpec(
@@ -313,6 +315,9 @@ def _prospective_case(entry: Mapping[str, Any], panel_version: str) -> Benchmark
         source_suite_id=entry.get("source_suite_id"),
         benchmark_suite_version=panel_version,
         tier=entry.get("tier", "core"),
+        openml_dataset_id=int(entry["dataset_id"]) if entry.get("dataset_id") is not None else None,
+        openml_dataset_version=entry.get("dataset_version"),
+        prospective_panel_hash=panel_hash,
     )
 
 
@@ -322,7 +327,8 @@ def prospective_benchmark_cases(manifest: Mapping[str, Any] | str | Path) -> lis
     loaded = load_prospective_panel_manifest(manifest) if isinstance(manifest, (str, Path)) else dict(manifest)
     validate_prospective_panel_manifest(loaded)
     panel_version = str(loaded.get("panel_id") or "prospective-panel")
-    return [_prospective_case(entry, panel_version) for entry in loaded["tasks"]]
+    panel_hash = loaded.get("content_sha256") or loaded.get("panel_hash")
+    return [_prospective_case(entry, panel_version, panel_hash) for entry in loaded["tasks"]]
 
 
 def _classification(

@@ -62,6 +62,9 @@ class BenchmarkCase:
     source_suite_id: int | None = None
     benchmark_suite_version: str | None = None
     tier: Literal["core", "stress"] = "core"
+    openml_dataset_id: int | None = None
+    openml_dataset_version: str | int | None = None
+    prospective_panel_hash: str | None = None
 
     def load(self) -> pd.DataFrame:
         if self.dataframe is not None:
@@ -102,6 +105,12 @@ class BenchmarkCase:
                     "tier": self.tier,
                 }
             )
+            if self.openml_dataset_id is not None:
+                payload["dataset_id"] = self.openml_dataset_id
+            if self.openml_dataset_version is not None:
+                payload["dataset_version"] = self.openml_dataset_version
+            if self.prospective_panel_hash is not None:
+                payload["prospective_panel_hash"] = self.prospective_panel_hash
         return payload
 
     def provenance(self) -> dict[str, object]:
@@ -109,13 +118,20 @@ class BenchmarkCase:
 
         if self.openml_task_id is None:
             return {}
-        return {
+        payload = {
             "openml_task_id": self.openml_task_id,
             "source_suite": self.source_suite,
             "source_suite_id": self.source_suite_id,
             "benchmark_suite_version": self.benchmark_suite_version,
             "benchmark_tier": self.tier,
         }
+        if self.openml_dataset_id is not None:
+            payload["dataset_id"] = self.openml_dataset_id
+        if self.openml_dataset_version is not None:
+            payload["dataset_version"] = self.openml_dataset_version
+        if self.prospective_panel_hash is not None:
+            payload["prospective_panel_hash"] = self.prospective_panel_hash
+        return payload
 
 
 def _breast_cancer() -> pd.DataFrame:

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import hashlib
+import math
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
 from pydantic import BaseModel
@@ -91,6 +94,7 @@ from evaluation.statistics import (
     DEFAULT_BOOTSTRAP_REPLICATES,
     DEFAULT_BOOTSTRAP_SEED,
 )
+from evaluation.mlsys_prospective import MLSYS_TRIAL_SCHEMA_VERSION, canonical_sha256
 
 
 EXPERIMENT_CONFIG_VERSION = "paper-confirmatory-v1"
@@ -223,6 +227,8 @@ def _jsonable(value: Any) -> Any:
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     return value
 
 
@@ -312,6 +318,88 @@ def _canonical_diagnostics(value: Any) -> dict[str, Any] | None:
         return None
     raw = _jsonable(value)
     return json.loads(json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str))
+
+
+def _pairwise_cv_evidence(
+    probe: Mapping[str, Any] | None,
+    *,
+    task_type: str,
+    thresholded_decision: Any = None,
+) -> dict[str, Any] | None:
+    """Persist a normalized raw-evidence view alongside the probe artifact."""
+
+    if not isinstance(probe, Mapping):
+        return None
+    proposal_a = probe.get("proposal_a")
+    proposal_b = probe.get("proposal_b")
+    if not isinstance(proposal_a, Mapping) or not isinstance(proposal_b, Mapping):
+        return None
+    if proposal_a.get("mean_score") is None or proposal_b.get("mean_score") is None:
+        return None
+    metric = "macro_f1" if task_type == "classification" else "rmse"
+    policy = probe.get("policy") if isinstance(probe.get("policy"), Mapping) else {}
+    return {
+        "candidate_a": {
+            "model_family": proposal_a.get("model_family"),
+            "preprocessing_contract": proposal_a.get("preprocessing"),
+            "raw_mean_cv_score": proposal_a.get("mean_score"),
+            "fold_scores": proposal_a.get("fold_scores"),
+            "validation_status": proposal_a.get("validation_status"),
+        },
+        "candidate_b": {
+            "model_family": proposal_b.get("model_family"),
+            "preprocessing_contract": proposal_b.get("preprocessing"),
+            "raw_mean_cv_score": proposal_b.get("mean_score"),
+            "fold_scores": proposal_b.get("fold_scores"),
+            "validation_status": proposal_b.get("validation_status"),
+        },
+        "metric": probe.get("metric", metric),
+        "higher_is_better": bool(probe.get("higher_is_better", task_type == "classification")),
+        "raw_mean_difference": probe.get(
+            "difference", float(proposal_a["mean_score"]) - float(proposal_b["mean_score"])
+        ),
+        "intervention_threshold": {
+            key: policy.get(key)
+            for key in ("tie_relative_threshold", "moderate_relative_threshold", "strong_relative_threshold")
+            if policy.get(key) is not None
+        },
+        "thresholded_decision": thresholded_decision,
+        "probe_status": probe.get("status"),
+        "probe_winner": probe.get("winner"),
+        "cv_folds": probe.get("cv_folds"),
+        "fit_count": probe.get("fit_count"),
+        "holdout_used": probe.get("holdout_used", False),
+        "data_used": probe.get("data_used"),
+    }
+
+
+def _four_family_cv_records(candidate_metrics: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize all four persisted candidate records for later derivation."""
+
+    records: dict[str, Any] = {}
+    for family in ("linear", "regularized_linear", "tree_ensemble", "boosted_tree"):
+        value = candidate_metrics.get(family)
+        if not isinstance(value, Mapping):
+            records[family] = {"family": family, "status": "missing"}
+            continue
+        metrics = value.get("metrics") if isinstance(value.get("metrics"), Mapping) else {}
+        primary_metric = value.get("primary_metric")
+        primary = metrics.get(primary_metric) if isinstance(metrics.get(primary_metric), Mapping) else {}
+        validation = value.get("validation") if isinstance(value.get("validation"), Mapping) else {}
+        records[family] = {
+            "family": family,
+            "preprocessing_contract": value.get("preprocessing") or validation.get("approved_preprocessing"),
+            "cv_mean": value.get("primary_mean", primary.get("mean")),
+            "cv_std": value.get("primary_std", primary.get("std")),
+            "fold_scores": value.get("fold_scores", primary.get("folds")),
+            "metric": primary_metric,
+            "cv_folds": value.get("cv_folds"),
+            "status": value.get("status"),
+            "failure_state": value.get("error") or value.get("reason"),
+            "holdout_used": value.get("holdout_used", False),
+            "data_used": value.get("data_used"),
+        }
+    return records
 
 
 def _plan_matches(
@@ -561,9 +649,48 @@ def _provenance_model_matches(
 
 def _write_proposal_cache(path: Path, cache: dict[str, dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        for key in sorted(cache):
-            handle.write(json.dumps({"cache_key": key, **cache[key]}, sort_keys=True) + "\n")
+    payload = "".join(
+        json.dumps({"cache_key": key, **cache[key]}, sort_keys=True) + "\n"
+        for key in sorted(cache)
+    )
+    _atomic_write_text(path, payload)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write a complete artifact and publish it with an atomic rename."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
+def _canonical_trial_jsonl(trials: Sequence[Mapping[str, Any]]) -> str:
+    return "".join(
+        json.dumps(_jsonable(trial), sort_keys=True, allow_nan=False) + "\n"
+        for trial in trials
+    )
+
+
+def _config_hash(config: Mapping[str, Any]) -> str:
+    payload = {key: value for key, value in config.items() if key != "config_sha256"}
+    return canonical_sha256(payload)
+
+
+def _write_json_artifact(path: Path, value: Any) -> None:
+    _atomic_write_text(path, json.dumps(_jsonable(value), indent=2, sort_keys=True, allow_nan=False))
 
 
 def _run_trial(
@@ -679,6 +806,10 @@ def _run_trial(
         "perturbation_id": perturbation_id,
         "trial": trial_number,
         "trial_id": trial_id,
+        "logical_trial_id": (
+            f"{config.model_condition_id}:{case.name}:{perturbation_id}:split{experimental_split_seed}:"
+            f"{repetition_id}:llm{trial_number}"
+        ),
         "split_seed": experimental_split_seed,
         "target_column": case.target_column,
         "task_type": case.expected_task_type,
@@ -1332,6 +1463,8 @@ def _run_trial(
         "llm_repetition_id": repetition_id,
         "model_condition_id": config.model_condition_id,
         "trial_id": context["trial_id"],
+        "logical_trial_id": context["logical_trial_id"],
+        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
         "evaluation_variant": variant,
         "order_swap_pair_id": order_swap_pair_id,
         "ablation_name": config.ablation_name,
@@ -1515,6 +1648,12 @@ def _run_trial(
         ),
         "empirical_probe_status": ((gate_result or {}).get("empirical_probe") or {}).get("status"),
         "empirical_probe": (gate_result or {}).get("empirical_probe"),
+        "pairwise_cv_evidence": _pairwise_cv_evidence(
+            (gate_result or {}).get("empirical_probe"),
+            task_type=case.expected_task_type,
+            thresholded_decision=(gate_result or {}).get("soft_challenge_decision")
+            or (gate_result or {}).get("gate_decision"),
+        ),
         "probe_status": (gate_result or {}).get("probe_status") or ((gate_result or {}).get("empirical_probe") or {}).get("status"),
         "probe_evidence_strength": (gate_result or {}).get("probe_evidence_strength") or ((gate_result or {}).get("empirical_probe") or {}).get("evidence_strength"),
         "abstention_reason": (gate_result or {}).get("abstention_reason"),
@@ -1579,6 +1718,11 @@ def _run_trial(
         },
         "empirical_reference": reference,
         "candidate_cv_metrics": reference.get("candidate_metrics", {}),
+        "four_family_cv_records": _four_family_cv_records(
+            reference.get("candidate_metrics", {})
+        ),
+        "four_family_cv_selection_data": "frozen_training_partition_only",
+        "four_family_cv_holdout_used": False,
         "agent_initial_cv_metric": agent_family_score,
         "agent_initial_plan_cv_metric": (agent_plan_cv or {}).get("primary_mean"),
         "gated_final_cv_metric": gated_family_score,
@@ -1748,20 +1892,19 @@ def _write_outputs(
     empirical_reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "config.json").write_text(json.dumps(config_payload, indent=2, sort_keys=True), encoding="utf-8")
-    with (output_dir / "trials.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
-        for trial in trials:
-            handle.write(json.dumps(trial, sort_keys=True) + "\n")
-    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    trials_payload = _canonical_trial_jsonl(trials)
+    config_payload["trials_jsonl_sha256"] = hashlib.sha256(
+        trials_payload.encode("utf-8")
+    ).hexdigest()
+    config_payload["config_sha256"] = _config_hash(config_payload)
+    _atomic_write_text(output_dir / "config.json", json.dumps(config_payload, indent=2, sort_keys=True))
+    _atomic_write_text(output_dir / "trials.jsonl", trials_payload)
+    _atomic_write_text(output_dir / "summary.json", json.dumps(_jsonable(summary), indent=2, sort_keys=True, allow_nan=False))
     if empirical_reference_cache is not None:
-        (output_dir / "empirical_reference.json").write_text(
-            json.dumps(empirical_reference_cache, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        _write_json_artifact(output_dir / "empirical_reference.json", empirical_reference_cache)
     from evaluation.reporting import render_summary_markdown
 
-    (output_dir / "summary.md").write_text(
-        render_summary_markdown(config_payload, trials, summary), encoding="utf-8"
-    )
+    _atomic_write_text(output_dir / "summary.md", render_summary_markdown(config_payload, trials, summary))
     return {
         "config": str(output_dir / "config.json"),
         "trials": str(output_dir / "trials.jsonl"),
@@ -1804,6 +1947,8 @@ def _failed_trial_record(
         trial_id = f"{trial_id}:{variant}"
     return {
         "trial_id": trial_id,
+        "logical_trial_id": trial_id.removesuffix(f":{config.ablation_name}") if config.ablation_name else trial_id,
+        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
         "benchmark_case": case.name,
         "dataset_source": case.dataset_source,
         "task_type": case.expected_task_type,
@@ -1866,6 +2011,8 @@ def _failed_trial_record(
         "proceeded_unchanged": False,
         "empirical_reference": None,
         "candidate_cv_metrics": {},
+        "four_family_cv_records": {},
+        "pairwise_cv_evidence": None,
         "agent_initial_cv_metric": None,
         "gated_final_cv_metric": None,
         "initial_holdout_metric": None,
@@ -2018,6 +2165,7 @@ def run_evaluation(
     llm_repetition_id: str | None = None,
     generation_settings: dict[str, Any] | None = None,
     llm_repetition_ids: Sequence[str] | None = None,
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run reproducible trials and write the structured evaluation bundle."""
 
@@ -2420,6 +2568,9 @@ def run_evaluation(
             environment_provenance(manifest=confirmatory_config_path)
             if confirmatory_metadata is not None else None
         ),
+        "run_metadata": _jsonable(dict(run_metadata or {})),
+        "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+        "run_status": "initialized",
     }
     if config.suite == "external":
         stable_config["benchmark_suite_version"] = (
@@ -2433,7 +2584,10 @@ def run_evaluation(
         existing_config = json.loads(config_path.read_text(encoding="utf-8"))
         compare_keys = [
             key for key in stable_config
-            if key not in {"repository_commit", "fallback_rows", "confirmatory_valid", "frozen_manifest_path"}
+            if key not in {
+                "repository_commit", "fallback_rows", "confirmatory_valid", "frozen_manifest_path",
+                "run_status",
+            }
         ]
         mismatches = [
             key
@@ -2469,6 +2623,8 @@ def run_evaluation(
         trials = []
         trial_positions = {}
         empirical_reference_cache = {}
+    config_payload.setdefault("run_status", "initialized")
+    config_payload["run_status"] = "running"
     empirical_reference_file = (
         Path(empirical_reference_cache_path).resolve()
         if empirical_reference_cache_path is not None
@@ -2590,7 +2746,19 @@ def run_evaluation(
                                 confirmatory_metadata.get("experiment_config_sha256")
                                 if confirmatory_metadata else None
                             ),
+                            "trial_schema_version": MLSYS_TRIAL_SCHEMA_VERSION,
+                            "run_metadata": _jsonable(dict(run_metadata or {})),
                         })
+                        for metadata_key in (
+                            "analysis_role",
+                            "prospective_panel_id",
+                            "prospective_panel_manifest_sha256",
+                            "prospective_panel_content_sha256",
+                            "panel_hash",
+                            "prospective_split_seeds",
+                        ):
+                            if run_metadata and metadata_key in run_metadata:
+                                trial[metadata_key] = _jsonable(run_metadata[metadata_key])
                         existing_position = trial_positions.get(trial_id)
                         if existing_position is None:
                             trial_positions[trial_id] = len(trials)
@@ -2624,6 +2792,7 @@ def run_evaluation(
                             compute_confidence_intervals=False,
                             include_model_condition_breakdown=False,
                         )
+                        config_payload["run_status"] = "running"
                         _write_outputs(
                             output_path,
                             config_payload,
@@ -2634,16 +2803,17 @@ def run_evaluation(
                         if proposal_cache_file is not None:
                             _write_proposal_cache(proposal_cache_file, proposal_cache)
                         if empirical_reference_file is not None:
-                            empirical_reference_file.parent.mkdir(parents=True, exist_ok=True)
-                            empirical_reference_file.write_text(
-                                json.dumps(empirical_reference_cache, indent=2, sort_keys=True),
-                                encoding="utf-8",
-                            )
+                            _write_json_artifact(empirical_reference_file, empirical_reference_cache)
     summary = summarize_trials(
         trials,
         thresholds=config.thresholds,
         compute_confidence_intervals=True,
         include_model_condition_breakdown=False,
+    )
+    config_payload["run_status"] = (
+        "complete"
+        if trials and all(trial.get("trial_status") != "failed" for trial in trials)
+        else "incomplete/interrupted"
     )
     confirmatory_valid = None
     if confirmatory_metadata is not None:
@@ -2702,11 +2872,7 @@ def run_evaluation(
     if proposal_cache_file is not None:
         _write_proposal_cache(proposal_cache_file, proposal_cache)
     if empirical_reference_file is not None:
-        empirical_reference_file.parent.mkdir(parents=True, exist_ok=True)
-        empirical_reference_file.write_text(
-            json.dumps(empirical_reference_cache, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        _write_json_artifact(empirical_reference_file, empirical_reference_cache)
     return {
         "output_dir": str(output_path),
         "paths": paths,
